@@ -1,0 +1,45 @@
+{
+  "input": {
+    "image": "/home/ma/.hermes/image_cache/img_c144ce87ec9d.jpg",
+    "model": "google/gemini-3-flash-preview",
+    "size": 22542
+  },
+  "vision_content": {
+    "model_type": "bolt",
+    "dimensions": {
+      "thread_diameter": 16,
+      "total_length": 62,
+      "shank_length": 50,
+      "thread_length": 38,
+      "head_height": 12,
+      "head_width_flats": 27,
+      "head_width_corners": 31,
+      "washer_face_diameter": 25
+    },
+    "confidence": 1.0,
+    "title": "M16 Hex Bolt"
+  },
+  "normalize_content": {
+    "head_flats": 27,
+    "head_thick": 12,
+    "thread_major": 16,
+    "shank_total": 50,
+    "thread_len": 38
+  },
+  "params": {
+    "normalized_raw": {
+      "head_flats": 27,
+      "head_thick": 12,
+      "thread_major": 16,
+      "shank_total": 50,
+      "thread_len": 38
+    },
+    "mapped_params": {
+      "head_flats": 27,
+      "head_thick": 12,
+      "thread_major": 16,
+      "shank_total": 50,
+      "thread_len": 38
+    }
+  }
+}

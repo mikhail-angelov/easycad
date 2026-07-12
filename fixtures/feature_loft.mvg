@@ -1,0 +1,29 @@
+viewbox 0 0 1100 650
+fill white
+stroke none
+rectangle 0,0 1100,650
+stroke black
+stroke-width 4
+fill none
+rectangle 140,420 420,500
+ellipse 280,160 90,35 0,360
+line 140,420 190,160
+line 420,420 370,160
+line 140,500 190,160
+line 420,500 370,160
+line 470,160 470,500
+line 450,160 490,160
+line 450,500 490,500
+stroke none
+fill black
+font-size 30
+font-weight 700
+text 120,55 'SQUARE-TO-CIRCLE LOFT'
+font-size 24
+font-weight 400
+text 540,180 'TOP PROFILE: CIRCLE D18'
+text 540,220 'BOTTOM PROFILE: SQUARE 30 x 30'
+text 540,260 'LOFT HEIGHT 40'
+text 540,300 'CENTERED PROFILES'
+text 540,340 'SOLID TRANSITION FOR 3D PRINTING'
+text 485,340 '40'

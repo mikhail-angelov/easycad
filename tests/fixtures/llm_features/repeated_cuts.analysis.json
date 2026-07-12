@@ -1,0 +1,166 @@
+{
+  "construction_strategy": "Start with a 60x40x10 base plate. Perform a 20mm wide cut on the front face. Extrude a 20mm wide block from the center of the base up to a total height of 30mm. Finally, cut a 10mm wide by 15mm deep slot into the top of that block.",
+  "dimensions": [
+    {
+      "id": "overall_length",
+      "value": 60
+    },
+    {
+      "id": "overall_width",
+      "value": 40
+    },
+    {
+      "id": "overall_height",
+      "value": 30
+    },
+    {
+      "id": "base_height",
+      "value": 10
+    },
+    {
+      "id": "central_slot_width",
+      "value": 20
+    },
+    {
+      "id": "central_slot_depth",
+      "value": 10
+    },
+    {
+      "id": "top_slot_width",
+      "value": 10
+    },
+    {
+      "id": "top_slot_depth",
+      "value": 15
+    },
+    {
+      "id": "top_block_width",
+      "value": 20
+    }
+  ],
+  "features": [
+    {
+      "confidence": 1.0,
+      "depends_on": [],
+      "evidence": {
+        "dimension_ids": [
+          "overall_length",
+          "overall_width",
+          "base_height"
+        ],
+        "source_view_ids": [
+          "iso_view"
+        ]
+      },
+      "id": "base_plate",
+      "name": "Base Plate",
+      "operation_hint": "add",
+      "placement": {
+        "origin": [
+          0,
+          0,
+          0
+        ],
+        "plane": "XY"
+      },
+      "profile": "Rectangular block 60x40x10",
+      "target": null,
+      "type": "body"
+    },
+    {
+      "confidence": 0.95,
+      "depends_on": [
+        "base_plate"
+      ],
+      "evidence": {
+        "dimension_ids": [
+          "central_slot_width",
+          "central_slot_depth"
+        ],
+        "source_view_ids": [
+          "iso_view"
+        ]
+      },
+      "id": "central_u_slot",
+      "name": "Central U-shaped Slot",
+      "operation_hint": "cut",
+      "placement": {
+        "depth": 10,
+        "reference": "front face"
+      },
+      "profile": "Rectangular cutout 20mm wide",
+      "target": "base_plate",
+      "type": "slot"
+    },
+    {
+      "confidence": 1.0,
+      "depends_on": [
+        "base_plate"
+      ],
+      "evidence": {
+        "dimension_ids": [
+          "overall_height",
+          "top_block_width"
+        ],
+        "source_view_ids": [
+          "iso_view"
+        ]
+      },
+      "id": "top_block",
+      "name": "Top Rectangular Block",
+      "operation_hint": "add",
+      "placement": {
+        "plane": "XY",
+        "reference": "top surface of base_plate"
+      },
+      "profile": "Rectangular block 20mm wide, extending to total height 30mm",
+      "target": "base_plate",
+      "type": "body"
+    },
+    {
+      "confidence": 1.0,
+      "depends_on": [
+        "top_block"
+      ],
+      "evidence": {
+        "dimension_ids": [
+          "top_slot_width",
+          "top_slot_depth"
+        ],
+        "source_view_ids": [
+          "iso_view"
+        ]
+      },
+      "id": "top_vertical_slot",
+      "name": "Top Vertical Slot",
+      "operation_hint": "cut",
+      "placement": {
+        "direction": "Z-axis negative",
+        "reference": "top face of top_block"
+      },
+      "profile": "Rectangular cutout 10mm wide, 15mm deep",
+      "target": "top_block",
+      "type": "slot"
+    }
+  ],
+  "overall_shape": "A stepped rectangular base with a central front cutout and a slotted vertical block mounted on top.",
+  "title": "Mechanical Part Isometric View 3",
+  "uncertainties": [
+    {
+      "description": "The alignment of the top block relative to the base length (60mm) is inferred to be centered, but no explicit offset dimension is provided.",
+      "id": "alignment"
+    },
+    {
+      "description": "The rear side of the part is not visible; it is assumed to be symmetrical or flat based on standard drafting conventions for this type of exercise.",
+      "id": "rear_geometry"
+    }
+  ],
+  "units": "millimeters",
+  "views": [
+    {
+      "description": "Primary isometric view showing overall geometry and dimensions",
+      "id": "iso_view",
+      "type": "isometric"
+    }
+  ]
+}

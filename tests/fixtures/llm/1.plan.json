@@ -1,0 +1,217 @@
+{
+  "assumptions": [
+    "The base height dimension (25 mm) is partially cut off but inferred from geometry.",
+    "The cutout radius (15 mm) is inferred from the 30 mm width of the central hole.",
+    "No fillets or chamfers are specified; edges remain sharp.",
+    "The semi-circular cutout is centered on the left face of the base, with its flat side aligned with the left face."
+  ],
+  "code": "import cadquery as cq\n\n# Parameters\nL = PARAMETERS['overall_length']\nW = PARAMETERS['overall_width']\nH = PARAMETERS['overall_height']\nbase_h = PARAMETERS['base_height']\nupright_t = PARAMETERS['upright_thickness']\nhole_d = PARAMETERS['hole_diameter']\nhole_x = PARAMETERS['hole_center_from_left']\nslot_w = PARAMETERS['slot_width']\nslot_d = PARAMETERS['slot_depth']\ncut_r = PARAMETERS['cutout_radius']\n\n# Build L-profile in XY plane\n# Base: rectangle L x base_h\n# Upright: rectangle upright_t x (H - base_h) attached at right end\nbase = cq.Workplane(\"XY\").rect(L, base_h).extrude(W)\nupright = cq.Workplane(\"XY\").workplane(offset=base_h).rect(upright_t, H - base_h).extrude(W)\nmain_body = base.union(upright)\n\n# Central through hole: cylinder along Z, center at (hole_x, W/2)\nhole = cq.Workplane(\"XY\").workplane(offset=0).circle(hole_d/2).extrude(W)\nhole = hole.translate((hole_x, W/2, 0))\nmain_body = main_body.cut(hole)\n\n# Semi-circular cutout at left end: cylinder of radius cut_r, centered at (0, W/2, base_h/2) and cut only half\ncutout = cq.Workplane(\"XY\").workplane(offset=0).circle(cut_r).extrude(W)\ncutout = cutout.translate((0, W/2, 0))\n# Intersect with a box to get half cylinder (left half)\nbox = cq.Workplane(\"XY\").box(cut_r*2, W, W).translate((-cut_r, W/2, 0))\ncutout_half = cutout.intersect(box)\nmain_body = main_body.cut(cutout_half)\n\n# Top slot: rectangular pocket on top face of upright\n# Top face is at z = H, centered on upright top face\n# Upright top face center: (L - upright_t/2, W/2, H)\nslot = cq.Workplane(\"XY\").workplane(offset=H - slot_d).rect(slot_w, W).extrude(slot_d)\nslot = slot.translate((L - upright_t/2, W/2, H - slot_d))\nmain_body = main_body.cut(slot)\n\nresult = main_body",
+  "confidence": 0.9,
+  "feature_graph": {
+    "central_hole": {
+      "confidence": 1.0,
+      "id": "central_hole",
+      "implementation": "central_hole",
+      "operation": "cut",
+      "source_feature_ids": [
+        "main_body"
+      ],
+      "status": "implemented",
+      "target": "main_body",
+      "type": "hole"
+    },
+    "edge_cutout": {
+      "confidence": 0.9,
+      "id": "edge_cutout",
+      "implementation": "edge_cutout",
+      "operation": "cut",
+      "source_feature_ids": [
+        "main_body"
+      ],
+      "status": "implemented",
+      "target": "main_body",
+      "type": "hole"
+    },
+    "main_body": {
+      "confidence": 1.0,
+      "id": "main_body",
+      "implementation": "main_body",
+      "operation": "extrude",
+      "source_feature_ids": [],
+      "status": "implemented",
+      "target": null,
+      "type": "body"
+    },
+    "top_slot": {
+      "confidence": 1.0,
+      "id": "top_slot",
+      "implementation": "top_slot",
+      "operation": "cut",
+      "source_feature_ids": [
+        "main_body"
+      ],
+      "status": "implemented",
+      "target": "main_body",
+      "type": "slot"
+    }
+  },
+  "feature_summary": [
+    {
+      "description": "Extruded L-profile with overall dimensions 90x50x60 mm, base height 25 mm, upright thickness 30 mm.",
+      "id": "main_body",
+      "name": "L-Shaped Base",
+      "type": "body"
+    },
+    {
+      "description": "Through hole of diameter 30 mm, centered 40 mm from left edge.",
+      "id": "central_hole",
+      "name": "Through Hole",
+      "type": "hole"
+    },
+    {
+      "description": "Semi-circular cutout of radius 15 mm at the left end, centered on the left face.",
+      "id": "edge_cutout",
+      "name": "Semi-circular End Cutout",
+      "type": "hole"
+    },
+    {
+      "description": "Rectangular slot of width 30 mm and depth 10 mm on the top face of the upright.",
+      "id": "top_slot",
+      "name": "Rectangular Top Slot",
+      "type": "slot"
+    }
+  ],
+  "parameters": [
+    {
+      "confidence": 1.0,
+      "editable": true,
+      "id": "overall_length",
+      "label": "Overall Length",
+      "max": 200,
+      "min": 10,
+      "source": "drawing",
+      "step": 1,
+      "type": "number",
+      "unit": "mm",
+      "value": 90
+    },
+    {
+      "confidence": 1.0,
+      "editable": true,
+      "id": "overall_width",
+      "label": "Overall Width",
+      "max": 200,
+      "min": 10,
+      "source": "drawing",
+      "step": 1,
+      "type": "number",
+      "unit": "mm",
+      "value": 50
+    },
+    {
+      "confidence": 1.0,
+      "editable": true,
+      "id": "overall_height",
+      "label": "Overall Height",
+      "max": 200,
+      "min": 10,
+      "source": "drawing",
+      "step": 1,
+      "type": "number",
+      "unit": "mm",
+      "value": 60
+    },
+    {
+      "confidence": 0.9,
+      "editable": true,
+      "id": "base_height",
+      "label": "Base Height",
+      "max": 100,
+      "min": 5,
+      "source": "drawing",
+      "step": 1,
+      "type": "number",
+      "unit": "mm",
+      "value": 25
+    },
+    {
+      "confidence": 1.0,
+      "editable": true,
+      "id": "upright_thickness",
+      "label": "Upright Thickness",
+      "max": 100,
+      "min": 5,
+      "source": "drawing",
+      "step": 1,
+      "type": "number",
+      "unit": "mm",
+      "value": 30
+    },
+    {
+      "confidence": 1.0,
+      "editable": true,
+      "id": "hole_diameter",
+      "label": "Hole Diameter",
+      "max": 100,
+      "min": 5,
+      "source": "drawing",
+      "step": 1,
+      "type": "number",
+      "unit": "mm",
+      "value": 30
+    },
+    {
+      "confidence": 1.0,
+      "editable": true,
+      "id": "hole_center_from_left",
+      "label": "Hole Center from Left",
+      "max": 100,
+      "min": 5,
+      "source": "drawing",
+      "step": 1,
+      "type": "number",
+      "unit": "mm",
+      "value": 40
+    },
+    {
+      "confidence": 1.0,
+      "editable": true,
+      "id": "slot_width",
+      "label": "Slot Width",
+      "max": 100,
+      "min": 5,
+      "source": "drawing",
+      "step": 1,
+      "type": "number",
+      "unit": "mm",
+      "value": 30
+    },
+    {
+      "confidence": 1.0,
+      "editable": true,
+      "id": "slot_depth",
+      "label": "Slot Depth",
+      "max": 50,
+      "min": 1,
+      "source": "drawing",
+      "step": 1,
+      "type": "number",
+      "unit": "mm",
+      "value": 10
+    },
+    {
+      "confidence": 0.9,
+      "editable": true,
+      "id": "cutout_radius",
+      "label": "Cutout Radius",
+      "max": 50,
+      "min": 5,
+      "source": "drawing",
+      "step": 1,
+      "type": "number",
+      "unit": "mm",
+      "value": 15
+    }
+  ],
+  "title": "L-Shaped Bracket with Holes and Slot"
+}

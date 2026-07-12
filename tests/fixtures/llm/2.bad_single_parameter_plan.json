@@ -1,0 +1,13 @@
+{
+  "confidence": 0.95,
+  "editable": true,
+  "id": "head_width_across_flats",
+  "label": "Head Width Across Flats",
+  "max": 35.0,
+  "min": 20.0,
+  "source": "drawing",
+  "step": 0.5,
+  "type": "float",
+  "unit": "mm",
+  "value": 27.0
+}

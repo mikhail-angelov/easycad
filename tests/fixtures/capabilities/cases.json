@@ -1,0 +1,93 @@
+[
+  {
+    "variants": ["control", "resized", "high_contrast", "rotated", "ambiguous_crop"],
+    "id": "ribs",
+    "status": "supported",
+    "source_drawing": "fixtures/feature_shell_ribs_perforation.png",
+    "parameters": {"l": 40, "w": 30, "h": 5, "rl": 25, "rt": 3, "rh": 12},
+    "operations": [
+      {"id": "base", "type": "box", "operation": "add", "parameters": {"length": "l", "width": "w", "height": "h"}},
+      {"id": "rib", "type": "rib", "operation": "add", "target": "base", "parameters": {"length": "rl", "thickness": "rt", "height": "rh"}, "placement": {"origin": [5, 10, 4.5]}}
+    ]
+  },
+  {
+    "variants": ["control", "resized", "high_contrast", "rotated", "ambiguous_crop"],
+    "id": "linear_perforations",
+    "status": "supported",
+    "source_drawing": "fixtures/feature_shell_ribs_perforation.png",
+    "parameters": {"l": 70, "w": 30, "h": 6, "d": 4, "depth": 8, "count": 5, "pitch": 12, "margin": 6},
+    "operations": [
+      {"id": "base", "type": "box", "operation": "add", "parameters": {"length": "l", "width": "w", "height": "h"}},
+      {"id": "holes", "type": "hole_pattern", "operation": "pattern", "target": "base", "profile": {"type": "circle", "dimensions": {"diameter": "d"}}, "parameters": {"depth": "depth"}, "pattern": {"type": "linear", "count": "count", "pitch": "pitch", "axis": "X", "start_margin": "margin"}, "placement": {"origin": [4, 15, -1]}}
+    ]
+  },
+  {
+    "variants": ["control", "resized", "high_contrast", "rotated", "ambiguous_crop"],
+    "id": "polar_perforations",
+    "status": "supported",
+    "source_drawing": "fixtures/feature_polar_perforation.png",
+    "parameters": {"l": 50, "w": 50, "h": 6, "d": 4, "depth": 8, "count": 6, "radius": 14},
+    "operations": [
+      {"id": "base", "type": "box", "operation": "add", "parameters": {"length": "l", "width": "w", "height": "h"}},
+      {"id": "holes", "type": "perforation_pattern", "operation": "pattern", "target": "base", "profile": {"type": "circle", "dimensions": {"diameter": "d"}}, "parameters": {"depth": "depth", "radius": "radius"}, "pattern": {"type": "polar", "count": "count", "angle_deg": 360, "axis": "Z"}, "placement": {"origin": [25, 25, -1]}}
+    ]
+  },
+  {
+    "variants": ["control", "resized", "high_contrast", "rotated", "ambiguous_crop"],
+    "id": "slots",
+    "status": "supported",
+    "source_drawing": "fixtures/4.jpg",
+    "parameters": {"l": 50, "w": 30, "h": 8, "sl": 18, "sw": 5, "depth": 10},
+    "operations": [
+      {"id": "base", "type": "box", "operation": "add", "parameters": {"length": "l", "width": "w", "height": "h"}},
+      {"id": "slot", "type": "slot", "operation": "cut", "target": "base", "parameters": {"length": "sl", "width": "sw", "depth": "depth"}, "placement": {"origin": [25, 15, -1]}}
+    ]
+  },
+  {
+    "variants": ["control", "resized", "high_contrast", "rotated", "ambiguous_crop"],
+    "id": "pockets",
+    "status": "supported",
+    "source_drawing": "fixtures/4.jpg",
+    "parameters": {"l": 50, "w": 30, "h": 8, "pl": 16, "pw": 10, "depth": -3},
+    "operations": [
+      {"id": "base", "type": "box", "operation": "add", "parameters": {"length": "l", "width": "w", "height": "h"}},
+      {"id": "pocket", "type": "pocket", "operation": "cut", "target": "base", "parameters": {"length": "pl", "width": "pw", "depth": "depth"}, "placement": {"origin": [25, 15, "h"]}}
+    ]
+  },
+  {
+    "variants": ["control", "resized", "high_contrast", "rotated", "ambiguous_crop"],
+    "id": "shells",
+    "status": "supported",
+    "source_drawing": "fixtures/feature_shell_ribs_perforation.png",
+    "parameters": {"l": 50, "w": 35, "h": 20, "thickness": -2},
+    "operations": [
+      {"id": "base", "type": "box", "operation": "add", "parameters": {"length": "l", "width": "w", "height": "h"}},
+      {"id": "shell", "type": "shell", "operation": "modify", "target": "base", "parameters": {"thickness": "thickness"}, "placement": {"reference": ">Z"}}
+    ]
+  },
+  {
+    "variants": ["control", "resized", "high_contrast", "rotated", "ambiguous_crop"],
+    "id": "text",
+    "status": "supported",
+    "source_drawing": "artifacts/recessed_text_cube_probe.png",
+    "parameters": {"l": 50, "w": 30, "h": 8, "label": "TEST", "size": 8, "depth": -1},
+    "operations": [
+      {"id": "base", "type": "box", "operation": "add", "parameters": {"length": "l", "width": "w", "height": "h"}},
+      {"id": "label", "type": "text", "operation": "cut", "target": "base", "parameters": {"content": "label", "size": "size", "distance": "depth"}, "placement": {"origin": [25, 15, "h"]}}
+    ]
+  },
+  {
+    "id": "sweeps",
+    "status": "experimental",
+    "source_drawing": "fixtures/feature_sweep.png",
+    "parameters": {"radius": 4},
+    "operations": [{"id": "sweep", "type": "sweep", "operation": "add", "parameters": {"radius": "radius"}}]
+  },
+  {
+    "id": "lofts",
+    "status": "experimental",
+    "source_drawing": "fixtures/feature_loft.png",
+    "parameters": {"bottom": 20, "top": 10, "height": 30},
+    "operations": [{"id": "loft", "type": "loft", "operation": "add", "parameters": {"bottom": "bottom", "top": "top", "height": "height"}}]
+  }
+]

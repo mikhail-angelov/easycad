@@ -1,0 +1,158 @@
+{
+  "construction_strategy": "1. Extrude a 27mm across-flats hexagon to a depth of 12mm. 2. Apply a revolving cut to create the 15-30 degree chamfer on the head top. 3. Extrude a 25mm diameter circle slightly from the bottom of the head. 4. Extrude a 16mm diameter cylinder from the head/washer face to a length of 50mm. 5. Apply a cosmetic or physical thread to the last 38mm of the shank. 6. Chamfer the end of the shank.",
+  "dimensions": [],
+  "features": [
+    {
+      "confidence": 1.0,
+      "depends_on": [],
+      "evidence": {
+        "dimension_ids": [
+          "head_thickness",
+          "across_flats",
+          "across_corners"
+        ],
+        "source_view_ids": [
+          "front_view",
+          "right_view"
+        ]
+      },
+      "id": "hex_head",
+      "name": "Hexagonal Head",
+      "operation_hint": "add",
+      "placement": {
+        "axis": "Z",
+        "origin": [
+          0,
+          0,
+          0
+        ]
+      },
+      "profile": "Hexagon",
+      "type": "body"
+    },
+    {
+      "confidence": 0.9,
+      "depends_on": [
+        "hex_head"
+      ],
+      "evidence": {
+        "dimension_ids": [
+          "washer_face_diameter"
+        ],
+        "source_view_ids": [
+          "front_view"
+        ]
+      },
+      "id": "washer_face",
+      "name": "Washer Face",
+      "operation_hint": "add",
+      "placement": {
+        "reference": "back of hex head"
+      },
+      "profile": "Circle",
+      "target": "hex_head",
+      "type": "body"
+    },
+    {
+      "confidence": 1.0,
+      "depends_on": [
+        "hex_head"
+      ],
+      "evidence": {
+        "dimension_ids": [
+          "total_length",
+          "nominal_diameter"
+        ],
+        "source_view_ids": [
+          "front_view"
+        ]
+      },
+      "id": "bolt_shank",
+      "name": "Bolt Shank",
+      "operation_hint": "add",
+      "placement": {
+        "reference": "center of hex head face"
+      },
+      "profile": "Circle",
+      "type": "body"
+    },
+    {
+      "confidence": 1.0,
+      "depends_on": [
+        "bolt_shank"
+      ],
+      "evidence": {
+        "dimension_ids": [
+          "thread_length",
+          "nominal_diameter"
+        ],
+        "source_view_ids": [
+          "front_view"
+        ]
+      },
+      "id": "thread_zone",
+      "name": "Threaded Section",
+      "operation_hint": "modify",
+      "profile": "M16 Metric Thread",
+      "target": "bolt_shank",
+      "type": "text"
+    },
+    {
+      "confidence": 0.95,
+      "depends_on": [
+        "hex_head"
+      ],
+      "evidence": {
+        "dimension_ids": [
+          "head_chamfer_angle"
+        ],
+        "source_view_ids": [
+          "front_view"
+        ]
+      },
+      "id": "head_chamfer",
+      "name": "Head Top Chamfer",
+      "operation_hint": "cut",
+      "target": "hex_head",
+      "type": "chamfer"
+    },
+    {
+      "confidence": 0.8,
+      "depends_on": [
+        "bolt_shank"
+      ],
+      "evidence": {
+        "source_view_ids": [
+          "front_view",
+          "isometric_view"
+        ]
+      },
+      "id": "end_chamfer",
+      "name": "Shank End Chamfer",
+      "operation_hint": "cut",
+      "target": "bolt_shank",
+      "type": "chamfer"
+    }
+  ],
+  "overall_shape": "A standard metric hexagonal head bolt with a partially threaded shank and a washer face.",
+  "title": "Hexagonal Bolt M16",
+  "uncertainties": [],
+  "units": "millimeters",
+  "views": [
+    {
+      "description": "Side view showing bolt length, head thickness, and thread length",
+      "id": "front_view",
+      "type": "side_elevation"
+    },
+    {
+      "description": "End view showing hexagonal head profile and across-flats dimension",
+      "id": "right_view",
+      "type": "end_elevation"
+    },
+    {
+      "description": "3D representation of the bolt",
+      "id": "isometric_view",
+      "type": "perspective"
+    }
+  ]
+}

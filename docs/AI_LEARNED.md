@@ -1,0 +1,134 @@
+## 2026-07-11 — Local CadQuery worker testing with uv
+
+### Goal
+
+Run and verify EasyCAD fixture preview/export generation locally without Docker.
+
+### Golden path
+
+1. Create the local venv with Python 3.11:
+   `uv venv --python /opt/homebrew/bin/python3.11 .venv`
+2. Install dependencies with a workspace-local uv cache:
+   `UV_CACHE_DIR=.uv-cache uv pip install --python .venv/bin/python -r requirements.txt cadquery`
+3. Force the backend runner to skip Docker and allow enough time for CadQuery startup:
+   `CADQUERY_WORKER_IMAGE=easycad-no-docker CADQUERY_WORKER_TIMEOUT_SECONDS=180 XDG_CACHE_HOME=/Users/ma/repo/easycad/.cache PYTHONDONTWRITEBYTECODE=1 .venv/bin/python <smoke-script>`
+4. Start the local app with Docker disabled:
+   `CADQUERY_WORKER_IMAGE=easycad-no-docker CADQUERY_WORKER_TIMEOUT_SECONDS=180 .venv/bin/python -m uvicorn app.main:app --host 127.0.0.1 --port 8852`
+
+### Verification
+
+- `curl -sS http://127.0.0.1:8852/api/health` returned `{"status":"ok",...}` while uvicorn was running.
+
+### Failure pattern avoided
+
+Local generation fails if the runner falls back to system Python without CadQuery, producing `worker_import: No module named 'cadquery'`. First local CadQuery startup can also exceed the previous hardcoded 35-second worker timeout.
+
+### Ruled-out approaches
+
+- Tried system Python 3.9; failed because `cadquery` was not installed and Python 3.9 is a poor target for current CadQuery wheels.
+- Tried running `uv pip install` inside the sandbox; failed because uv panicked in macOS system-configuration access before dependency resolution.
+- Tried Docker worker verification; rejected for this workflow because local testing without Docker was requested.
+
+### Notes
+
+When the sandbox blocks localhost binding, start uvicorn with approval outside the sandbox.
+
+## 2026-07-12 — CadQuery text engraving API
+
+### Goal
+
+Add or debug generated CadQuery projects that need engraved or embossed text.
+
+### Golden path
+
+Use `Workplane.text(txt, fontsize, distance, combine=...)`:
+
+- `combine="cut"` for engraved/recessed text. On a top face, pass negative distance into the solid, for example `.text(label, size, -depth, combine="cut")`.
+- `combine="a"` for embossed/raised text.
+
+Expose visible drawing text as normal EasyCAD parameters such as `text_content`, `text_mode`, and `text_size`, then read them from `PARAMETERS` in generated code.
+
+For image-to-CAD tests, draw recessed text as an orthographic technical drawing, not as perspective artwork:
+
+- show a top view with the text on the top face;
+- show a section view with the recess depth;
+- label that the result is for 3D printing and must be solid printable geometry, not a laser/engraver path.
+
+### Diagnostic sequence
+
+When recessed text output looks wrong, work through this sequence:
+
+1. Inspect the input drawing first. If the text looks like a perspective label or overlay, redraw the input as orthographic top/front/section views.
+2. Add explicit drawing notes: target is 3D printing, text is recessed into the top face, recess depth is a real solid cut.
+3. Run the normal `/api/projects/generate` pipeline and save the response JSON.
+4. Inspect model logs/response for `text_content`, `text_mode`, text depth, and generated CadQuery `.text(...)`.
+5. Validate the generated CadQuery API usage against the installed CadQuery signature. For this project, `cut=` is invalid; use `combine="cut"`.
+6. Export STL through the backend export endpoint, not a one-off script.
+7. Compare resulting volume against the full block volume. Equal volume means the cut did not remove material; for top-face recessed text, change positive text distance to negative distance.
+8. Add or update regression tests so the worker export proves the STL volume decreases.
+
+### Verification
+
+`make test` passed after adding unit tests that run the local CadQuery worker and export STL from projects using `.text(..., combine="cut")`.
+
+A generated recessed-text block was confirmed by comparing volume:
+
+- full 60 x 40 x 30 mm block volume is `72000 mm3`;
+- generated STL volume was `71898.99 mm3`, proving material was actually removed.
+
+### Failure pattern avoided
+
+The old backend used `.text(..., cut=True, combine=True)`, but the local CadQuery version rejects `cut` with `Workplane.text() got an unexpected keyword argument 'cut'`. Positive cut distance on a top face can also leave the solid volume unchanged because the text extrusion is outside the part.
+
+Perspective drawings where the text looks like a label on top of a cube are ambiguous: the model may interpret them as printed surface text or place the text on the wrong plane. Orthographic top/section views avoid that.
+
+### Ruled-out approaches
+
+- Tried the old backend `.text(..., cut=True, combine=True)` call in a worker-backed test; failed because this CadQuery version does not accept `cut`.
+- Tried a perspective cube drawing with text rendered on the top face; rejected because the text looked like an overlaid label rather than a recessed feature in the plane.
+- Tried positive text cut depth on the top face; rejected because the exported solid kept the full block volume.
+
+### Notes
+
+The response processing should stay simple: no separate registry/tool-call pipeline is needed just to support lettering.
+## 2026-07-12 — Local capability regression with uv-managed environment
+
+### Goal
+
+Run the complete capability regression locally with the project environment and CadQuery worker, without Docker.
+
+### Golden path
+
+Run `make test-capabilities`. The target verifies the installed `uv` version, then runs
+`tests.capability_regression` with `.venv/bin/python`, the interpreter managed for this project by `uv`.
+
+The runner discovers every `tests/test_*.py` module and writes the grouped machine-readable result to
+`artifacts/capability-summary.json`.
+
+### Verification
+
+`make test-capabilities` completed 133 tests successfully in 136.6 seconds. The generated summary reported
+`passed`. A later architecture review found that the initial capability metrics reused expected IDs as predictions
+and hardcoded successful exports and zero dimension errors, so those values did not verify product quality. The
+report now emits `insufficient_evidence`, `metrics: null`, and the actual observation count until independent
+provider and worker outcomes exist.
+
+### Failure pattern avoided
+
+On the sandboxed macOS environment, `uv run` can panic in the Rust `system-configuration` crate while creating a
+dynamic-store object, before Python starts. Offline mode, an isolated cache, and cleared proxy variables do not
+prevent that launcher failure.
+
+### Ruled-out approaches
+
+- Tried `uv run --python .venv/bin/python`; failed with `Attempted to create a NULL object` in `dynamic_store.rs`.
+- Tried `uv run --offline --no-project` with `UV_OFFLINE=1` and a workspace cache; failed with the same panic.
+- Tried clearing HTTP, HTTPS, and ALL proxy variables; failed with the same panic.
+
+### Notes
+
+The fallback does not use system Python: it invokes the existing project `.venv/bin/python` directly after
+confirming `uv` is installed.
+
+Do not infer capability quality from the regression command's process exit status. Read each capability's
+`evaluation_status` and require observed outcomes before calculating gates.

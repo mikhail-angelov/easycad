@@ -1,0 +1,107 @@
+{
+  "construction_strategy": "Extrude a base plate of 60x40x10. Extrude a second block of 60x20x20 on top of the base. Perform a boolean cut for the front 20x10 slot. Perform a boolean cut for the top 10x15 longitudinal slot.",
+  "dimensions": [],
+  "features": [
+    {
+      "confidence": 1.0,
+      "depends_on": [],
+      "evidence": {
+        "dimension_ids": [
+          "60",
+          "40",
+          "10"
+        ],
+        "source_view_ids": [
+          "iso_view"
+        ]
+      },
+      "id": "base_plate",
+      "name": "Base Plate",
+      "operation_hint": "add",
+      "profile": "Rectangular block 60x40x10",
+      "type": "body"
+    },
+    {
+      "confidence": 0.95,
+      "depends_on": [
+        "base_plate"
+      ],
+      "evidence": {
+        "dimension_ids": [
+          "20",
+          "10"
+        ],
+        "source_view_ids": [
+          "iso_view"
+        ]
+      },
+      "id": "front_slot",
+      "name": "Front Rectangular Slot",
+      "operation_hint": "cut",
+      "placement": {
+        "depth": 10,
+        "reference": "front_face",
+        "width": 20
+      },
+      "target": "base_plate",
+      "type": "slot"
+    },
+    {
+      "confidence": 1.0,
+      "depends_on": [
+        "base_plate"
+      ],
+      "evidence": {
+        "dimension_ids": [
+          "30",
+          "20"
+        ],
+        "source_view_ids": [
+          "iso_view"
+        ]
+      },
+      "id": "top_riser",
+      "name": "Top Riser Block",
+      "operation_hint": "add",
+      "profile": "Rectangular block 60x20x20 sitting on base",
+      "target": "base_plate",
+      "type": "body"
+    },
+    {
+      "confidence": 0.9,
+      "depends_on": [
+        "top_riser"
+      ],
+      "evidence": {
+        "dimension_ids": [
+          "10",
+          "15"
+        ],
+        "source_view_ids": [
+          "iso_view"
+        ]
+      },
+      "id": "top_u_slot",
+      "name": "Top U-Channel Slot",
+      "operation_hint": "cut",
+      "placement": {
+        "depth": 15,
+        "reference": "top_face",
+        "width": 10
+      },
+      "target": "top_riser",
+      "type": "slot"
+    }
+  ],
+  "overall_shape": "An L-shaped stepped block with a central longitudinal riser, featuring a rectangular cutout in the base and a U-shaped channel in the top riser.",
+  "title": "Mechanical Block with Slots",
+  "uncertainties": [],
+  "units": "millimeters",
+  "views": [
+    {
+      "description": "Primary isometric view showing overall geometry and dimensions",
+      "id": "iso_view",
+      "type": "isometric"
+    }
+  ]
+}

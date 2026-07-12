@@ -1,0 +1,167 @@
+{
+  "construction_strategy": "1. Create a cylinder of diameter 80mm and height 8mm. 2. Cut a central coaxial cylinder of diameter 28mm. 3. Create a single hole of diameter 6mm at a radius of 26mm from the center. 4. Apply a circular pattern to the 6mm hole with a count of 8 over 360 degrees.",
+  "dimensions": [
+    {
+      "id": "flange_diameter",
+      "value": 80
+    },
+    {
+      "id": "flange_thickness",
+      "value": 8
+    },
+    {
+      "id": "center_bore_diameter",
+      "value": 28
+    },
+    {
+      "id": "hole_diameter",
+      "value": 6
+    },
+    {
+      "id": "hole_count",
+      "value": 8
+    },
+    {
+      "id": "polar_radius",
+      "value": 26
+    },
+    {
+      "id": "pattern_angle",
+      "value": 360
+    }
+  ],
+  "features": [
+    {
+      "confidence": 1.0,
+      "depends_on": [],
+      "evidence": {
+        "dimension_ids": [
+          "flange_diameter",
+          "flange_thickness"
+        ],
+        "source_view_ids": [
+          "top_view"
+        ]
+      },
+      "id": "main_flange",
+      "name": "Main Flange Body",
+      "operation_hint": "add",
+      "placement": {
+        "axis": "Z",
+        "origin": [
+          0,
+          0,
+          0
+        ]
+      },
+      "profile": "circle",
+      "target": null,
+      "type": "body"
+    },
+    {
+      "confidence": 1.0,
+      "depends_on": [
+        "main_flange"
+      ],
+      "evidence": {
+        "dimension_ids": [
+          "center_bore_diameter"
+        ],
+        "source_view_ids": [
+          "top_view"
+        ]
+      },
+      "id": "center_bore",
+      "name": "Center Bore",
+      "operation_hint": "cut",
+      "placement": {
+        "axis": "Z",
+        "origin": [
+          0,
+          0,
+          0
+        ]
+      },
+      "profile": "circle",
+      "target": "main_flange",
+      "type": "hole"
+    },
+    {
+      "confidence": 1.0,
+      "depends_on": [
+        "main_flange"
+      ],
+      "evidence": {
+        "dimension_ids": [
+          "hole_diameter",
+          "polar_radius"
+        ],
+        "source_view_ids": [
+          "top_view"
+        ]
+      },
+      "id": "mounting_hole_seed",
+      "name": "Mounting Hole Seed",
+      "operation_hint": "cut",
+      "placement": {
+        "axis": "Z",
+        "origin": [
+          26,
+          0,
+          0
+        ],
+        "reference": "center_bore"
+      },
+      "profile": "circle",
+      "target": "main_flange",
+      "type": "hole"
+    },
+    {
+      "confidence": 1.0,
+      "depends_on": [
+        "mounting_hole_seed"
+      ],
+      "evidence": {
+        "dimension_ids": [
+          "hole_count",
+          "pattern_angle"
+        ],
+        "source_view_ids": [
+          "top_view"
+        ]
+      },
+      "id": "polar_hole_pattern",
+      "name": "Polar Hole Pattern",
+      "operation_hint": "pattern",
+      "pattern": {
+        "angle_deg": 360,
+        "axis": "Z",
+        "count": 8,
+        "pitch": 45,
+        "type": "circular"
+      },
+      "target": "mounting_hole_seed",
+      "type": "repeated_pattern"
+    }
+  ],
+  "overall_shape": "Cylindrical disk with a central hole and a circular array of eight smaller holes.",
+  "title": "TOP VIEW - POLAR HOLE PATTERN",
+  "uncertainties": [
+    {
+      "description": "Assumed 'THRU' based on text '8 x D6 THRU', implying full thickness of 8mm",
+      "id": "hole_depth"
+    },
+    {
+      "description": "Visual evidence suggests first hole is at 0 degrees (3 o'clock position), but not explicitly dimensioned",
+      "id": "pattern_start_angle"
+    }
+  ],
+  "units": "millimeters",
+  "views": [
+    {
+      "description": "Plan view showing circular flange and polar hole arrangement",
+      "id": "top_view",
+      "type": "top"
+    }
+  ]
+}

@@ -1,0 +1,8 @@
+.env
+old/
+logs/
+.cache/
+.uv-cache/
+.venv/
+artifacts/
+__pycache__

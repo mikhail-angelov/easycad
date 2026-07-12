@@ -1,0 +1,193 @@
+{
+  "construction_strategy": "Extrude an L-profile sketch 50mm wide. Then, perform three boolean subtractions: a 30mm cylinder at the center of the base, a 30mm diameter cylinder (or semi-circle) at the left edge, and a 30x10mm rectangular pocket across the top of the upright section.",
+  "dimensions": [
+    {
+      "id": "overall_length",
+      "value": 90
+    },
+    {
+      "id": "overall_width",
+      "value": 50
+    },
+    {
+      "id": "overall_height",
+      "value": 60
+    },
+    {
+      "id": "base_height",
+      "value": 25
+    },
+    {
+      "id": "upright_thickness",
+      "value": 30
+    },
+    {
+      "id": "hole_diameter",
+      "value": 30
+    },
+    {
+      "id": "hole_center_from_left",
+      "value": 40
+    },
+    {
+      "id": "slot_width",
+      "value": 30
+    },
+    {
+      "id": "slot_depth",
+      "value": 10
+    },
+    {
+      "id": "cutout_radius",
+      "value": 15
+    }
+  ],
+  "features": [
+    {
+      "confidence": 1.0,
+      "depends_on": [],
+      "evidence": {
+        "dimension_ids": [
+          "overall_length",
+          "overall_width",
+          "overall_height",
+          "base_height"
+        ],
+        "source_view_ids": [
+          "front_view",
+          "top_view"
+        ]
+      },
+      "id": "main_body",
+      "name": "L-Shaped Base",
+      "operation_hint": "add",
+      "placement": {
+        "origin": [
+          0,
+          0,
+          0
+        ],
+        "plane": "XY"
+      },
+      "profile": "L-shape with 90mm length and 60mm height",
+      "target": null,
+      "type": "body"
+    },
+    {
+      "confidence": 1.0,
+      "depends_on": [
+        "main_body"
+      ],
+      "evidence": {
+        "dimension_ids": [
+          "hole_diameter",
+          "hole_center_from_left"
+        ],
+        "source_view_ids": [
+          "top_view",
+          "front_view"
+        ]
+      },
+      "id": "central_hole",
+      "name": "Through Hole",
+      "operation_hint": "cut",
+      "placement": {
+        "axis": "Z",
+        "offset": 40,
+        "reference": "left_edge"
+      },
+      "profile": "Circle diameter 30",
+      "target": "main_body",
+      "type": "hole"
+    },
+    {
+      "confidence": 0.9,
+      "depends_on": [
+        "main_body"
+      ],
+      "evidence": {
+        "dimension_ids": [
+          "cutout_radius"
+        ],
+        "source_view_ids": [
+          "top_view"
+        ]
+      },
+      "id": "edge_cutout",
+      "name": "Semi-circular End Cutout",
+      "operation_hint": "cut",
+      "placement": {
+        "axis": "Z",
+        "reference": "left_face_center"
+      },
+      "profile": "Semi-circle",
+      "target": "main_body",
+      "type": "hole"
+    },
+    {
+      "confidence": 1.0,
+      "depends_on": [
+        "main_body"
+      ],
+      "evidence": {
+        "dimension_ids": [
+          "slot_width",
+          "slot_depth"
+        ],
+        "source_view_ids": [
+          "side_view",
+          "front_view"
+        ]
+      },
+      "id": "top_slot",
+      "name": "Rectangular Top Slot",
+      "operation_hint": "cut",
+      "placement": {
+        "axis": "Y",
+        "reference": "top_face_center"
+      },
+      "profile": "Rectangle 30x10",
+      "target": "main_body",
+      "type": "slot"
+    }
+  ],
+  "overall_shape": "An L-shaped block with a rectangular base and a vertical upright at one end, featuring a central vertical bore, a semi-circular end notch, and a longitudinal rectangular slot on the top face.",
+  "title": "L-Shaped Bracket with Holes and Slot",
+  "uncertainties": [
+    {
+      "description": "The dimension for the base thickness (25) is partially cut off in the crop but inferred from geometry and standard proportions.",
+      "id": "base_height_label"
+    },
+    {
+      "description": "The radius for the semi-circular cutout is not explicitly labeled with a number but aligns with the 30mm width/diameter logic of the central hole.",
+      "id": "cutout_radius"
+    },
+    {
+      "description": "Isometric view suggests sharp edges, no fillets specified.",
+      "id": "fillets"
+    }
+  ],
+  "units": "millimeters",
+  "views": [
+    {
+      "description": "Shows the L-profile and vertical dimensions",
+      "id": "front_view",
+      "type": "orthographic"
+    },
+    {
+      "description": "Shows the footprint, circular hole, and semi-circular cutout",
+      "id": "top_view",
+      "type": "orthographic"
+    },
+    {
+      "description": "Shows the width and the top rectangular slot",
+      "id": "side_view",
+      "type": "orthographic"
+    },
+    {
+      "description": "3D representation of the part",
+      "id": "isometric_view",
+      "type": "perspective"
+    }
+  ]
+}

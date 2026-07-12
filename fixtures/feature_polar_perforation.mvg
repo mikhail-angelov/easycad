@@ -1,0 +1,31 @@
+viewbox 0 0 900 650
+fill white
+stroke none
+rectangle 0,0 900,650
+stroke black
+stroke-width 4
+fill none
+circle 300,290 500,290
+circle 300,290 370,290
+circle 430,290 445,290
+circle 392,198 407,198
+circle 300,160 315,160
+circle 208,198 223,198
+circle 170,290 185,290
+circle 208,382 223,382
+circle 300,420 315,420
+circle 392,382 407,382
+line 300,290 430,290
+stroke none
+fill black
+font-size 30
+font-weight 700
+text 165,55 'TOP VIEW - POLAR HOLE PATTERN'
+font-size 24
+font-weight 400
+text 545,180 'FLANGE D80, THICKNESS 8'
+text 545,220 'CENTER BORE D28'
+text 545,260 '8 x D6 THRU'
+text 545,300 'POLAR RADIUS 26'
+text 545,340 'FULL 360 DEG PATTERN'
+text 545,380 'ONE PRINTABLE SOLID - mm'

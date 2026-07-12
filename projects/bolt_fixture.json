@@ -1,0 +1,153 @@
+{
+  "version": 1,
+  "id": "bolt_fixture",
+  "title": "Hex bolt fixture",
+  "units": "mm",
+  "source": {
+    "filename": "fixtures/2.jpg",
+    "mime_type": "image/jpeg"
+  },
+  "analysis": {
+    "views": [
+      {
+        "id": "side",
+        "type": "side",
+        "description": "Side view with shaft and head dimensions"
+      },
+      {
+        "id": "front",
+        "type": "front",
+        "description": "Hex head front view"
+      }
+    ],
+    "dimensions": [],
+    "features": [
+      {
+        "type": "hex_head",
+        "confidence": 0.95
+      },
+      {
+        "type": "cylindrical_shank",
+        "confidence": 0.9
+      }
+    ],
+    "uncertainties": [
+      {
+        "description": "Thread is represented as a cylindrical major diameter in this first fixture.",
+        "severity": "warning"
+      }
+    ]
+  },
+  "parameters": {
+    "head_flats": {
+      "label": "Head width across flats",
+      "type": "number",
+      "value": 27,
+      "unit": "mm",
+      "min": 10,
+      "max": 60,
+      "step": 1,
+      "source": "drawing",
+      "confidence": 0.95,
+      "editable": true
+    },
+    "head_thickness": {
+      "label": "Head thickness",
+      "type": "number",
+      "value": 12,
+      "unit": "mm",
+      "min": 5,
+      "max": 40,
+      "step": 1,
+      "source": "drawing",
+      "confidence": 0.92,
+      "editable": true
+    },
+    "head_chamfer": {
+      "label": "Head chamfer",
+      "type": "number",
+      "value": 1.5,
+      "unit": "mm",
+      "min": 0,
+      "max": 5,
+      "step": 0.1,
+      "source": "inferred",
+      "confidence": 0.65,
+      "editable": true
+    },
+    "shank_total_length": {
+      "label": "Shank total length",
+      "type": "number",
+      "value": 50,
+      "unit": "mm",
+      "min": 20,
+      "max": 200,
+      "step": 1,
+      "source": "drawing",
+      "confidence": 0.95,
+      "editable": true
+    },
+    "thread_length": {
+      "label": "Thread length",
+      "type": "number",
+      "value": 38,
+      "unit": "mm",
+      "min": 10,
+      "max": 150,
+      "step": 1,
+      "source": "drawing",
+      "confidence": 0.9,
+      "editable": true
+    },
+    "thread_major_diameter": {
+      "label": "Thread major diameter",
+      "type": "number",
+      "value": 16,
+      "unit": "mm",
+      "min": 6,
+      "max": 36,
+      "step": 1,
+      "source": "drawing",
+      "confidence": 0.9,
+      "editable": true
+    },
+    "shank_smooth_length": {
+      "label": "Smooth shank length",
+      "type": "expression",
+      "expression": "shank_total_length - thread_length",
+      "unit": "mm",
+      "source": "derived",
+      "editable": false
+    }
+  },
+  "feature_summary": [
+    {
+      "id": "head",
+      "name": "Hex head",
+      "type": "extrude",
+      "description": "Extruded hexagonal bolt head"
+    },
+    {
+      "id": "shank",
+      "name": "Cylindrical shank",
+      "type": "extrude",
+      "description": "Cylindrical shank and simplified threaded section"
+    }
+  ],
+  "assumptions": [
+    "Threads are simplified as a plain cylinder at major diameter.",
+    "Chamfers are inferred from the side view and may need manual adjustment."
+  ],
+  "cad": {
+    "language": "cadquery-python",
+    "source": "p = PARAMETERS\n\nhead = cq.Workplane(\"XY\").polygon(6, p[\"head_flats\"] * 2 / math.sqrt(3), circumscribed=True).extrude(p[\"head_thickness\"])\n\nchamfered_head = head.faces(\">Z\").chamfer(p[\"head_chamfer\"])\n\nsmooth_shank = cq.Workplane(\"XY\").circle(p[\"thread_major_diameter\"] / 2).extrude(-p[\"shank_smooth_length\"])\n\nthread_section = cq.Workplane(\"XY\").workplane(offset=-p[\"shank_smooth_length\"]).circle(p[\"thread_major_diameter\"] / 2).extrude(-p[\"thread_length\"])\n\nresult = chamfered_head.union(smooth_shank).union(thread_section)\n",
+    "entry_variable": "result",
+    "generation_attempt": 1
+  },
+  "generation": {
+    "status": "new",
+    "warnings": []
+  },
+  "created_at": "2026-07-11T00:00:00Z",
+  "updated_at": "2026-07-11T00:00:00Z"
+}

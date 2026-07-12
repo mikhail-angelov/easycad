@@ -1,0 +1,225 @@
+{
+  "construction_strategy": "Extrude the outer rectangular profile to a height of 30mm. Shell or pocket the interior leaving a 4mm wall and bottom. Create two longitudinal ribs of 4mm thickness. Sketch a 6mm circle on the rib face and apply a linear pattern with a count of 5 and pitch of 18mm to cut through the ribs.",
+  "dimensions": [
+    {
+      "id": "overall_length",
+      "value": 100
+    },
+    {
+      "id": "overall_width",
+      "value": "unlabeled"
+    },
+    {
+      "id": "overall_depth",
+      "value": 30
+    },
+    {
+      "id": "wall_thickness",
+      "value": 4
+    },
+    {
+      "id": "bottom_thickness",
+      "value": 4
+    },
+    {
+      "id": "rib_thickness",
+      "value": 4
+    },
+    {
+      "id": "rib_hole_diameter",
+      "value": 6
+    },
+    {
+      "id": "rib_hole_count",
+      "value": 5
+    },
+    {
+      "id": "rib_hole_pitch",
+      "value": 18
+    }
+  ],
+  "features": [
+    {
+      "confidence": 0.9,
+      "depends_on": [],
+      "evidence": {
+        "dimension_ids": [
+          "overall_length",
+          "overall_depth"
+        ],
+        "source_view_ids": [
+          "top_view",
+          "section_a_a"
+        ]
+      },
+      "id": "main_body",
+      "name": "Outer Shell Body",
+      "operation_hint": "add",
+      "placement": {
+        "origin": [
+          0,
+          0,
+          0
+        ]
+      },
+      "profile": "Rectangular box",
+      "target": null,
+      "type": "body"
+    },
+    {
+      "confidence": 1.0,
+      "depends_on": [
+        "main_body"
+      ],
+      "evidence": {
+        "dimension_ids": [
+          "wall_thickness",
+          "bottom_thickness"
+        ],
+        "source_view_ids": [
+          "top_view",
+          "section_a_a"
+        ]
+      },
+      "id": "internal_pocket",
+      "name": "Open Top Pocket",
+      "operation_hint": "cut",
+      "profile": "Rectangular offset by wall thickness",
+      "target": "main_body",
+      "type": "pocket"
+    },
+    {
+      "confidence": 1.0,
+      "depends_on": [
+        "internal_pocket"
+      ],
+      "evidence": {
+        "dimension_ids": [
+          "rib_thickness"
+        ],
+        "source_view_ids": [
+          "top_view",
+          "section_a_a"
+        ]
+      },
+      "id": "internal_rib_1",
+      "name": "Internal Rib North",
+      "operation_hint": "add",
+      "placement": {
+        "direction": "longitudinal"
+      },
+      "target": "main_body",
+      "type": "rib"
+    },
+    {
+      "confidence": 1.0,
+      "depends_on": [
+        "internal_pocket"
+      ],
+      "evidence": {
+        "dimension_ids": [
+          "rib_thickness"
+        ],
+        "source_view_ids": [
+          "top_view",
+          "section_a_a"
+        ]
+      },
+      "id": "internal_rib_2",
+      "name": "Internal Rib South",
+      "operation_hint": "add",
+      "placement": {
+        "direction": "longitudinal"
+      },
+      "target": "main_body",
+      "type": "rib"
+    },
+    {
+      "confidence": 1.0,
+      "depends_on": [
+        "internal_rib_1"
+      ],
+      "evidence": {
+        "dimension_ids": [
+          "rib_hole_diameter",
+          "rib_hole_pitch",
+          "rib_hole_count"
+        ],
+        "source_view_ids": [
+          "top_view"
+        ]
+      },
+      "id": "rib_holes_pattern_1",
+      "name": "Rib 1 Perforations",
+      "operation_hint": "pattern",
+      "pattern": {
+        "axis": "X",
+        "count": 5,
+        "pitch": 18,
+        "type": "linear"
+      },
+      "target": "internal_rib_1",
+      "type": "perforation"
+    },
+    {
+      "confidence": 1.0,
+      "depends_on": [
+        "internal_rib_2"
+      ],
+      "evidence": {
+        "dimension_ids": [
+          "rib_hole_diameter",
+          "rib_hole_pitch",
+          "rib_hole_count"
+        ],
+        "source_view_ids": [
+          "top_view"
+        ]
+      },
+      "id": "rib_holes_pattern_2",
+      "name": "Rib 2 Perforations",
+      "operation_hint": "pattern",
+      "pattern": {
+        "axis": "X",
+        "count": 5,
+        "pitch": 18,
+        "type": "linear"
+      },
+      "target": "internal_rib_2",
+      "type": "perforation"
+    }
+  ],
+  "overall_shape": "A rectangular open-top tray with a wall thickness of 4mm, containing two longitudinal internal ribs, each featuring five evenly spaced 6mm diameter through-holes.",
+  "title": "TOP VIEW - OPEN-TOP SHELL",
+  "uncertainties": [
+    {
+      "description": "The vertical dimension in the Top View is indicated by arrows but no numerical value is provided.",
+      "id": "overall_width"
+    },
+    {
+      "description": "The distance between the two ribs and their distance from the outer walls is not specified.",
+      "id": "rib_spacing"
+    },
+    {
+      "description": "Section A-A shows ribs are shorter than the outer walls, but the specific height or offset from the top is not dimensioned.",
+      "id": "rib_height"
+    },
+    {
+      "description": "The vertical center-line of the holes relative to the rib height is not explicitly dimensioned, though shown centered in Section A-A.",
+      "id": "hole_vertical_alignment"
+    }
+  ],
+  "units": "millimeters",
+  "views": [
+    {
+      "id": "top_view",
+      "name": "Top View",
+      "type": "orthographic"
+    },
+    {
+      "id": "section_a_a",
+      "name": "Section A-A",
+      "type": "cross_section"
+    }
+  ]
+}

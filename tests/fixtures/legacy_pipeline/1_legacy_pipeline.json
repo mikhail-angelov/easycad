@@ -1,0 +1,46 @@
+{
+  "input": {
+    "image": "/home/ma/.hermes/image_cache/img_445892cf8871.jpg",
+    "model": "google/gemini-3-flash-preview",
+    "size": 33483
+  },
+  "normalize_content": {
+    "depth": 50,
+    "groove_d": 10,
+    "groove_w": 30,
+    "height": 60,
+    "hole_dia": 30,
+    "length": 90
+  },
+  "params": {
+    "mapped_params": {
+      "depth": 50,
+      "groove_d": 10,
+      "groove_w": 30,
+      "height": 60,
+      "hole_dia": 30,
+      "length": 90
+    },
+    "normalized_raw": {
+      "depth": 50,
+      "groove_d": 10,
+      "groove_w": 30,
+      "height": 60,
+      "hole_dia": 30,
+      "length": 90
+    }
+  },
+  "vision_content": {
+    "confidence": 0.95,
+    "dimensions": {
+      "height": 60,
+      "hole_diameter": 30,
+      "length": 90,
+      "slot_depth": 10,
+      "slot_width": 30,
+      "width": 50
+    },
+    "model_type": "bracket",
+    "title": "L-shaped slotted bracket"
+  }
+}

@@ -1,0 +1,226 @@
+{
+  "version": 1,
+  "id": "bracket_fixture",
+  "title": "Bracket fixture",
+  "units": "mm",
+  "source": {
+    "filename": "fixtures/1.jpg",
+    "mime_type": "image/jpeg"
+  },
+  "analysis": {
+    "views": [
+      {
+        "id": "front",
+        "type": "front",
+        "description": "Front orthographic view"
+      },
+      {
+        "id": "top",
+        "type": "top",
+        "description": "Top orthographic view"
+      },
+      {
+        "id": "right",
+        "type": "right",
+        "description": "Right orthographic view"
+      }
+    ],
+    "dimensions": [],
+    "features": [
+      {
+        "type": "base_body",
+        "confidence": 0.9
+      },
+      {
+        "type": "through_hole",
+        "confidence": 0.92
+      },
+      {
+        "type": "semicircular_notch",
+        "confidence": 0.8
+      },
+      {
+        "type": "upper_groove",
+        "confidence": 0.75
+      }
+    ],
+    "uncertainties": [
+      {
+        "description": "Some dimensions are inferred from the old prototype defaults and visible drawing proportions.",
+        "severity": "warning"
+      }
+    ]
+  },
+  "parameters": {
+    "overall_length": {
+      "label": "Overall length",
+      "type": "number",
+      "value": 90,
+      "unit": "mm",
+      "min": 30,
+      "max": 300,
+      "step": 1,
+      "source": "drawing",
+      "confidence": 0.95,
+      "editable": true
+    },
+    "overall_width": {
+      "label": "Overall width",
+      "type": "number",
+      "value": 50,
+      "unit": "mm",
+      "min": 20,
+      "max": 200,
+      "step": 1,
+      "source": "drawing",
+      "confidence": 0.9,
+      "editable": true
+    },
+    "overall_height": {
+      "label": "Overall height",
+      "type": "number",
+      "value": 60,
+      "unit": "mm",
+      "min": 20,
+      "max": 200,
+      "step": 1,
+      "source": "drawing",
+      "confidence": 0.9,
+      "editable": true
+    },
+    "base_thickness": {
+      "label": "Base thickness",
+      "type": "number",
+      "value": 20,
+      "unit": "mm",
+      "min": 5,
+      "max": 80,
+      "step": 1,
+      "source": "inferred",
+      "confidence": 0.7,
+      "editable": true
+    },
+    "upright_length": {
+      "label": "Upright length",
+      "type": "number",
+      "value": 30,
+      "unit": "mm",
+      "min": 10,
+      "max": 120,
+      "step": 1,
+      "source": "drawing",
+      "confidence": 0.85,
+      "editable": true
+    },
+    "groove_width": {
+      "label": "Upper groove width",
+      "type": "number",
+      "value": 30,
+      "unit": "mm",
+      "min": 5,
+      "max": 100,
+      "step": 1,
+      "source": "drawing",
+      "confidence": 0.8,
+      "editable": true
+    },
+    "groove_depth": {
+      "label": "Upper groove depth",
+      "type": "number",
+      "value": 10,
+      "unit": "mm",
+      "min": 2,
+      "max": 50,
+      "step": 1,
+      "source": "drawing",
+      "confidence": 0.75,
+      "editable": true
+    },
+    "main_hole_diameter": {
+      "label": "Main hole diameter",
+      "type": "number",
+      "value": 30,
+      "unit": "mm",
+      "min": 5,
+      "max": 80,
+      "step": 1,
+      "source": "drawing",
+      "confidence": 0.92,
+      "editable": true
+    },
+    "main_hole_x": {
+      "label": "Main hole X",
+      "type": "number",
+      "value": 40,
+      "unit": "mm",
+      "min": 5,
+      "max": 200,
+      "step": 1,
+      "source": "drawing",
+      "confidence": 0.85,
+      "editable": true
+    },
+    "front_notch_radius": {
+      "label": "Front notch radius",
+      "type": "number",
+      "value": 15,
+      "unit": "mm",
+      "min": 3,
+      "max": 50,
+      "step": 1,
+      "source": "inferred",
+      "confidence": 0.7,
+      "editable": true
+    },
+    "upright_height": {
+      "label": "Upright height",
+      "type": "expression",
+      "expression": "overall_height - base_thickness",
+      "unit": "mm",
+      "source": "derived",
+      "editable": false
+    }
+  },
+  "feature_summary": [
+    {
+      "id": "base",
+      "name": "Base body",
+      "type": "box",
+      "description": "Rectangular base extrusion"
+    },
+    {
+      "id": "upright",
+      "name": "Rear upright",
+      "type": "box",
+      "description": "Vertical rear block"
+    },
+    {
+      "id": "main_hole",
+      "name": "Main through hole",
+      "type": "cut",
+      "description": "Cylindrical through cut in the base"
+    },
+    {
+      "id": "front_notch",
+      "name": "Front notch",
+      "type": "cut",
+      "description": "Semicircular cut at the front edge"
+    }
+  ],
+  "assumptions": [
+    "The main hole and front notch are cut through the full base thickness.",
+    "The groove depth is interpreted as a vertical cut from the top of the upright."
+  ],
+  "cad": {
+    "language": "cadquery-python",
+    "source": "p = PARAMETERS\n\nbase = cq.Workplane(\"XY\").box(p[\"overall_length\"], p[\"overall_width\"], p[\"base_thickness\"], centered=False)\n\nupright = cq.Workplane(\"XY\").box(p[\"upright_length\"], p[\"overall_width\"], p[\"upright_height\"], centered=False).translate((p[\"overall_length\"] - p[\"upright_length\"], 0, p[\"base_thickness\"]))\n\nbody = base.union(upright)\n\ngroove = cq.Workplane(\"XY\").box(p[\"upright_length\"], p[\"groove_width\"], p[\"groove_depth\"], centered=False).translate((p[\"overall_length\"] - p[\"upright_length\"], (p[\"overall_width\"] - p[\"groove_width\"]) / 2, p[\"overall_height\"] - p[\"groove_depth\"]))\n\nwith_groove = body.cut(groove)\n\nmain_hole = cq.Workplane(\"XY\").circle(p[\"main_hole_diameter\"] / 2).extrude(p[\"base_thickness\"] + 2).translate((p[\"main_hole_x\"], p[\"overall_width\"] / 2, -1))\n\nwith_main_hole = with_groove.cut(main_hole)\n\nfront_notch = cq.Workplane(\"XY\").circle(p[\"front_notch_radius\"]).extrude(p[\"base_thickness\"] + 2).translate((0, p[\"overall_width\"] / 2, -1))\n\nresult = with_main_hole.cut(front_notch)\n",
+    "entry_variable": "result",
+    "generation_attempt": 1
+  },
+  "generation": {
+    "status": "new",
+    "warnings": []
+  },
+  "created_at": "2026-07-11T00:00:00Z",
+  "updated_at": "2026-07-11T00:00:00Z"
+}

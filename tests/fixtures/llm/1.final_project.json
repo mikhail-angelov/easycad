@@ -1,0 +1,665 @@
+{
+  "analysis": {
+    "dimensions": [],
+    "features": [
+      {
+        "confidence": 1.0,
+        "depends_on": [],
+        "evidence": {
+          "dimension_ids": [
+            "overall_length",
+            "overall_height",
+            "base_height",
+            "upright_thickness"
+          ],
+          "source_view_ids": [
+            "front_view",
+            "top_view"
+          ]
+        },
+        "id": "base_body",
+        "name": "L-Shaped Base",
+        "operation_hint": "add",
+        "placement": {
+          "origin": [
+            0,
+            0,
+            0
+          ],
+          "plane": "XY"
+        },
+        "profile": "L-shape profile with 90mm length and 60mm height",
+        "target": null,
+        "type": "body"
+      },
+      {
+        "confidence": 1.0,
+        "depends_on": [
+          "base_body"
+        ],
+        "evidence": {
+          "dimension_ids": [
+            "hole_diameter",
+            "hole_center_from_left"
+          ],
+          "source_view_ids": [
+            "top_view",
+            "front_view"
+          ]
+        },
+        "id": "central_hole",
+        "name": "Vertical Through Hole",
+        "operation_hint": "cut",
+        "placement": {
+          "axis": "Z",
+          "offset": 40,
+          "reference": "left_edge"
+        },
+        "profile": "Circle diameter 30",
+        "target": "base_body",
+        "type": "hole"
+      },
+      {
+        "confidence": 0.9,
+        "depends_on": [
+          "base_body"
+        ],
+        "evidence": {
+          "dimension_ids": [
+            "semi_circle_radius"
+          ],
+          "source_view_ids": [
+            "top_view"
+          ]
+        },
+        "id": "end_cutout",
+        "name": "Semi-circular End Cutout",
+        "operation_hint": "cut",
+        "placement": {
+          "axis": "Z",
+          "reference": "left_edge_center"
+        },
+        "profile": "Semi-circle centered on left edge",
+        "target": "base_body",
+        "type": "hole"
+      },
+      {
+        "confidence": 1.0,
+        "depends_on": [
+          "base_body"
+        ],
+        "evidence": {
+          "dimension_ids": [
+            "slot_width",
+            "slot_depth"
+          ],
+          "source_view_ids": [
+            "side_view",
+            "front_view"
+          ]
+        },
+        "id": "top_slot",
+        "name": "Rectangular Top Slot",
+        "operation_hint": "cut",
+        "placement": {
+          "axis": "Y",
+          "reference": "top_face_center"
+        },
+        "profile": "Rectangle 30x10",
+        "target": "base_body",
+        "type": "slot"
+      }
+    ],
+    "uncertainties": [],
+    "views": [
+      {
+        "description": "Shows the L-profile and vertical dimensions",
+        "id": "front_view",
+        "type": "orthographic"
+      },
+      {
+        "description": "Shows the footprint, circular hole, and semi-circular cutout",
+        "id": "top_view",
+        "type": "orthographic"
+      },
+      {
+        "description": "Shows the width and the top rectangular slot",
+        "id": "side_view",
+        "type": "orthographic"
+      },
+      {
+        "description": "3D representation of the part",
+        "id": "isometric_view",
+        "type": "perspective"
+      }
+    ]
+  },
+  "assumptions": [
+    "Base height and upright thickness are assumed equal to 20mm as typical for L-brackets; adjust if different.",
+    "Semi-circle radius assumed 15mm based on typical proportion; adjust if dimension available.",
+    "Slot is centered on the top face of the upright section."
+  ],
+  "cad": {
+    "entry_variable": "result",
+    "generation_attempt": 1,
+    "language": "cadquery-python",
+    "source": "p = PARAMETERS\n\nbase = cq.Workplane(\"XY\").box(p[\"overall_length\"], p[\"overall_width\"], p[\"base_height\"], centered=False)\n\nupright = (\n    cq.Workplane(\"XY\")\n    .box(p[\"upright_thickness\"], p[\"overall_width\"], p[\"overall_height\"] - p[\"base_height\"], centered=False)\n    .translate((p[\"overall_length\"] - p[\"upright_thickness\"], 0, p[\"base_height\"]))\n)\n\nbody = base.union(upright)\n\nmain_hole = (\n    cq.Workplane(\"XY\")\n    .circle(p[\"hole_diameter\"] / 2)\n    .extrude(p[\"base_height\"] + 2)\n    .translate((p[\"hole_center_from_left\"], p[\"overall_width\"] / 2, -1))\n)\n\nwith_main_hole = body.cut(main_hole)\n\nfront_notch = (\n    cq.Workplane(\"XY\")\n    .circle(p[\"end_notch_radius\"])\n    .extrude(p[\"base_height\"] + 2)\n    .translate((0, p[\"overall_width\"] / 2, -1))\n)\n\nwith_notch = with_main_hole.cut(front_notch)\n\ntop_slot = (\n    cq.Workplane(\"XY\")\n    .box(p[\"upright_thickness\"], p[\"top_slot_width\"], p[\"top_slot_depth\"], centered=False)\n    .translate((p[\"overall_length\"] - p[\"upright_thickness\"], (p[\"overall_width\"] - p[\"top_slot_width\"]) / 2, p[\"overall_height\"] - p[\"top_slot_depth\"]))\n)\n\nresult = with_notch.cut(top_slot)\n"
+  },
+  "created_at": "2026-07-12T11:05:38.679891Z",
+  "feature_coverage": {
+    "all_accounted_for": true,
+    "entries": [
+      {
+        "confidence": 1.0,
+        "explanation": null,
+        "feature_id": "base_body",
+        "operation_ids": [
+          "base_body",
+          "central_hole",
+          "end_cutout",
+          "top_slot"
+        ],
+        "status": "implemented"
+      },
+      {
+        "confidence": 1.0,
+        "explanation": null,
+        "feature_id": "central_hole",
+        "operation_ids": [
+          "central_hole"
+        ],
+        "status": "implemented"
+      },
+      {
+        "confidence": 0.9,
+        "explanation": null,
+        "feature_id": "end_cutout",
+        "operation_ids": [
+          "end_cutout"
+        ],
+        "status": "implemented"
+      },
+      {
+        "confidence": 1.0,
+        "explanation": null,
+        "feature_id": "top_slot",
+        "operation_ids": [
+          "top_slot"
+        ],
+        "status": "implemented"
+      }
+    ],
+    "has_unresolved": false
+  },
+  "feature_graph": {
+    "operations": [
+      {
+        "assumption": null,
+        "confidence": 1.0,
+        "depends_on": [],
+        "evidence": {
+          "dimension_ids": [],
+          "note": null,
+          "source": "inferred",
+          "views": []
+        },
+        "id": "base_body",
+        "implementation": "base_body",
+        "name": "",
+        "operation": "add",
+        "parameters": {},
+        "pattern": null,
+        "placement": null,
+        "profile": null,
+        "source_feature_ids": [
+          "base_body"
+        ],
+        "status": "implemented",
+        "target": null,
+        "type": "body"
+      },
+      {
+        "assumption": null,
+        "confidence": 1.0,
+        "depends_on": [],
+        "evidence": {
+          "dimension_ids": [],
+          "note": null,
+          "source": "inferred",
+          "views": []
+        },
+        "id": "central_hole",
+        "implementation": "central_hole",
+        "name": "",
+        "operation": "add",
+        "parameters": {},
+        "pattern": null,
+        "placement": null,
+        "profile": null,
+        "source_feature_ids": [
+          "base_body",
+          "central_hole"
+        ],
+        "status": "implemented",
+        "target": "base_body",
+        "type": "hole"
+      },
+      {
+        "assumption": null,
+        "confidence": 0.9,
+        "depends_on": [],
+        "evidence": {
+          "dimension_ids": [],
+          "note": null,
+          "source": "inferred",
+          "views": []
+        },
+        "id": "end_cutout",
+        "implementation": "end_cutout",
+        "name": "",
+        "operation": "add",
+        "parameters": {},
+        "pattern": null,
+        "placement": null,
+        "profile": null,
+        "source_feature_ids": [
+          "base_body",
+          "end_cutout"
+        ],
+        "status": "implemented",
+        "target": "base_body",
+        "type": "hole"
+      },
+      {
+        "assumption": null,
+        "confidence": 1.0,
+        "depends_on": [],
+        "evidence": {
+          "dimension_ids": [],
+          "note": null,
+          "source": "inferred",
+          "views": []
+        },
+        "id": "top_slot",
+        "implementation": "top_slot",
+        "name": "",
+        "operation": "add",
+        "parameters": {},
+        "pattern": null,
+        "placement": null,
+        "profile": null,
+        "source_feature_ids": [
+          "base_body",
+          "top_slot"
+        ],
+        "status": "implemented",
+        "target": "base_body",
+        "type": "slot"
+      }
+    ]
+  },
+  "feature_summary": [
+    {
+      "description": "Extruded L-profile forming the main body",
+      "id": "base_body",
+      "name": "L-Shaped Base",
+      "type": "body"
+    },
+    {
+      "description": "Circular through hole on the base",
+      "id": "central_hole",
+      "name": "Vertical Through Hole",
+      "type": "hole"
+    },
+    {
+      "description": "Semi-circular notch on the left edge",
+      "id": "end_cutout",
+      "name": "Semi-circular End Cutout",
+      "type": "hole"
+    },
+    {
+      "description": "Rectangular slot on the top face of the upright",
+      "id": "top_slot",
+      "name": "Rectangular Top Slot",
+      "type": "slot"
+    }
+  ],
+  "generation": {
+    "bounding_box": {
+      "x": 90.0,
+      "y": 50.0,
+      "z": 60.0
+    },
+    "error": null,
+    "execution_time_ms": 4293,
+    "solid_count": 1,
+    "status": "success",
+    "volume_mm3": 102794.24958826885,
+    "warnings": []
+  },
+  "generation_history": [],
+  "id": "b304b2fa-9ad6-44f9-9dc4-f5c6db098bbd",
+  "parameters": {
+    "base_height": {
+      "confidence": 0.8,
+      "editable": true,
+      "expression": null,
+      "label": "Base Height",
+      "max": 100.0,
+      "min": 5.0,
+      "options": [],
+      "source": "drawing",
+      "step": 1.0,
+      "type": "number",
+      "unit": "mm",
+      "value": 20.0
+    },
+    "base_length": {
+      "confidence": 1.0,
+      "editable": true,
+      "expression": null,
+      "label": "Base Length",
+      "max": 200.0,
+      "min": 10.0,
+      "options": [],
+      "source": "drawing",
+      "step": 1.0,
+      "type": "number",
+      "unit": "mm",
+      "value": 90.0
+    },
+    "base_width": {
+      "confidence": 1.0,
+      "editable": true,
+      "expression": null,
+      "label": "Base Width",
+      "max": 200.0,
+      "min": 10.0,
+      "options": [],
+      "source": "drawing",
+      "step": 1.0,
+      "type": "number",
+      "unit": "mm",
+      "value": 50.0
+    },
+    "central_block_height": {
+      "confidence": 0.7,
+      "editable": true,
+      "expression": null,
+      "label": "Central Block Height",
+      "max": 160.0,
+      "min": 1.0,
+      "options": [],
+      "source": "inferred",
+      "step": 1.0,
+      "type": "number",
+      "unit": "mm",
+      "value": 40.0
+    },
+    "end_notch_radius": {
+      "confidence": 0.6,
+      "editable": true,
+      "expression": null,
+      "label": "End Notch Radius",
+      "max": 60.0,
+      "min": 0.0,
+      "options": [],
+      "source": "assumed",
+      "step": 1.0,
+      "type": "number",
+      "unit": "mm",
+      "value": 15.0
+    },
+    "head_chamfer": {
+      "confidence": 0.65,
+      "editable": true,
+      "expression": null,
+      "label": "Head Chamfer",
+      "max": 5.0,
+      "min": 0.0,
+      "options": [],
+      "source": "inferred",
+      "step": 0.1,
+      "type": "number",
+      "unit": "mm",
+      "value": 1.5
+    },
+    "hole_center_from_left": {
+      "confidence": 1.0,
+      "editable": true,
+      "expression": null,
+      "label": "Hole Center from Left",
+      "max": 200.0,
+      "min": 5.0,
+      "options": [],
+      "source": "drawing",
+      "step": 1.0,
+      "type": "number",
+      "unit": "mm",
+      "value": 40.0
+    },
+    "hole_diameter": {
+      "confidence": 1.0,
+      "editable": true,
+      "expression": null,
+      "label": "Hole Diameter",
+      "max": 100.0,
+      "min": 5.0,
+      "options": [],
+      "source": "drawing",
+      "step": 1.0,
+      "type": "number",
+      "unit": "mm",
+      "value": 30.0
+    },
+    "notch_depth": {
+      "confidence": 0.7,
+      "editable": true,
+      "expression": null,
+      "label": "Notch Depth",
+      "max": 80.0,
+      "min": 1.0,
+      "options": [],
+      "source": "inferred",
+      "step": 1.0,
+      "type": "number",
+      "unit": "mm",
+      "value": 20.0
+    },
+    "overall_height": {
+      "confidence": 1.0,
+      "editable": true,
+      "expression": null,
+      "label": "Overall Height",
+      "max": 200.0,
+      "min": 10.0,
+      "options": [],
+      "source": "drawing",
+      "step": 1.0,
+      "type": "number",
+      "unit": "mm",
+      "value": 60.0
+    },
+    "overall_length": {
+      "confidence": 1.0,
+      "editable": true,
+      "expression": null,
+      "label": "Overall Length",
+      "max": 200.0,
+      "min": 10.0,
+      "options": [],
+      "source": "drawing",
+      "step": 1.0,
+      "type": "number",
+      "unit": "mm",
+      "value": 90.0
+    },
+    "overall_width": {
+      "confidence": 1.0,
+      "editable": true,
+      "expression": null,
+      "label": "Overall Width",
+      "max": 200.0,
+      "min": 10.0,
+      "options": [],
+      "source": "drawing",
+      "step": 1.0,
+      "type": "number",
+      "unit": "mm",
+      "value": 50.0
+    },
+    "semi_circle_radius": {
+      "confidence": 0.9,
+      "editable": true,
+      "expression": null,
+      "label": "Semi-circle Radius",
+      "max": 100.0,
+      "min": 5.0,
+      "options": [],
+      "source": "drawing",
+      "step": 1.0,
+      "type": "number",
+      "unit": "mm",
+      "value": 15.0
+    },
+    "side_cut_depth": {
+      "confidence": 0.7,
+      "editable": true,
+      "expression": null,
+      "label": "Side Cut Depth",
+      "max": 40.0,
+      "min": 1.0,
+      "options": [],
+      "source": "inferred",
+      "step": 1.0,
+      "type": "number",
+      "unit": "mm",
+      "value": 10.0
+    },
+    "side_cut_width": {
+      "confidence": 0.7,
+      "editable": true,
+      "expression": null,
+      "label": "Side Cut Width",
+      "max": 40.0,
+      "min": 1.0,
+      "options": [],
+      "source": "inferred",
+      "step": 1.0,
+      "type": "number",
+      "unit": "mm",
+      "value": 10.0
+    },
+    "slot_depth": {
+      "confidence": 1.0,
+      "editable": true,
+      "expression": null,
+      "label": "Slot Depth",
+      "max": 50.0,
+      "min": 1.0,
+      "options": [],
+      "source": "drawing",
+      "step": 1.0,
+      "type": "number",
+      "unit": "mm",
+      "value": 10.0
+    },
+    "slot_width": {
+      "confidence": 1.0,
+      "editable": true,
+      "expression": null,
+      "label": "Slot Width",
+      "max": 100.0,
+      "min": 5.0,
+      "options": [],
+      "source": "drawing",
+      "step": 1.0,
+      "type": "number",
+      "unit": "mm",
+      "value": 30.0
+    },
+    "through_hole_diameter": {
+      "confidence": 1.0,
+      "editable": true,
+      "expression": null,
+      "label": "Through Hole Diameter",
+      "max": 100.0,
+      "min": 5.0,
+      "options": [],
+      "source": "drawing",
+      "step": 1.0,
+      "type": "number",
+      "unit": "mm",
+      "value": 30.0
+    },
+    "top_slot_depth": {
+      "confidence": 1.0,
+      "editable": true,
+      "expression": null,
+      "label": "Top Slot Depth",
+      "max": 50.0,
+      "min": 1.0,
+      "options": [],
+      "source": "drawing",
+      "step": 1.0,
+      "type": "number",
+      "unit": "mm",
+      "value": 10.0
+    },
+    "top_slot_width": {
+      "confidence": 1.0,
+      "editable": true,
+      "expression": null,
+      "label": "Top Slot Width",
+      "max": 100.0,
+      "min": 5.0,
+      "options": [],
+      "source": "drawing",
+      "step": 1.0,
+      "type": "number",
+      "unit": "mm",
+      "value": 30.0
+    },
+    "upright_thickness": {
+      "confidence": 0.8,
+      "editable": true,
+      "expression": null,
+      "label": "Upright Thickness",
+      "max": 100.0,
+      "min": 5.0,
+      "options": [],
+      "source": "drawing",
+      "step": 1.0,
+      "type": "number",
+      "unit": "mm",
+      "value": 20.0
+    },
+    "width": {
+      "confidence": 1.0,
+      "editable": true,
+      "expression": null,
+      "label": "Width",
+      "max": 200.0,
+      "min": 10.0,
+      "options": [],
+      "source": "drawing",
+      "step": 1.0,
+      "type": "number",
+      "unit": "mm",
+      "value": 50.0
+    }
+  },
+  "source": {
+    "filename": "1.jpg",
+    "height": null,
+    "image_data": null,
+    "image_ref": "memory://sha256/26c6dfaf27b1da30d6fcb5439309bf436d552980662619f9ae2d02cd4331a586",
+    "image_sha256": "26c6dfaf27b1da30d6fcb5439309bf436d552980662619f9ae2d02cd4331a586",
+    "mime_type": "image/jpeg",
+    "width": null
+  },
+  "title": "L-Shaped Bracket with Holes and Slot",
+  "units": "millimeters",
+  "updated_at": "2026-07-12T11:05:38.679891Z",
+  "version": 1
+}
