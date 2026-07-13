@@ -1,0 +1,116 @@
+{
+  "analysis": {
+    "construction_strategy": "1. Create a rectangular sketch of 110mm x 55mm and extrude to an arbitrary thickness. 2. Create a second sketch on the top face for an obround slot of 30mm x 9mm. 3. Constrain the slot to the center of the plate. 4. Perform a cut operation through the plate.",
+    "dimensions": [
+      {
+        "id": "plate_length",
+        "value": 110
+      },
+      {
+        "id": "plate_width",
+        "value": 55
+      },
+      {
+        "id": "slot_length",
+        "value": 30
+      },
+      {
+        "id": "slot_width",
+        "value": 9
+      }
+    ],
+    "features": [
+      {
+        "confidence": 1.0,
+        "depends_on": [],
+        "evidence": {
+          "dimension_ids": [
+            "plate_length",
+            "plate_width"
+          ],
+          "source_view_ids": [
+            "top_view"
+          ]
+        },
+        "id": "base_plate",
+        "name": "Base Plate",
+        "operation_hint": "add",
+        "placement": {
+          "dimensions": {
+            "length": 110,
+            "width": 55
+          },
+          "plane": "XY",
+          "reference": "origin"
+        },
+        "profile": "Rectangular",
+        "target": null,
+        "type": "body"
+      },
+      {
+        "confidence": 0.9,
+        "depends_on": [
+          "base_plate"
+        ],
+        "evidence": {
+          "dimension_ids": [
+            "slot_length",
+            "slot_width"
+          ],
+          "source_view_ids": [
+            "top_view"
+          ]
+        },
+        "id": "central_slot",
+        "name": "Central Slot",
+        "operation_hint": "cut",
+        "placement": {
+          "dimensions": {
+            "length": 30,
+            "width": 9
+          },
+          "plane": "XY",
+          "reference": "base_plate_center"
+        },
+        "profile": "Obround",
+        "target": "base_plate",
+        "type": "slot"
+      }
+    ],
+    "overall_shape": "A rectangular flat plate with a single obround slot located in the center.",
+    "title": "SLOTS - VARIANT 5",
+    "uncertainties": [
+      {
+        "description": "The thickness of the solid part for 3D printing is not specified.",
+        "id": "plate_thickness"
+      },
+      {
+        "description": "The slot is visually centered, but no explicit coordinate dimensions are provided to confirm exact alignment.",
+        "id": "slot_position"
+      },
+      {
+        "description": "The dimension '30 x 9' for a slot typically refers to the overall length and width, but can sometimes refer to center-to-center distance; overall length is inferred here.",
+        "id": "slot_type"
+      }
+    ],
+    "units": "millimeters",
+    "views": [
+      {
+        "description": "Plan view showing the rectangular plate and a single central slot",
+        "id": "top_view",
+        "type": "top"
+      }
+    ]
+  },
+  "capability": "slots",
+  "detected": true,
+  "dimension_errors_mm": [
+    0.0,
+    0.0
+  ],
+  "expected_dimensions_mm": [
+    110,
+    55
+  ],
+  "variant": "ambiguous_crop"
+}

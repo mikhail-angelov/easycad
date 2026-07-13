@@ -1,1 +1,180 @@
-[]
+[
+  {
+    "attempt": 2,
+    "input_error": {
+      "detail": {
+        "duration_ms": 2209,
+        "error_type": "Standard_Failure",
+        "message": "Bnd_Box is void",
+        "returncode": 1,
+        "stage": "cadquery_execution",
+        "status": "error",
+        "traceback": "Traceback (most recent call last):\n  File \"/Users/ma/repo/easycad/worker/cadquery_worker.py\", line 41, in main"
+      },
+      "message": "Bnd_Box is void",
+      "stage": "cadquery_execution"
+    },
+    "plan": {
+      "assumptions": [
+        "Base height of 25mm inferred from front view scale.",
+        "Notch radius of 15mm inferred from symmetry with hole diameter.",
+        "Top slot centered on width (50mm) leaving 10mm walls on each side.",
+        "Notch approximated as a full through hole; actual semi-circular shape requires a pocket operation.",
+        "Upright section origin corrected to (overall_length - upright_thickness, 0, base_height) to align with base block rear edge."
+      ],
+      "feature_summary": [
+        {
+          "description": "Horizontal rectangular base of the L-bracket.",
+          "id": "base_block",
+          "name": "Base Block",
+          "type": "body"
+        },
+        {
+          "description": "Vertical rectangular upright attached to the base.",
+          "id": "upright_section",
+          "name": "Upright Section",
+          "type": "body"
+        },
+        {
+          "description": "Through hole in the base for mounting.",
+          "id": "central_hole",
+          "name": "Central Through Hole",
+          "type": "hole"
+        },
+        {
+          "description": "Semi-circular notch at the left end of the base.",
+          "id": "end_notch",
+          "name": "End Notch",
+          "type": "hole"
+        },
+        {
+          "description": "Rectangular slot on the top of the upright.",
+          "id": "top_slot",
+          "name": "Top Rectangular Slot",
+          "type": "slot"
+        }
+      ],
+      "operation_updates": [
+        {
+          "id": "upright_section",
+          "placement": {
+            "origin": [
+              "overall_length - upright_thickness",
+              0,
+              "base_height"
+            ]
+          },
+          "status": "updated"
+        }
+      ],
+      "repaired_feature_ids": [
+        "upright_section"
+      ]
+    },
+    "user_feedback": "Automatic repair for cadquery_execution: Bnd_Box is void"
+  },
+  {
+    "attempt": 3,
+    "input_error": {
+      "detail": {
+        "bounding_box": {
+          "x": 90.0,
+          "y": 50.0,
+          "z": 25.0
+        },
+        "expected": {
+          "x": 90.0,
+          "y": 50.0,
+          "z": 60.0
+        },
+        "mismatches": [
+          "z: expected 60, got 25"
+        ]
+      },
+      "message": "Generated model bounding box does not match declared overall dimensions",
+      "stage": "geometry_validation"
+    },
+    "plan": {
+      "assumptions": [
+        "Base height of 25mm inferred from front view scale.",
+        "Notch radius of 15mm inferred from symmetry with hole diameter.",
+        "Top slot centered on width (50mm) leaving 10mm walls on each side.",
+        "Notch approximated as a full through hole; actual semi-circular shape requires a pocket operation.",
+        "Upright section origin corrected to (overall_length - upright_thickness, 0, base_height) to align with base block rear edge."
+      ],
+      "feature_summary": [
+        {
+          "description": "Horizontal rectangular base of the L-bracket.",
+          "id": "base_block",
+          "name": "Base Block",
+          "type": "body"
+        },
+        {
+          "description": "Vertical rectangular upright attached to the base.",
+          "id": "upright_section",
+          "name": "Upright Section",
+          "type": "body"
+        },
+        {
+          "description": "Through hole in the base for mounting.",
+          "id": "central_hole",
+          "name": "Central Through Hole",
+          "type": "hole"
+        },
+        {
+          "description": "Semi-circular notch at the left end of the base.",
+          "id": "end_notch",
+          "name": "End Notch",
+          "type": "hole"
+        },
+        {
+          "description": "Rectangular slot on the top of the upright.",
+          "id": "top_slot",
+          "name": "Top Rectangular Slot",
+          "type": "slot"
+        }
+      ],
+      "operation_updates": [
+        {
+          "assumption": null,
+          "id": "upright_section",
+          "parameters": {
+            "height": "upright_height",
+            "length": "upright_thickness",
+            "width": "overall_width"
+          },
+          "placement": {
+            "origin": [
+              "overall_length - upright_thickness",
+              0,
+              "base_height"
+            ]
+          },
+          "status": "implemented"
+        },
+        {
+          "assumption": null,
+          "id": "top_slot",
+          "parameters": {
+            "depth": "slot_depth",
+            "length": "slot_width",
+            "width": "overall_width"
+          },
+          "placement": {
+            "origin": [
+              "slot_center_x",
+              "slot_center_y",
+              "overall_height"
+            ]
+          },
+          "status": "implemented"
+        }
+      ],
+      "repaired_feature_ids": [
+        "upright_section",
+        "top_slot"
+      ]
+    },
+    "user_feedback": "Automatic repair for geometry_validation: Generated model bounding box does not match declared overall dimensions"
+  }
+]

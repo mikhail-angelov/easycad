@@ -1,0 +1,152 @@
+{
+  "analysis": {
+    "construction_strategy": "1. Create a base rectangular extrusion of 100x50mm. 2. Apply a shell command with 5mm thickness or create two rectangular pocket cuts. 3. Ensure the central divider is maintained at the 50mm mark along the length.",
+    "dimensions": [
+      {
+        "id": "dim_l",
+        "label": "L",
+        "unit": "mm",
+        "value": 100
+      },
+      {
+        "id": "dim_w",
+        "label": "W",
+        "unit": "mm",
+        "value": 50
+      },
+      {
+        "description": "Wall thickness inferred from text 'WALL T5'",
+        "id": "dim_t",
+        "label": "T",
+        "unit": "mm",
+        "value": 5
+      }
+    ],
+    "features": [
+      {
+        "confidence": 1.0,
+        "depends_on": [],
+        "evidence": {
+          "dimension_ids": [
+            "dim_l",
+            "dim_w"
+          ],
+          "source_view_ids": [
+            "top_view"
+          ]
+        },
+        "id": "main_body",
+        "name": "Outer Rectangular Block",
+        "operation_hint": "add",
+        "profile": "Rectangle 100x50",
+        "type": "body"
+      },
+      {
+        "confidence": 0.9,
+        "depends_on": [
+          "main_body"
+        ],
+        "evidence": {
+          "dimension_ids": [
+            "dim_t"
+          ],
+          "source_view_ids": [
+            "top_view"
+          ]
+        },
+        "id": "internal_pocket_left",
+        "name": "Left Internal Cavity",
+        "operation_hint": "cut",
+        "placement": {
+          "offset_x": 5,
+          "offset_y": 5,
+          "reference": "Top-left corner"
+        },
+        "profile": "Rectangular cavity with 5mm wall offset",
+        "target": "main_body",
+        "type": "pocket"
+      },
+      {
+        "confidence": 0.9,
+        "depends_on": [
+          "main_body"
+        ],
+        "evidence": {
+          "dimension_ids": [
+            "dim_t"
+          ],
+          "source_view_ids": [
+            "top_view"
+          ]
+        },
+        "id": "internal_pocket_right",
+        "name": "Right Internal Cavity",
+        "operation_hint": "cut",
+        "placement": {
+          "offset_x": -5,
+          "offset_y": 5,
+          "reference": "Top-right corner"
+        },
+        "profile": "Rectangular cavity with 5mm wall offset",
+        "target": "main_body",
+        "type": "pocket"
+      },
+      {
+        "confidence": 0.95,
+        "depends_on": [
+          "main_body"
+        ],
+        "evidence": {
+          "source_view_ids": [
+            "top_view"
+          ]
+        },
+        "id": "central_divider",
+        "name": "Central Rib",
+        "operation_hint": "add",
+        "placement": {
+          "axis": "Y-axis",
+          "reference": "Center of L dimension"
+        },
+        "profile": "Vertical wall dividing the shell into two equal halves",
+        "target": "main_body",
+        "type": "rib"
+      }
+    ],
+    "overall_shape": "A rectangular open-top box divided into two equal compartments by a central vertical wall.",
+    "title": "SHELLS - VARIANT 4",
+    "uncertainties": [
+      {
+        "description": "The height (Z-dimension) of the shell is not specified in the drawing.",
+        "feature_id": "all"
+      },
+      {
+        "description": "The thickness of the central divider is not explicitly labeled, though it appears to match the outer wall thickness (T5).",
+        "feature_id": "central_divider"
+      },
+      {
+        "description": "The text 'OPEN TOP' suggests the pockets are through-all or have no top face, but the bottom thickness is not defined.",
+        "feature_id": "internal_pocket_left"
+      }
+    ],
+    "units": "millimeters",
+    "views": [
+      {
+        "description": "Top-down view showing the rectangular shell with a central divider",
+        "id": "top_view",
+        "type": "top"
+      }
+    ]
+  },
+  "capability": "shells",
+  "detected": true,
+  "dimension_errors_mm": [
+    0.0,
+    0.0
+  ],
+  "expected_dimensions_mm": [
+    100,
+    50
+  ],
+  "variant": "rotated"
+}

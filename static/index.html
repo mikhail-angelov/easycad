@@ -395,7 +395,6 @@
       $('visualIssueList').innerHTML = '';
       $('assumptionList').innerHTML = '';
       $('errorDetails').textContent = '';
-      $('sourceText').value = '';
       document.title = 'EasyCAD';
       disableProjectButtons();
     }
@@ -504,8 +503,23 @@
       }
       renderProject();
       enableProjectButtons();
-      setStatus(result.status === 'success' ? 'Generated project' : 'Generated project needs review', result.status === 'success' ? 'ok' : '');
-      if (result.status === 'success') await generatePreview();
+      const canPreview = (state.project.feature_graph?.operations || []).some(
+        operation => ['implemented', 'approximated'].includes(operation.status)
+      ) && Boolean(state.project.cad?.source);
+      if (canPreview) {
+        try {
+          await generatePreview();
+        } catch (error) {
+          setStatus(`Generated project needs review; preview unavailable: ${error.message}`, 'err');
+          return;
+        }
+      }
+      setStatus(
+        result.status === 'success'
+          ? 'Generated project'
+          : canPreview ? 'Generated project needs review; preview is not verified' : 'Generated project needs review',
+        result.status === 'success' ? 'ok' : ''
+      );
     }
 
     async function startSelectedFile() {

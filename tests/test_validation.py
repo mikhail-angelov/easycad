@@ -3,7 +3,7 @@ from __future__ import annotations
 import unittest
 from pathlib import Path
 
-from app.main import load_project_json
+from app.main import export, load_project_json, PreviewRequest
 from app.feature_compiler import CompilerError, compile_project_feature_graph
 from app.models import FeatureGraph
 from app.validator import ValidationError, parameter_references, validate_project, validate_source
@@ -21,6 +21,19 @@ class ValidationTests(unittest.TestCase):
         for name in ("bolt_fixture.json", "bracket_fixture.json"):
             with self.subTest(name=name):
                 validate_project(self.load_fixture(name))
+
+    def test_legacy_source_only_project_loads_needs_review_and_cannot_export(self):
+        payload = (ROOT / "projects" / "bracket_fixture.json").read_text(encoding="utf-8")
+        raw = __import__("json").loads(payload)
+        raw.pop("feature_graph")
+        raw["cad"].pop("source_kind", None)
+
+        project = load_project_json(__import__("json").dumps(raw))
+
+        self.assertEqual(project.generation.status, "needs_review")
+        self.assertEqual(project.generation.error["stage"], "legacy_project")
+        with self.assertRaisesRegex(Exception, "Legacy source-only"):
+            export(PreviewRequest(project=project), format="stl")
 
     def test_forbidden_source_is_rejected(self):
         with self.assertRaisesRegex(ValidationError, "Import is not allowed"):

@@ -181,6 +181,19 @@
       "editable": false
     }
   },
+  "feature_graph": {
+    "operations": [
+      {
+        "id": "base",
+        "type": "box",
+        "operation": "add",
+        "parameters": {"length": "overall_length", "width": "overall_width", "height": "base_thickness"},
+        "status": "implemented",
+        "implementation": "base",
+        "capability_status": "supported"
+      }
+    ]
+  },
   "feature_summary": [
     {
       "id": "base",
@@ -213,6 +226,7 @@
   ],
   "cad": {
     "language": "cadquery-python",
+    "source_kind": "compiled",
     "source": "p = PARAMETERS\n\nbase = cq.Workplane(\"XY\").box(p[\"overall_length\"], p[\"overall_width\"], p[\"base_thickness\"], centered=False)\n\nupright = cq.Workplane(\"XY\").box(p[\"upright_length\"], p[\"overall_width\"], p[\"upright_height\"], centered=False).translate((p[\"overall_length\"] - p[\"upright_length\"], 0, p[\"base_thickness\"]))\n\nbody = base.union(upright)\n\ngroove = cq.Workplane(\"XY\").box(p[\"upright_length\"], p[\"groove_width\"], p[\"groove_depth\"], centered=False).translate((p[\"overall_length\"] - p[\"upright_length\"], (p[\"overall_width\"] - p[\"groove_width\"]) / 2, p[\"overall_height\"] - p[\"groove_depth\"]))\n\nwith_groove = body.cut(groove)\n\nmain_hole = cq.Workplane(\"XY\").circle(p[\"main_hole_diameter\"] / 2).extrude(p[\"base_thickness\"] + 2).translate((p[\"main_hole_x\"], p[\"overall_width\"] / 2, -1))\n\nwith_main_hole = with_groove.cut(main_hole)\n\nfront_notch = cq.Workplane(\"XY\").circle(p[\"front_notch_radius\"]).extrude(p[\"base_thickness\"] + 2).translate((0, p[\"overall_width\"] / 2, -1))\n\nresult = with_main_hole.cut(front_notch)\n",
     "entry_variable": "result",
     "generation_attempt": 1

@@ -1,0 +1,126 @@
+{
+  "analysis": {
+    "construction_strategy": "1. Create a rectangular sketch of 80mm x 40mm and extrude to an arbitrary thickness. 2. Create a circular sketch of diameter 5mm. 3. Apply a polar pattern to the circular sketch with a count of 5. 4. Perform a cut operation through the base plate using the patterned circles.",
+    "dimensions": [
+      {
+        "id": "dim_l80",
+        "parameter": "length",
+        "unit": "mm",
+        "value": 80
+      },
+      {
+        "id": "dim_w40",
+        "parameter": "width",
+        "unit": "mm",
+        "value": 40
+      },
+      {
+        "id": "dim_d5",
+        "parameter": "diameter",
+        "unit": "mm",
+        "value": 5
+      },
+      {
+        "id": "dim_count5",
+        "parameter": "quantity",
+        "unit": "count",
+        "value": 5
+      }
+    ],
+    "features": [
+      {
+        "confidence": 1.0,
+        "depends_on": [],
+        "evidence": {
+          "dimension_ids": [
+            "dim_l80",
+            "dim_w40"
+          ],
+          "source_view_ids": [
+            "top_view"
+          ]
+        },
+        "id": "base_plate",
+        "name": "Base Plate",
+        "operation_hint": "add",
+        "placement": {
+          "origin": [
+            0,
+            0,
+            0
+          ],
+          "plane": "XY"
+        },
+        "profile": "rectangular",
+        "target": null,
+        "type": "body"
+      },
+      {
+        "confidence": 0.9,
+        "depends_on": [
+          "base_plate"
+        ],
+        "evidence": {
+          "dimension_ids": [
+            "dim_d5",
+            "dim_count5"
+          ],
+          "source_view_ids": [
+            "top_view"
+          ]
+        },
+        "id": "polar_perforations",
+        "name": "Circular Perforations",
+        "operation_hint": "cut",
+        "pattern": {
+          "angle_deg": 72,
+          "axis": "Z",
+          "count": 5,
+          "type": "polar"
+        },
+        "profile": "circular",
+        "target": "base_plate",
+        "type": "perforation"
+      }
+    ],
+    "overall_shape": "A rectangular flat plate containing five circular holes arranged in a polar pattern.",
+    "title": "POLAR PERFORATIONS - VARIANT 2",
+    "uncertainties": [
+      {
+        "description": "The thickness of the solid part is not specified in the drawing.",
+        "id": "thickness"
+      },
+      {
+        "description": "The exact coordinates for the center of the polar pattern are not dimensioned, though it appears centered on the plate.",
+        "id": "pattern_center"
+      },
+      {
+        "description": "The pitch circle diameter (PCD) or radius for the polar arrangement of holes is not specified.",
+        "id": "pattern_radius"
+      },
+      {
+        "description": "The starting angle of the first hole in the polar pattern is not explicitly dimensioned.",
+        "id": "pattern_orientation"
+      }
+    ],
+    "units": "millimeters",
+    "views": [
+      {
+        "description": "Plan view showing the rectangular plate and the polar arrangement of circular perforations",
+        "id": "top_view",
+        "type": "top"
+      }
+    ]
+  },
+  "capability": "polar_perforations",
+  "detected": true,
+  "dimension_errors_mm": [
+    0.0,
+    0.0
+  ],
+  "expected_dimensions_mm": [
+    80,
+    40
+  ],
+  "variant": "resized"
+}

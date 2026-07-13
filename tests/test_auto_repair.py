@@ -67,6 +67,20 @@ class AutoRepairTests(unittest.TestCase):
         self.assertEqual(result["project"]["generation"]["geometry_status"], "success")
         self.assertEqual(result["project"]["generation"]["semantic_status"], "failed")
 
+    def test_invalid_structured_repair_returns_needs_review(self):
+        project = self.make_plate_project()
+
+        async def invalid_repair(*args, **kwargs):
+            raise main.GenerationError("cad_generation", "Invalid operation update")
+
+        with patch.object(main, "run_project", side_effect=RunnerError("cadquery_execution", "failed")), patch.object(
+            main, "repair_project", invalid_repair
+        ):
+            result = asyncio.run(main.finalize_project_with_auto_repair(project))
+
+        self.assertEqual(result["status"], "needs_review")
+        self.assertEqual(result["project"]["generation"]["error"]["stage"], "repair_generation")
+
     def test_export_rejects_unresolved_high_confidence_feature_before_any_format(self):
         project = self.make_plate_project()
         project.feature_coverage = FeatureCoverageReport.model_validate(

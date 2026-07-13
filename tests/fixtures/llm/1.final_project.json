@@ -1,6 +1,47 @@
 {
   "analysis": {
-    "dimensions": [],
+    "dimensions": [
+      {
+        "id": "overall_length",
+        "value": 90
+      },
+      {
+        "id": "overall_width",
+        "value": 50
+      },
+      {
+        "id": "overall_height",
+        "value": 60
+      },
+      {
+        "id": "base_height",
+        "value": 25
+      },
+      {
+        "id": "upright_thickness",
+        "value": 30
+      },
+      {
+        "id": "slot_width",
+        "value": 30
+      },
+      {
+        "id": "slot_depth",
+        "value": 10
+      },
+      {
+        "id": "hole_diameter",
+        "value": 30
+      },
+      {
+        "id": "hole_center_from_left",
+        "value": 40
+      },
+      {
+        "id": "notch_radius",
+        "value": 15
+      }
+    ],
     "features": [
       {
         "confidence": 1.0,
@@ -8,17 +49,16 @@
         "evidence": {
           "dimension_ids": [
             "overall_length",
-            "overall_height",
-            "base_height",
-            "upright_thickness"
+            "overall_width",
+            "base_height"
           ],
           "source_view_ids": [
             "front_view",
             "top_view"
           ]
         },
-        "id": "base_body",
-        "name": "L-Shaped Base",
+        "id": "base_block",
+        "name": "Base Block",
         "operation_hint": "add",
         "placement": {
           "origin": [
@@ -28,14 +68,40 @@
           ],
           "plane": "XY"
         },
-        "profile": "L-shape profile with 90mm length and 60mm height",
+        "profile": "Rectangular 90x50",
         "target": null,
         "type": "body"
       },
       {
         "confidence": 1.0,
         "depends_on": [
-          "base_body"
+          "base_block"
+        ],
+        "evidence": {
+          "dimension_ids": [
+            "overall_height",
+            "upright_thickness"
+          ],
+          "source_view_ids": [
+            "front_view",
+            "right_view"
+          ]
+        },
+        "id": "upright_section",
+        "name": "Upright Section",
+        "operation_hint": "add",
+        "placement": {
+          "height_above_base": 35,
+          "reference": "base_block_top_rear"
+        },
+        "profile": "Rectangular 30x50",
+        "target": "base_block",
+        "type": "body"
+      },
+      {
+        "confidence": 1.0,
+        "depends_on": [
+          "base_block"
         ],
         "evidence": {
           "dimension_ids": [
@@ -48,45 +114,44 @@
           ]
         },
         "id": "central_hole",
-        "name": "Vertical Through Hole",
+        "name": "Central Through Hole",
         "operation_hint": "cut",
         "placement": {
-          "axis": "Z",
-          "offset": 40,
-          "reference": "left_edge"
+          "center_x": 40,
+          "center_y": 25
         },
-        "profile": "Circle diameter 30",
-        "target": "base_body",
+        "profile": "Circular diameter 30",
+        "target": "base_block",
         "type": "hole"
       },
       {
         "confidence": 0.9,
         "depends_on": [
-          "base_body"
+          "base_block"
         ],
         "evidence": {
           "dimension_ids": [
-            "semi_circle_radius"
+            "notch_radius"
           ],
           "source_view_ids": [
             "top_view"
           ]
         },
-        "id": "end_cutout",
-        "name": "Semi-circular End Cutout",
+        "id": "end_notch",
+        "name": "Semi-circular End Notch",
         "operation_hint": "cut",
         "placement": {
-          "axis": "Z",
-          "reference": "left_edge_center"
+          "center_x": 0,
+          "center_y": 25
         },
-        "profile": "Semi-circle centered on left edge",
-        "target": "base_body",
+        "profile": "Semi-circle radius 15",
+        "target": "base_block",
         "type": "hole"
       },
       {
         "confidence": 1.0,
         "depends_on": [
-          "base_body"
+          "upright_section"
         ],
         "evidence": {
           "dimension_ids": [
@@ -94,72 +159,94 @@
             "slot_depth"
           ],
           "source_view_ids": [
-            "side_view",
-            "front_view"
+            "right_view"
           ]
         },
         "id": "top_slot",
-        "name": "Rectangular Top Slot",
+        "name": "Top Rectangular Slot",
         "operation_hint": "cut",
         "placement": {
-          "axis": "Y",
-          "reference": "top_face_center"
+          "center_x_offset": 0,
+          "top_surface": true
         },
-        "profile": "Rectangle 30x10",
-        "target": "base_body",
+        "profile": "Rectangular 30x10",
+        "target": "upright_section",
         "type": "slot"
       }
     ],
-    "uncertainties": [],
+    "uncertainties": [
+      {
+        "description": "The dimension for the base thickness (25mm) is inferred from the front view as it is not explicitly labeled but matches the scale of other 30mm segments.",
+        "id": "base_height_value"
+      },
+      {
+        "description": "The notch radius is inferred to be 15mm based on the symmetry and the 30mm diameter of the adjacent hole.",
+        "id": "notch_radius"
+      },
+      {
+        "description": "The top slot is assumed to be centered on the 50mm width, leaving 10mm walls on either side.",
+        "id": "slot_centering"
+      }
+    ],
     "views": [
       {
-        "description": "Shows the L-profile and vertical dimensions",
-        "id": "front_view",
-        "type": "orthographic"
+        "description": "Side elevation showing L-profile and vertical hole centerlines",
+        "id": "front_view"
       },
       {
-        "description": "Shows the footprint, circular hole, and semi-circular cutout",
-        "id": "top_view",
-        "type": "orthographic"
+        "description": "Plan view showing overall footprint, circular hole, and semi-circular notch",
+        "id": "top_view"
       },
       {
-        "description": "Shows the width and the top rectangular slot",
-        "id": "side_view",
-        "type": "orthographic"
+        "description": "End elevation showing width and top rectangular slot",
+        "id": "right_view"
       },
       {
-        "description": "3D representation of the part",
-        "id": "isometric_view",
-        "type": "perspective"
+        "description": "3D perspective of the part",
+        "id": "isometric_view"
       }
     ]
   },
   "assumptions": [
-    "Base height and upright thickness are assumed equal to 20mm as typical for L-brackets; adjust if different.",
-    "Semi-circle radius assumed 15mm based on typical proportion; adjust if dimension available.",
-    "Slot is centered on the top face of the upright section."
+    "Base height of 25mm inferred from front view scale.",
+    "Notch radius of 15mm inferred from symmetry with hole diameter.",
+    "Top slot centered on width (50mm) leaving 10mm walls on each side.",
+    "Notch approximated as a full through hole; actual semi-circular shape requires a pocket operation.",
+    "Upright section origin corrected to (overall_length - upright_thickness, 0, base_height) to align with base block rear edge."
   ],
   "cad": {
     "entry_variable": "result",
-    "generation_attempt": 1,
+    "generation_attempt": 3,
+    "implemented_feature_ids": [
+      "base_block",
+      "central_hole",
+      "end_notch"
+    ],
     "language": "cadquery-python",
-    "source": "p = PARAMETERS\n\nbase = cq.Workplane(\"XY\").box(p[\"overall_length\"], p[\"overall_width\"], p[\"base_height\"], centered=False)\n\nupright = (\n    cq.Workplane(\"XY\")\n    .box(p[\"upright_thickness\"], p[\"overall_width\"], p[\"overall_height\"] - p[\"base_height\"], centered=False)\n    .translate((p[\"overall_length\"] - p[\"upright_thickness\"], 0, p[\"base_height\"]))\n)\n\nbody = base.union(upright)\n\nmain_hole = (\n    cq.Workplane(\"XY\")\n    .circle(p[\"hole_diameter\"] / 2)\n    .extrude(p[\"base_height\"] + 2)\n    .translate((p[\"hole_center_from_left\"], p[\"overall_width\"] / 2, -1))\n)\n\nwith_main_hole = body.cut(main_hole)\n\nfront_notch = (\n    cq.Workplane(\"XY\")\n    .circle(p[\"end_notch_radius\"])\n    .extrude(p[\"base_height\"] + 2)\n    .translate((0, p[\"overall_width\"] / 2, -1))\n)\n\nwith_notch = with_main_hole.cut(front_notch)\n\ntop_slot = (\n    cq.Workplane(\"XY\")\n    .box(p[\"upright_thickness\"], p[\"top_slot_width\"], p[\"top_slot_depth\"], centered=False)\n    .translate((p[\"overall_length\"] - p[\"upright_thickness\"], (p[\"overall_width\"] - p[\"top_slot_width\"]) / 2, p[\"overall_height\"] - p[\"top_slot_depth\"]))\n)\n\nresult = with_notch.cut(top_slot)\n"
+    "source": "p = PARAMETERS\n\n# feature:base_block\nbase_block_shape = (\n    cq.Workplane(\"XY\").box(p[\"overall_length\"], p[\"overall_width\"], p[\"base_height\"], centered=False).translate((0, 0, 0))\n)\nbase_block = base_block_shape\n\n# feature:central_hole\ncentral_hole_shape = (\n    cq.Workplane(\"XY\").circle(p[\"hole_diameter\"] / 2).extrude(p[\"base_height\"]).translate((p[\"hole_center_from_left\"], p[\"hole_center_y\"], 0))\n)\ncentral_hole = base_block.cut(central_hole_shape)\n\n# feature:end_notch\nend_notch_shape = (\n    cq.Workplane(\"XY\").circle(p[\"notch_radius\"] / 2).extrude(p[\"base_height\"]).translate((0, p[\"hole_center_y\"], 0))\n)\nend_notch = central_hole.cut(end_notch_shape)\n\nFEATURE_PREDECESSORS = {\"central_hole\": \"base_block\", \"end_notch\": \"central_hole\"}\nresult = end_notch\n",
+    "source_kind": "compiled"
   },
-  "created_at": "2026-07-12T11:05:38.679891Z",
+  "created_at": "2026-07-13T05:18:17.173533Z",
   "feature_coverage": {
     "all_accounted_for": true,
     "entries": [
       {
         "confidence": 1.0,
         "explanation": null,
-        "feature_id": "base_body",
+        "feature_id": "base_block",
         "operation_ids": [
-          "base_body",
-          "central_hole",
-          "end_cutout",
-          "top_slot"
+          "base_block"
         ],
         "status": "implemented"
+      },
+      {
+        "confidence": 1.0,
+        "explanation": "Repair contains an expression not represented by declared parameters.",
+        "feature_id": "upright_section",
+        "operation_ids": [
+          "upright_section"
+        ],
+        "status": "unsupported"
       },
       {
         "confidence": 1.0,
@@ -172,29 +259,30 @@
       },
       {
         "confidence": 0.9,
-        "explanation": null,
-        "feature_id": "end_cutout",
+        "explanation": "Notch approximated as a full through hole; actual semi-circular notch requires a pocket operation, but hole is used for simplicity.",
+        "feature_id": "end_notch",
         "operation_ids": [
-          "end_cutout"
+          "end_notch"
         ],
         "status": "implemented"
       },
       {
         "confidence": 1.0,
-        "explanation": null,
+        "explanation": "Target operation is unsupported by the trusted compiler.",
         "feature_id": "top_slot",
         "operation_ids": [
           "top_slot"
         ],
-        "status": "implemented"
+        "status": "unsupported"
       }
     ],
-    "has_unresolved": false
+    "has_unresolved": true
   },
   "feature_graph": {
     "operations": [
       {
         "assumption": null,
+        "capability_status": "supported",
         "confidence": 1.0,
         "depends_on": [],
         "evidence": {
@@ -203,23 +291,84 @@
           "source": "inferred",
           "views": []
         },
-        "id": "base_body",
-        "implementation": "base_body",
+        "id": "base_block",
+        "implementation": "base_block",
+        "minimum_printable_thickness": null,
         "name": "",
         "operation": "add",
-        "parameters": {},
+        "parameters": {
+          "height": "base_height",
+          "length": "overall_length",
+          "width": "overall_width"
+        },
         "pattern": null,
-        "placement": null,
+        "placement": {
+          "axis": null,
+          "direction": null,
+          "offsets": {},
+          "origin": [
+            0,
+            0,
+            0
+          ],
+          "plane": null,
+          "reference": null,
+          "rotation_deg": null
+        },
         "profile": null,
         "source_feature_ids": [
-          "base_body"
+          "base_block"
         ],
         "status": "implemented",
         "target": null,
-        "type": "body"
+        "type": "box"
+      },
+      {
+        "assumption": "Repair contains an expression not represented by declared parameters.",
+        "capability_status": "unsupported",
+        "confidence": 1.0,
+        "depends_on": [],
+        "evidence": {
+          "dimension_ids": [],
+          "note": null,
+          "source": "inferred",
+          "views": []
+        },
+        "id": "upright_section",
+        "implementation": null,
+        "minimum_printable_thickness": null,
+        "name": "",
+        "operation": "add",
+        "parameters": {
+          "height": "upright_height",
+          "length": "upright_thickness",
+          "width": "overall_width"
+        },
+        "pattern": null,
+        "placement": {
+          "axis": null,
+          "direction": null,
+          "offsets": {},
+          "origin": [
+            "overall_length - upright_thickness",
+            0,
+            "base_height"
+          ],
+          "plane": null,
+          "reference": null,
+          "rotation_deg": null
+        },
+        "profile": null,
+        "source_feature_ids": [
+          "upright_section"
+        ],
+        "status": "unsupported",
+        "target": "base_block",
+        "type": "box"
       },
       {
         "assumption": null,
+        "capability_status": "supported",
         "confidence": 1.0,
         "depends_on": [],
         "evidence": {
@@ -230,22 +379,38 @@
         },
         "id": "central_hole",
         "implementation": "central_hole",
+        "minimum_printable_thickness": null,
         "name": "",
-        "operation": "add",
-        "parameters": {},
+        "operation": "cut",
+        "parameters": {
+          "depth": "base_height",
+          "diameter": "hole_diameter"
+        },
         "pattern": null,
-        "placement": null,
+        "placement": {
+          "axis": null,
+          "direction": null,
+          "offsets": {},
+          "origin": [
+            "hole_center_from_left",
+            "hole_center_y",
+            0
+          ],
+          "plane": null,
+          "reference": null,
+          "rotation_deg": null
+        },
         "profile": null,
         "source_feature_ids": [
-          "base_body",
           "central_hole"
         ],
         "status": "implemented",
-        "target": "base_body",
-        "type": "hole"
+        "target": "base_block",
+        "type": "through_hole"
       },
       {
-        "assumption": null,
+        "assumption": "Notch approximated as a full through hole; actual semi-circular notch requires a pocket operation, but hole is used for simplicity.",
+        "capability_status": "supported",
         "confidence": 0.9,
         "depends_on": [],
         "evidence": {
@@ -254,24 +419,40 @@
           "source": "inferred",
           "views": []
         },
-        "id": "end_cutout",
-        "implementation": "end_cutout",
+        "id": "end_notch",
+        "implementation": "end_notch",
+        "minimum_printable_thickness": null,
         "name": "",
-        "operation": "add",
-        "parameters": {},
+        "operation": "cut",
+        "parameters": {
+          "depth": "base_height",
+          "diameter": "notch_radius"
+        },
         "pattern": null,
-        "placement": null,
+        "placement": {
+          "axis": null,
+          "direction": null,
+          "offsets": {},
+          "origin": [
+            0,
+            "hole_center_y",
+            0
+          ],
+          "plane": null,
+          "reference": null,
+          "rotation_deg": null
+        },
         "profile": null,
         "source_feature_ids": [
-          "base_body",
-          "end_cutout"
+          "end_notch"
         ],
         "status": "implemented",
-        "target": "base_body",
+        "target": "base_block",
         "type": "hole"
       },
       {
-        "assumption": null,
+        "assumption": "Target operation is unsupported by the trusted compiler.",
+        "capability_status": "unsupported",
         "confidence": 1.0,
         "depends_on": [],
         "evidence": {
@@ -281,156 +462,732 @@
           "views": []
         },
         "id": "top_slot",
-        "implementation": "top_slot",
+        "implementation": null,
+        "minimum_printable_thickness": null,
         "name": "",
-        "operation": "add",
-        "parameters": {},
+        "operation": "cut",
+        "parameters": {
+          "depth": "slot_depth",
+          "length": "slot_width",
+          "width": "overall_width"
+        },
         "pattern": null,
-        "placement": null,
+        "placement": {
+          "axis": null,
+          "direction": null,
+          "offsets": {},
+          "origin": [
+            "slot_center_x",
+            "slot_center_y",
+            "overall_height"
+          ],
+          "plane": null,
+          "reference": null,
+          "rotation_deg": null
+        },
         "profile": null,
         "source_feature_ids": [
-          "base_body",
           "top_slot"
         ],
-        "status": "implemented",
-        "target": "base_body",
+        "status": "unsupported",
+        "target": "upright_section",
         "type": "slot"
       }
     ]
   },
   "feature_summary": [
     {
-      "description": "Extruded L-profile forming the main body",
-      "id": "base_body",
-      "name": "L-Shaped Base",
+      "description": "Horizontal rectangular base of the L-bracket.",
+      "id": "base_block",
+      "name": "Base Block",
       "type": "body"
     },
     {
-      "description": "Circular through hole on the base",
+      "description": "Vertical rectangular upright attached to the base.",
+      "id": "upright_section",
+      "name": "Upright Section",
+      "type": "body"
+    },
+    {
+      "description": "Through hole in the base for mounting.",
       "id": "central_hole",
-      "name": "Vertical Through Hole",
+      "name": "Central Through Hole",
       "type": "hole"
     },
     {
-      "description": "Semi-circular notch on the left edge",
-      "id": "end_cutout",
-      "name": "Semi-circular End Cutout",
+      "description": "Semi-circular notch at the left end of the base.",
+      "id": "end_notch",
+      "name": "End Notch",
       "type": "hole"
     },
     {
-      "description": "Rectangular slot on the top face of the upright",
+      "description": "Rectangular slot on the top of the upright.",
       "id": "top_slot",
-      "name": "Rectangular Top Slot",
+      "name": "Top Rectangular Slot",
       "type": "slot"
     }
   ],
   "generation": {
-    "bounding_box": {
-      "x": 90.0,
-      "y": 50.0,
-      "z": 60.0
+    "bounding_box": null,
+    "error": {
+      "detail": {
+        "bounding_box": {
+          "x": 90.0,
+          "y": 50.0,
+          "z": 25.0
+        },
+        "expected": {
+          "x": 90.0,
+          "y": 50.0,
+          "z": 60.0
+        },
+        "mismatches": [
+          "z: expected 60, got 25"
+        ]
+      },
+      "message": "Generated model bounding box does not match declared overall dimensions",
+      "stage": "geometry_validation"
     },
-    "error": null,
-    "execution_time_ms": 4293,
-    "solid_count": 1,
-    "status": "success",
-    "volume_mm3": 102794.24958826885,
+    "execution_time_ms": null,
+    "feature_measurements": {},
+    "geometry_status": "success",
+    "render_artifacts": {},
+    "semantic_status": "failed",
+    "solid_count": null,
+    "status": "needs_review",
+    "syntax_status": "success",
+    "visual_comparison": {
+      "issues": [],
+      "match_score": null,
+      "status": "not_run"
+    },
+    "volume_mm3": null,
     "warnings": []
   },
-  "generation_history": [],
-  "id": "b304b2fa-9ad6-44f9-9dc4-f5c6db098bbd",
+  "generation_history": [
+    {
+      "attempt": 1,
+      "cad_source": "p = PARAMETERS\n\n# feature:base_block\nbase_block_shape = (\n    cq.Workplane(\"XY\").box(p[\"overall_length\"], p[\"overall_width\"], p[\"base_height\"], centered=False).translate((0, 0, 0))\n)\nbase_block = base_block_shape\n\n# feature:upright_section\nupright_section_shape = (\n    cq.Workplane(\"XY\").box(p[\"upright_thickness\"], p[\"overall_width\"], p[\"upright_height\"], centered=False).translate((p[\"overall_length\"], 0, p[\"base_height\"]))\n)\nupright_section = base_block.union(upright_section_shape)\n\n# feature:central_hole\ncentral_hole_shape = (\n    cq.Workplane(\"XY\").circle(p[\"hole_diameter\"] / 2).extrude(p[\"base_height\"]).translate((p[\"hole_center_from_left\"], p[\"hole_center_y\"], 0))\n)\ncentral_hole = upright_section.cut(central_hole_shape)\n\n# feature:end_notch\nend_notch_shape = (\n    cq.Workplane(\"XY\").circle(p[\"notch_radius\"] / 2).extrude(p[\"base_height\"]).translate((0, p[\"hole_center_y\"], 0))\n)\nend_notch = central_hole.cut(end_notch_shape)\n\n# feature:top_slot\ntop_slot_shape = (\n    cq.Workplane(\"XY\").slot2D(p[\"slot_width\"], p[\"overall_width\"]).extrude(p[\"slot_depth\"]).translate((p[\"slot_center_x\"], p[\"slot_center_y\"], p[\"overall_height\"]))\n)\ntop_slot = end_notch.cut(top_slot_shape)\n\nFEATURE_PREDECESSORS = {\"central_hole\": \"upright_section\", \"end_notch\": \"central_hole\", \"top_slot\": \"end_notch\", \"upright_section\": \"base_block\"}\nresult = top_slot\n",
+      "created_at": "2026-07-13T05:18:23.320266Z",
+      "error": {
+        "detail": {
+          "duration_ms": 2209,
+          "error_type": "Standard_Failure",
+          "message": "Bnd_Box is void",
+          "returncode": 1,
+          "stage": "cadquery_execution",
+          "status": "error",
+          "traceback": "Traceback (most recent call last):\n  File \"/Users/ma/repo/easycad/worker/cadquery_worker.py\", line 41, in main"
+        },
+        "message": "Bnd_Box is void",
+        "stage": "cadquery_execution"
+      },
+      "feature_coverage": {
+        "all_accounted_for": true,
+        "entries": [
+          {
+            "confidence": 1.0,
+            "explanation": null,
+            "feature_id": "base_block",
+            "operation_ids": [
+              "base_block"
+            ],
+            "status": "implemented"
+          },
+          {
+            "confidence": 1.0,
+            "explanation": null,
+            "feature_id": "upright_section",
+            "operation_ids": [
+              "upright_section"
+            ],
+            "status": "implemented"
+          },
+          {
+            "confidence": 1.0,
+            "explanation": null,
+            "feature_id": "central_hole",
+            "operation_ids": [
+              "central_hole"
+            ],
+            "status": "implemented"
+          },
+          {
+            "confidence": 0.9,
+            "explanation": "Notch approximated as a full through hole; actual semi-circular notch requires a pocket operation, but hole is used for simplicity.",
+            "feature_id": "end_notch",
+            "operation_ids": [
+              "end_notch"
+            ],
+            "status": "approximated"
+          },
+          {
+            "confidence": 1.0,
+            "explanation": null,
+            "feature_id": "top_slot",
+            "operation_ids": [
+              "top_slot"
+            ],
+            "status": "implemented"
+          }
+        ],
+        "has_unresolved": false
+      },
+      "feature_graph": {
+        "operations": [
+          {
+            "assumption": null,
+            "capability_status": "supported",
+            "confidence": 1.0,
+            "depends_on": [],
+            "evidence": {
+              "dimension_ids": [],
+              "note": null,
+              "source": "inferred",
+              "views": []
+            },
+            "id": "base_block",
+            "implementation": "base_block",
+            "minimum_printable_thickness": null,
+            "name": "",
+            "operation": "add",
+            "parameters": {
+              "height": "base_height",
+              "length": "overall_length",
+              "width": "overall_width"
+            },
+            "pattern": null,
+            "placement": {
+              "axis": null,
+              "direction": null,
+              "offsets": {},
+              "origin": [
+                0,
+                0,
+                0
+              ],
+              "plane": null,
+              "reference": null,
+              "rotation_deg": null
+            },
+            "profile": null,
+            "source_feature_ids": [
+              "base_block"
+            ],
+            "status": "implemented",
+            "target": null,
+            "type": "box"
+          },
+          {
+            "assumption": null,
+            "capability_status": "supported",
+            "confidence": 1.0,
+            "depends_on": [],
+            "evidence": {
+              "dimension_ids": [],
+              "note": null,
+              "source": "inferred",
+              "views": []
+            },
+            "id": "upright_section",
+            "implementation": "upright_section",
+            "minimum_printable_thickness": null,
+            "name": "",
+            "operation": "add",
+            "parameters": {
+              "height": "upright_height",
+              "length": "upright_thickness",
+              "width": "overall_width"
+            },
+            "pattern": null,
+            "placement": {
+              "axis": null,
+              "direction": null,
+              "offsets": {},
+              "origin": [
+                "overall_length",
+                0,
+                "base_height"
+              ],
+              "plane": null,
+              "reference": null,
+              "rotation_deg": null
+            },
+            "profile": null,
+            "source_feature_ids": [
+              "upright_section"
+            ],
+            "status": "implemented",
+            "target": "base_block",
+            "type": "box"
+          },
+          {
+            "assumption": null,
+            "capability_status": "supported",
+            "confidence": 1.0,
+            "depends_on": [],
+            "evidence": {
+              "dimension_ids": [],
+              "note": null,
+              "source": "inferred",
+              "views": []
+            },
+            "id": "central_hole",
+            "implementation": "central_hole",
+            "minimum_printable_thickness": null,
+            "name": "",
+            "operation": "cut",
+            "parameters": {
+              "depth": "base_height",
+              "diameter": "hole_diameter"
+            },
+            "pattern": null,
+            "placement": {
+              "axis": null,
+              "direction": null,
+              "offsets": {},
+              "origin": [
+                "hole_center_from_left",
+                "hole_center_y",
+                0
+              ],
+              "plane": null,
+              "reference": null,
+              "rotation_deg": null
+            },
+            "profile": null,
+            "source_feature_ids": [
+              "central_hole"
+            ],
+            "status": "implemented",
+            "target": "base_block",
+            "type": "through_hole"
+          },
+          {
+            "assumption": "Notch approximated as a full through hole; actual semi-circular notch requires a pocket operation, but hole is used for simplicity.",
+            "capability_status": "supported",
+            "confidence": 0.9,
+            "depends_on": [],
+            "evidence": {
+              "dimension_ids": [],
+              "note": null,
+              "source": "inferred",
+              "views": []
+            },
+            "id": "end_notch",
+            "implementation": "end_notch",
+            "minimum_printable_thickness": null,
+            "name": "",
+            "operation": "cut",
+            "parameters": {
+              "depth": "base_height",
+              "diameter": "notch_radius"
+            },
+            "pattern": null,
+            "placement": {
+              "axis": null,
+              "direction": null,
+              "offsets": {},
+              "origin": [
+                0,
+                "hole_center_y",
+                0
+              ],
+              "plane": null,
+              "reference": null,
+              "rotation_deg": null
+            },
+            "profile": null,
+            "source_feature_ids": [
+              "end_notch"
+            ],
+            "status": "implemented",
+            "target": "base_block",
+            "type": "hole"
+          },
+          {
+            "assumption": null,
+            "capability_status": "supported",
+            "confidence": 1.0,
+            "depends_on": [],
+            "evidence": {
+              "dimension_ids": [],
+              "note": null,
+              "source": "inferred",
+              "views": []
+            },
+            "id": "top_slot",
+            "implementation": "top_slot",
+            "minimum_printable_thickness": null,
+            "name": "",
+            "operation": "cut",
+            "parameters": {
+              "depth": "slot_depth",
+              "length": "slot_width",
+              "width": "overall_width"
+            },
+            "pattern": null,
+            "placement": {
+              "axis": null,
+              "direction": null,
+              "offsets": {},
+              "origin": [
+                "slot_center_x",
+                "slot_center_y",
+                "overall_height"
+              ],
+              "plane": null,
+              "reference": null,
+              "rotation_deg": null
+            },
+            "profile": null,
+            "source_feature_ids": [
+              "top_slot"
+            ],
+            "status": "implemented",
+            "target": "upright_section",
+            "type": "slot"
+          }
+        ]
+      },
+      "render_artifacts": {},
+      "repair_feature_ids": [
+        "upright_section"
+      ],
+      "status": "needs_review",
+      "visual_comparison": {
+        "issues": [],
+        "match_score": null,
+        "status": "not_run"
+      }
+    },
+    {
+      "attempt": 2,
+      "cad_source": "p = PARAMETERS\n\n# feature:base_block\nbase_block_shape = (\n    cq.Workplane(\"XY\").box(p[\"overall_length\"], p[\"overall_width\"], p[\"base_height\"], centered=False).translate((0, 0, 0))\n)\nbase_block = base_block_shape\n\n# feature:central_hole\ncentral_hole_shape = (\n    cq.Workplane(\"XY\").circle(p[\"hole_diameter\"] / 2).extrude(p[\"base_height\"]).translate((p[\"hole_center_from_left\"], p[\"hole_center_y\"], 0))\n)\ncentral_hole = base_block.cut(central_hole_shape)\n\n# feature:end_notch\nend_notch_shape = (\n    cq.Workplane(\"XY\").circle(p[\"notch_radius\"] / 2).extrude(p[\"base_height\"]).translate((0, p[\"hole_center_y\"], 0))\n)\nend_notch = central_hole.cut(end_notch_shape)\n\nFEATURE_PREDECESSORS = {\"central_hole\": \"base_block\", \"end_notch\": \"central_hole\"}\nresult = end_notch\n",
+      "created_at": "2026-07-13T05:18:30.655024Z",
+      "error": {
+        "detail": {
+          "bounding_box": {
+            "x": 90.0,
+            "y": 50.0,
+            "z": 25.0
+          },
+          "expected": {
+            "x": 90.0,
+            "y": 50.0,
+            "z": 60.0
+          },
+          "mismatches": [
+            "z: expected 60, got 25"
+          ]
+        },
+        "message": "Generated model bounding box does not match declared overall dimensions",
+        "stage": "geometry_validation"
+      },
+      "feature_coverage": {
+        "all_accounted_for": true,
+        "entries": [
+          {
+            "confidence": 1.0,
+            "explanation": null,
+            "feature_id": "base_block",
+            "operation_ids": [
+              "base_block"
+            ],
+            "status": "implemented"
+          },
+          {
+            "confidence": 1.0,
+            "explanation": "Repair contains an expression not represented by declared parameters.",
+            "feature_id": "upright_section",
+            "operation_ids": [
+              "upright_section"
+            ],
+            "status": "unsupported"
+          },
+          {
+            "confidence": 1.0,
+            "explanation": null,
+            "feature_id": "central_hole",
+            "operation_ids": [
+              "central_hole"
+            ],
+            "status": "implemented"
+          },
+          {
+            "confidence": 0.9,
+            "explanation": "Notch approximated as a full through hole; actual semi-circular notch requires a pocket operation, but hole is used for simplicity.",
+            "feature_id": "end_notch",
+            "operation_ids": [
+              "end_notch"
+            ],
+            "status": "implemented"
+          },
+          {
+            "confidence": 1.0,
+            "explanation": "Target operation is unsupported by the trusted compiler.",
+            "feature_id": "top_slot",
+            "operation_ids": [
+              "top_slot"
+            ],
+            "status": "unsupported"
+          }
+        ],
+        "has_unresolved": true
+      },
+      "feature_graph": {
+        "operations": [
+          {
+            "assumption": null,
+            "capability_status": "supported",
+            "confidence": 1.0,
+            "depends_on": [],
+            "evidence": {
+              "dimension_ids": [],
+              "note": null,
+              "source": "inferred",
+              "views": []
+            },
+            "id": "base_block",
+            "implementation": "base_block",
+            "minimum_printable_thickness": null,
+            "name": "",
+            "operation": "add",
+            "parameters": {
+              "height": "base_height",
+              "length": "overall_length",
+              "width": "overall_width"
+            },
+            "pattern": null,
+            "placement": {
+              "axis": null,
+              "direction": null,
+              "offsets": {},
+              "origin": [
+                0,
+                0,
+                0
+              ],
+              "plane": null,
+              "reference": null,
+              "rotation_deg": null
+            },
+            "profile": null,
+            "source_feature_ids": [
+              "base_block"
+            ],
+            "status": "implemented",
+            "target": null,
+            "type": "box"
+          },
+          {
+            "assumption": "Repair contains an expression not represented by declared parameters.",
+            "capability_status": "unsupported",
+            "confidence": 1.0,
+            "depends_on": [],
+            "evidence": {
+              "dimension_ids": [],
+              "note": null,
+              "source": "inferred",
+              "views": []
+            },
+            "id": "upright_section",
+            "implementation": null,
+            "minimum_printable_thickness": null,
+            "name": "",
+            "operation": "add",
+            "parameters": {
+              "height": "upright_height",
+              "length": "upright_thickness",
+              "width": "overall_width"
+            },
+            "pattern": null,
+            "placement": {
+              "axis": null,
+              "direction": null,
+              "offsets": {},
+              "origin": [
+                "overall_length - upright_thickness",
+                0,
+                "base_height"
+              ],
+              "plane": null,
+              "reference": null,
+              "rotation_deg": null
+            },
+            "profile": null,
+            "source_feature_ids": [
+              "upright_section"
+            ],
+            "status": "unsupported",
+            "target": "base_block",
+            "type": "box"
+          },
+          {
+            "assumption": null,
+            "capability_status": "supported",
+            "confidence": 1.0,
+            "depends_on": [],
+            "evidence": {
+              "dimension_ids": [],
+              "note": null,
+              "source": "inferred",
+              "views": []
+            },
+            "id": "central_hole",
+            "implementation": "central_hole",
+            "minimum_printable_thickness": null,
+            "name": "",
+            "operation": "cut",
+            "parameters": {
+              "depth": "base_height",
+              "diameter": "hole_diameter"
+            },
+            "pattern": null,
+            "placement": {
+              "axis": null,
+              "direction": null,
+              "offsets": {},
+              "origin": [
+                "hole_center_from_left",
+                "hole_center_y",
+                0
+              ],
+              "plane": null,
+              "reference": null,
+              "rotation_deg": null
+            },
+            "profile": null,
+            "source_feature_ids": [
+              "central_hole"
+            ],
+            "status": "implemented",
+            "target": "base_block",
+            "type": "through_hole"
+          },
+          {
+            "assumption": "Notch approximated as a full through hole; actual semi-circular notch requires a pocket operation, but hole is used for simplicity.",
+            "capability_status": "supported",
+            "confidence": 0.9,
+            "depends_on": [],
+            "evidence": {
+              "dimension_ids": [],
+              "note": null,
+              "source": "inferred",
+              "views": []
+            },
+            "id": "end_notch",
+            "implementation": "end_notch",
+            "minimum_printable_thickness": null,
+            "name": "",
+            "operation": "cut",
+            "parameters": {
+              "depth": "base_height",
+              "diameter": "notch_radius"
+            },
+            "pattern": null,
+            "placement": {
+              "axis": null,
+              "direction": null,
+              "offsets": {},
+              "origin": [
+                0,
+                "hole_center_y",
+                0
+              ],
+              "plane": null,
+              "reference": null,
+              "rotation_deg": null
+            },
+            "profile": null,
+            "source_feature_ids": [
+              "end_notch"
+            ],
+            "status": "implemented",
+            "target": "base_block",
+            "type": "hole"
+          },
+          {
+            "assumption": "Target operation is unsupported by the trusted compiler.",
+            "capability_status": "unsupported",
+            "confidence": 1.0,
+            "depends_on": [],
+            "evidence": {
+              "dimension_ids": [],
+              "note": null,
+              "source": "inferred",
+              "views": []
+            },
+            "id": "top_slot",
+            "implementation": null,
+            "minimum_printable_thickness": null,
+            "name": "",
+            "operation": "cut",
+            "parameters": {
+              "depth": "slot_depth",
+              "length": "slot_width",
+              "width": "overall_width"
+            },
+            "pattern": null,
+            "placement": {
+              "axis": null,
+              "direction": null,
+              "offsets": {},
+              "origin": [
+                "slot_center_x",
+                "slot_center_y",
+                "overall_height"
+              ],
+              "plane": null,
+              "reference": null,
+              "rotation_deg": null
+            },
+            "profile": null,
+            "source_feature_ids": [
+              "top_slot"
+            ],
+            "status": "unsupported",
+            "target": "upright_section",
+            "type": "slot"
+          }
+        ]
+      },
+      "render_artifacts": {},
+      "repair_feature_ids": [
+        "upright_section",
+        "top_slot"
+      ],
+      "status": "needs_review",
+      "visual_comparison": {
+        "issues": [],
+        "match_score": null,
+        "status": "not_run"
+      }
+    }
+  ],
+  "id": "91b72fc0-b141-41fc-ad13-5d8d3f9ad80d",
   "parameters": {
     "base_height": {
-      "confidence": 0.8,
+      "confidence": 0.9,
       "editable": true,
       "expression": null,
       "label": "Base Height",
-      "max": 100.0,
-      "min": 5.0,
+      "max": 30.0,
+      "min": 20.0,
       "options": [],
       "source": "drawing",
       "step": 1.0,
       "type": "number",
       "unit": "mm",
-      "value": 20.0
-    },
-    "base_length": {
-      "confidence": 1.0,
-      "editable": true,
-      "expression": null,
-      "label": "Base Length",
-      "max": 200.0,
-      "min": 10.0,
-      "options": [],
-      "source": "drawing",
-      "step": 1.0,
-      "type": "number",
-      "unit": "mm",
-      "value": 90.0
-    },
-    "base_width": {
-      "confidence": 1.0,
-      "editable": true,
-      "expression": null,
-      "label": "Base Width",
-      "max": 200.0,
-      "min": 10.0,
-      "options": [],
-      "source": "drawing",
-      "step": 1.0,
-      "type": "number",
-      "unit": "mm",
-      "value": 50.0
-    },
-    "central_block_height": {
-      "confidence": 0.7,
-      "editable": true,
-      "expression": null,
-      "label": "Central Block Height",
-      "max": 160.0,
-      "min": 1.0,
-      "options": [],
-      "source": "inferred",
-      "step": 1.0,
-      "type": "number",
-      "unit": "mm",
-      "value": 40.0
-    },
-    "end_notch_radius": {
-      "confidence": 0.6,
-      "editable": true,
-      "expression": null,
-      "label": "End Notch Radius",
-      "max": 60.0,
-      "min": 0.0,
-      "options": [],
-      "source": "assumed",
-      "step": 1.0,
-      "type": "number",
-      "unit": "mm",
-      "value": 15.0
-    },
-    "head_chamfer": {
-      "confidence": 0.65,
-      "editable": true,
-      "expression": null,
-      "label": "Head Chamfer",
-      "max": 5.0,
-      "min": 0.0,
-      "options": [],
-      "source": "inferred",
-      "step": 0.1,
-      "type": "number",
-      "unit": "mm",
-      "value": 1.5
+      "value": 25.0
     },
     "hole_center_from_left": {
       "confidence": 1.0,
       "editable": true,
       "expression": null,
       "label": "Hole Center from Left",
-      "max": 200.0,
-      "min": 5.0,
+      "max": 45.0,
+      "min": 35.0,
       "options": [],
       "source": "drawing",
       "step": 1.0,
@@ -438,13 +1195,27 @@
       "unit": "mm",
       "value": 40.0
     },
+    "hole_center_y": {
+      "confidence": 1.0,
+      "editable": false,
+      "expression": "overall_width/2",
+      "label": "Hole Center Y (half width)",
+      "max": null,
+      "min": null,
+      "options": [],
+      "source": "derived",
+      "step": 0.1,
+      "type": "expression",
+      "unit": "mm",
+      "value": null
+    },
     "hole_diameter": {
       "confidence": 1.0,
       "editable": true,
       "expression": null,
       "label": "Hole Diameter",
-      "max": 100.0,
-      "min": 5.0,
+      "max": 35.0,
+      "min": 25.0,
       "options": [],
       "source": "drawing",
       "step": 1.0,
@@ -452,27 +1223,27 @@
       "unit": "mm",
       "value": 30.0
     },
-    "notch_depth": {
-      "confidence": 0.7,
+    "notch_radius": {
+      "confidence": 0.9,
       "editable": true,
       "expression": null,
-      "label": "Notch Depth",
-      "max": 80.0,
-      "min": 1.0,
+      "label": "Notch Radius",
+      "max": 20.0,
+      "min": 10.0,
       "options": [],
-      "source": "inferred",
+      "source": "drawing",
       "step": 1.0,
       "type": "number",
       "unit": "mm",
-      "value": 20.0
+      "value": 15.0
     },
     "overall_height": {
       "confidence": 1.0,
       "editable": true,
       "expression": null,
       "label": "Overall Height",
-      "max": 200.0,
-      "min": 10.0,
+      "max": 70.0,
+      "min": 50.0,
       "options": [],
       "source": "drawing",
       "step": 1.0,
@@ -485,8 +1256,8 @@
       "editable": true,
       "expression": null,
       "label": "Overall Length",
-      "max": 200.0,
-      "min": 10.0,
+      "max": 100.0,
+      "min": 80.0,
       "options": [],
       "source": "drawing",
       "step": 1.0,
@@ -499,8 +1270,8 @@
       "editable": true,
       "expression": null,
       "label": "Overall Width",
-      "max": 200.0,
-      "min": 10.0,
+      "max": 60.0,
+      "min": 40.0,
       "options": [],
       "source": "drawing",
       "step": 1.0,
@@ -508,55 +1279,41 @@
       "unit": "mm",
       "value": 50.0
     },
-    "semi_circle_radius": {
-      "confidence": 0.9,
-      "editable": true,
-      "expression": null,
-      "label": "Semi-circle Radius",
-      "max": 100.0,
-      "min": 5.0,
+    "slot_center_x": {
+      "confidence": 1.0,
+      "editable": false,
+      "expression": "upright_thickness/2",
+      "label": "Slot Center X (half thickness)",
+      "max": null,
+      "min": null,
       "options": [],
-      "source": "drawing",
-      "step": 1.0,
-      "type": "number",
+      "source": "derived",
+      "step": 0.1,
+      "type": "expression",
       "unit": "mm",
-      "value": 15.0
+      "value": null
     },
-    "side_cut_depth": {
-      "confidence": 0.7,
-      "editable": true,
-      "expression": null,
-      "label": "Side Cut Depth",
-      "max": 40.0,
-      "min": 1.0,
+    "slot_center_y": {
+      "confidence": 1.0,
+      "editable": false,
+      "expression": "overall_width/2",
+      "label": "Slot Center Y (half width)",
+      "max": null,
+      "min": null,
       "options": [],
-      "source": "inferred",
-      "step": 1.0,
-      "type": "number",
+      "source": "derived",
+      "step": 0.1,
+      "type": "expression",
       "unit": "mm",
-      "value": 10.0
-    },
-    "side_cut_width": {
-      "confidence": 0.7,
-      "editable": true,
-      "expression": null,
-      "label": "Side Cut Width",
-      "max": 40.0,
-      "min": 1.0,
-      "options": [],
-      "source": "inferred",
-      "step": 1.0,
-      "type": "number",
-      "unit": "mm",
-      "value": 10.0
+      "value": null
     },
     "slot_depth": {
       "confidence": 1.0,
       "editable": true,
       "expression": null,
       "label": "Slot Depth",
-      "max": 50.0,
-      "min": 1.0,
+      "max": 15.0,
+      "min": 5.0,
       "options": [],
       "source": "drawing",
       "step": 1.0,
@@ -569,8 +1326,8 @@
       "editable": true,
       "expression": null,
       "label": "Slot Width",
-      "max": 100.0,
-      "min": 5.0,
+      "max": 35.0,
+      "min": 25.0,
       "options": [],
       "source": "drawing",
       "step": 1.0,
@@ -578,75 +1335,33 @@
       "unit": "mm",
       "value": 30.0
     },
-    "through_hole_diameter": {
+    "upright_height": {
       "confidence": 1.0,
-      "editable": true,
-      "expression": null,
-      "label": "Through Hole Diameter",
-      "max": 100.0,
-      "min": 5.0,
+      "editable": false,
+      "expression": "overall_height - base_height",
+      "label": "Upright Height",
+      "max": null,
+      "min": null,
       "options": [],
-      "source": "drawing",
-      "step": 1.0,
-      "type": "number",
+      "source": "derived",
+      "step": 0.1,
+      "type": "expression",
       "unit": "mm",
-      "value": 30.0
-    },
-    "top_slot_depth": {
-      "confidence": 1.0,
-      "editable": true,
-      "expression": null,
-      "label": "Top Slot Depth",
-      "max": 50.0,
-      "min": 1.0,
-      "options": [],
-      "source": "drawing",
-      "step": 1.0,
-      "type": "number",
-      "unit": "mm",
-      "value": 10.0
-    },
-    "top_slot_width": {
-      "confidence": 1.0,
-      "editable": true,
-      "expression": null,
-      "label": "Top Slot Width",
-      "max": 100.0,
-      "min": 5.0,
-      "options": [],
-      "source": "drawing",
-      "step": 1.0,
-      "type": "number",
-      "unit": "mm",
-      "value": 30.0
+      "value": null
     },
     "upright_thickness": {
-      "confidence": 0.8,
+      "confidence": 1.0,
       "editable": true,
       "expression": null,
       "label": "Upright Thickness",
-      "max": 100.0,
-      "min": 5.0,
+      "max": 35.0,
+      "min": 25.0,
       "options": [],
       "source": "drawing",
       "step": 1.0,
       "type": "number",
       "unit": "mm",
-      "value": 20.0
-    },
-    "width": {
-      "confidence": 1.0,
-      "editable": true,
-      "expression": null,
-      "label": "Width",
-      "max": 200.0,
-      "min": 10.0,
-      "options": [],
-      "source": "drawing",
-      "step": 1.0,
-      "type": "number",
-      "unit": "mm",
-      "value": 50.0
+      "value": 30.0
     }
   },
   "source": {
@@ -660,6 +1375,6 @@
   },
   "title": "L-Shaped Bracket with Holes and Slot",
   "units": "millimeters",
-  "updated_at": "2026-07-12T11:05:38.679891Z",
+  "updated_at": "2026-07-13T05:18:30.656933Z",
   "version": 1
 }

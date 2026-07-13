@@ -1,0 +1,111 @@
+{
+  "analysis": {
+    "construction_strategy": "Extrude a 70x35mm rectangle to an unspecified thickness, then perform a boolean subtract (cut) of the text 'OUTV1' to a depth of 0.8mm from the top surface.",
+    "dimensions": [
+      {
+        "id": "length",
+        "value": 70.0
+      },
+      {
+        "id": "width",
+        "value": 35.0
+      },
+      {
+        "id": "text_recess_depth",
+        "value": 0.8
+      }
+    ],
+    "features": [
+      {
+        "confidence": 1.0,
+        "depends_on": [],
+        "evidence": {
+          "dimension_ids": [
+            "L 70",
+            "W 35"
+          ],
+          "source_view_ids": [
+            "top_view"
+          ]
+        },
+        "id": "base_plate",
+        "name": "Base Plate",
+        "operation_hint": "add",
+        "placement": {
+          "origin": [
+            0,
+            0,
+            0
+          ],
+          "plane": "XY"
+        },
+        "profile": "rectangular",
+        "target": null,
+        "type": "body"
+      },
+      {
+        "confidence": 0.9,
+        "depends_on": [
+          "base_plate"
+        ],
+        "evidence": {
+          "dimension_ids": [
+            "RECESSED 0.8"
+          ],
+          "source_view_ids": [
+            "top_view"
+          ]
+        },
+        "id": "recessed_text",
+        "name": "Recessed Text 'OUTV1'",
+        "operation_hint": "cut",
+        "placement": {
+          "depth": 0.8,
+          "reference": "center of base_plate"
+        },
+        "profile": "OUTV1",
+        "target": "base_plate",
+        "type": "text"
+      }
+    ],
+    "overall_shape": "A rectangular flat plate with centered recessed text.",
+    "title": "TEXT - VARIANT 1",
+    "uncertainties": [
+      {
+        "description": "The overall thickness of the base plate is not specified.",
+        "id": "plate_thickness"
+      },
+      {
+        "description": "The specific font and height of the 'OUTV1' text are not dimensioned.",
+        "id": "text_font_and_size"
+      },
+      {
+        "description": "Text appears centered, but no explicit alignment dimensions are provided.",
+        "id": "text_alignment"
+      },
+      {
+        "description": "The central text is slightly blurred but appears to read 'OUTV1' based on the variant title.",
+        "id": "text_content"
+      }
+    ],
+    "units": "millimeters",
+    "views": [
+      {
+        "description": "Plan view of the rectangular plate showing text placement and overall dimensions",
+        "id": "top_view",
+        "type": "top"
+      }
+    ]
+  },
+  "capability": "text",
+  "detected": true,
+  "dimension_errors_mm": [
+    0.0,
+    0.0
+  ],
+  "expected_dimensions_mm": [
+    70,
+    35
+  ],
+  "variant": "control"
+}

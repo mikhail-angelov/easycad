@@ -7,6 +7,48 @@ from .models import CADProject, FeatureGraph, FeatureOperation, FeatureValue
 from .validator import ValidationError, validate_source
 
 
+# Single source of truth for the types accepted by the trusted compiler.
+# Keys are the only names proposed to an LLM; values retain compatibility with
+# previously recorded plans without widening the planner contract.
+COMPILER_OPERATION_TYPES = {
+    "box": ("box", "rectangular_body"),
+    "cylinder": ("cylinder",),
+    "extrude": ("extrude", "extrusion"),
+    "revolve": ("revolve", "revolution"),
+    "hole": ("hole",),
+    "through_hole": ("through_hole",),
+    "counterbore": ("counterbore", "counterbore_hole"),
+    "countersink": ("countersink", "countersink_hole"),
+    "slot": ("slot", "slot2d"),
+    "pocket": ("pocket", "rectangular_pocket"),
+    "rib": ("rib",),
+    "gusset": ("gusset",),
+    "text": ("text", "engraving", "embossing"),
+    "fillet": ("fillet",),
+    "chamfer": ("chamfer",),
+    "shell": ("shell",),
+    "mirror": ("mirror",),
+    "hole_pattern": ("hole_pattern",),
+    "perforation_pattern": ("perforation_pattern",),
+}
+
+
+def planner_operation_types() -> str:
+    return ", ".join(COMPILER_OPERATION_TYPES)
+
+
+def compiler_operation_types() -> frozenset[str]:
+    return frozenset(alias for aliases in COMPILER_OPERATION_TYPES.values() for alias in aliases)
+
+
+def canonical_operation_type(value: str) -> str:
+    normalized = value.strip().lower()
+    for canonical, aliases in COMPILER_OPERATION_TYPES.items():
+        if normalized in aliases:
+            return canonical
+    return normalized
+
+
 class CompilerError(ValueError):
     def __init__(self, operation_id: str, message: str):
         super().__init__(f"Feature operation '{operation_id}': {message}")
@@ -24,7 +66,7 @@ def compile_project_feature_graph(project: CADProject) -> CADProject:
         if operation.status not in {"unresolved", "unsupported"}
     ]
     for operation in compiled.feature_graph.operations:
-        if operation.id in compiled.cad.implemented_feature_ids:
+        if operation.status in {"planned", "implemented"}:
             operation.status = "implemented"
             operation.implementation = operation.id
             operation.capability_status = "supported"
@@ -58,7 +100,7 @@ def compile_feature_graph(graph: FeatureGraph, parameter_ids: Iterable[str]) -> 
     for operation in graph.operations:
         if operation.status in {"unresolved", "unsupported"}:
             continue
-        feature_type = operation.type.strip().lower()
+        feature_type = canonical_operation_type(operation.type)
         if operation.operation == "pattern":
             if not operation.target or operation.target not in operation_roots:
                 raise CompilerError(operation.id, "pattern target has not been compiled")
@@ -132,17 +174,21 @@ def compile_feature_graph(graph: FeatureGraph, parameter_ids: Iterable[str]) -> 
 
 
 def _compile_primitive(operation: FeatureOperation, parameter_ids: Set[str]) -> list[str]:
-    feature_type = operation.type.strip().lower()
-    if feature_type in {"box", "rectangular_body"}:
+    feature_type = canonical_operation_type(operation.type)
+    if feature_type == "box":
         length = _required_value(operation, "length", parameter_ids)
         width = _required_value(operation, "width", parameter_ids)
         height = _required_value(operation, "height", parameter_ids)
         expression = f'cq.Workplane("{_plane(operation)}").box({length}, {width}, {height}, centered=False)'
-    elif feature_type in {"extrude", "extrusion"}:
+    elif feature_type == "cylinder":
+        radius = _required_value(operation, "radius", parameter_ids)
+        height = _required_value(operation, "height", parameter_ids)
+        expression = f'cq.Workplane("{_plane(operation)}").circle({radius}).extrude({height})'
+    elif feature_type == "extrude":
         profile = _compile_profile(operation, parameter_ids)
         distance = _required_value(operation, "distance", parameter_ids, aliases=("depth", "height", "length"))
         expression = f'cq.Workplane("{_plane(operation)}"){profile}.extrude({distance})'
-    elif feature_type in {"revolve", "revolution"}:
+    elif feature_type == "revolve":
         profile = _compile_profile(operation, parameter_ids)
         angle = _optional_value(operation, "angle_deg", 360, parameter_ids)
         expression = (
@@ -153,7 +199,7 @@ def _compile_primitive(operation: FeatureOperation, parameter_ids: Set[str]) -> 
         diameter = _required_value(operation, "diameter", parameter_ids)
         depth = _required_value(operation, "depth", parameter_ids)
         expression = f'cq.Workplane("{_plane(operation)}").circle({diameter} / 2).extrude({depth})'
-    elif feature_type in {"counterbore", "counterbore_hole"}:
+    elif feature_type == "counterbore":
         diameter = _required_value(operation, "diameter", parameter_ids)
         depth = _required_value(operation, "depth", parameter_ids)
         bore_diameter = _required_value(operation, "bore_diameter", parameter_ids)
@@ -163,7 +209,7 @@ def _compile_primitive(operation: FeatureOperation, parameter_ids: Set[str]) -> 
             f'cq.Workplane("{plane}").circle({diameter} / 2).extrude({depth})'
             f'.union(cq.Workplane("{plane}").circle({bore_diameter} / 2).extrude({bore_depth}))'
         )
-    elif feature_type in {"countersink", "countersink_hole"}:
+    elif feature_type == "countersink":
         diameter = _required_value(operation, "diameter", parameter_ids)
         depth = _required_value(operation, "depth", parameter_ids)
         sink_diameter = _required_value(operation, "sink_diameter", parameter_ids)
@@ -174,12 +220,12 @@ def _compile_primitive(operation: FeatureOperation, parameter_ids: Set[str]) -> 
             f'.union(cq.Workplane("{plane}").circle({sink_diameter} / 2)'
             f".workplane(offset={sink_depth}).circle({diameter} / 2).loft(combine=True))"
         )
-    elif feature_type in {"slot", "slot2d"}:
+    elif feature_type == "slot":
         length = _required_value(operation, "length", parameter_ids)
         width = _required_value(operation, "width", parameter_ids)
         depth = _required_value(operation, "depth", parameter_ids)
         expression = f'cq.Workplane("{_plane(operation)}").slot2D({length}, {width}).extrude({depth})'
-    elif feature_type in {"pocket", "rectangular_pocket"}:
+    elif feature_type == "pocket":
         length = _required_value(operation, "length", parameter_ids)
         width = _required_value(operation, "width", parameter_ids)
         depth = _required_value(operation, "depth", parameter_ids)
@@ -193,7 +239,7 @@ def _compile_primitive(operation: FeatureOperation, parameter_ids: Set[str]) -> 
         profile = _compile_profile(operation, parameter_ids)
         width = _required_value(operation, "width", parameter_ids)
         expression = f'cq.Workplane("{_plane(operation, default="XZ")}"){profile}.extrude({width})'
-    elif feature_type in {"text", "engraving", "embossing"}:
+    elif feature_type == "text":
         content = _required_value(operation, "content", parameter_ids)
         size = _required_value(operation, "size", parameter_ids)
         distance = _required_value(operation, "distance", parameter_ids)
@@ -211,7 +257,7 @@ def _compile_primitive(operation: FeatureOperation, parameter_ids: Set[str]) -> 
 
 
 def _compile_modifier(operation: FeatureOperation, target_shape: str, parameter_ids: Set[str]) -> str:
-    feature_type = operation.type.strip().lower()
+    feature_type = canonical_operation_type(operation.type)
     selector = operation.placement.reference if operation.placement else None
     if feature_type == "fillet":
         radius = _required_value(operation, "radius", parameter_ids)
@@ -299,11 +345,9 @@ def _local_axis_translation(plane: str, axis: str, distance: str) -> str:
 
 
 def _pattern_boolean_method(operation: FeatureOperation) -> str:
-    feature_type = operation.type.strip().lower()
-    if any(token in feature_type for token in ("hole", "cut", "perforation", "pocket", "slot")):
+    feature_type = canonical_operation_type(operation.type)
+    if feature_type in {"hole_pattern", "perforation_pattern"}:
         return "cut"
-    if any(token in feature_type for token in ("rib", "additive", "boss")):
-        return "union"
     raise CompilerError(operation.id, "pattern type must declare additive or subtractive feature semantics")
 
 

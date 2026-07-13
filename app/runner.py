@@ -3,6 +3,7 @@ from __future__ import annotations
 import json
 import os
 import re
+import signal
 import subprocess
 import sys
 import tempfile
@@ -19,7 +20,17 @@ from .feature_compiler import CompilerError, compile_feature_graph
 
 ROOT = Path(__file__).resolve().parent.parent
 WORKER_SCRIPT = ROOT / "worker" / "cadquery_worker.py"
-WORKER_TIMEOUT_SECONDS = float(os.environ.get("CADQUERY_WORKER_TIMEOUT_SECONDS", "35"))
+
+
+def worker_timeout_seconds(raw: str | None = None) -> float:
+    try:
+        value = float(raw if raw is not None else os.environ.get("CADQUERY_WORKER_TIMEOUT_SECONDS", "35"))
+    except (TypeError, ValueError):
+        value = 35.0
+    return min(120.0, max(5.0, value))
+
+
+WORKER_TIMEOUT_SECONDS = worker_timeout_seconds()
 
 
 class RunnerError(RuntimeError):
@@ -151,15 +162,35 @@ def run_project(
 
 
 def _run_local(job_dir: Path) -> subprocess.CompletedProcess:
-    env = os.environ.copy()
-    env.setdefault("XDG_CACHE_HOME", str(ROOT / ".cache"))
-    return subprocess.run(
-        [sys.executable, str(WORKER_SCRIPT), str(job_dir)],
+    cmd = [sys.executable, str(WORKER_SCRIPT), str(job_dir)]
+    process = subprocess.Popen(
+        cmd,
         text=True,
-        capture_output=True,
-        timeout=WORKER_TIMEOUT_SECONDS,
-        env=env,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        start_new_session=True,
+        env=_worker_environment(),
     )
+    try:
+        stdout, stderr = process.communicate(timeout=WORKER_TIMEOUT_SECONDS)
+    except subprocess.TimeoutExpired:
+        os.killpg(process.pid, signal.SIGKILL)
+        process.communicate()
+        raise subprocess.TimeoutExpired(cmd, WORKER_TIMEOUT_SECONDS)
+    return subprocess.CompletedProcess(cmd, process.returncode, stdout, stderr)
+
+
+def _worker_environment() -> Dict[str, str]:
+    allowed = ("HOME", "PATH", "TMPDIR", "DYLD_LIBRARY_PATH", "LD_LIBRARY_PATH", "SYSTEMROOT")
+    env = {key: os.environ[key] for key in allowed if os.environ.get(key)}
+    env.update(
+        {
+            "XDG_CACHE_HOME": os.environ.get("XDG_CACHE_HOME", str(ROOT / ".cache")),
+            "PYTHONNOUSERSITE": "1",
+            "PYTHONDONTWRITEBYTECODE": "1",
+        }
+    )
+    return env
 
 
 def _rasterize_svg(svg_path: Path, png_path: Path) -> None:

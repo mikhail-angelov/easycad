@@ -132,3 +132,78 @@ confirming `uv` is installed.
 
 Do not infer capability quality from the regression command's process exit status. Read each capability's
 `evaluation_status` and require observed outcomes before calculating gates.
+## 2026-07-12 — Structured provider output at the trusted compiler boundary
+
+### Goal
+
+Keep real model variability from bypassing or crashing the Feature Graph to trusted compiler pipeline.
+
+### Golden path
+
+1. Prompt the planning model for parameters and Feature Graph operations only; explicitly forbid Python/CadQuery source.
+2. Normalize only unambiguous provider variants such as geometry fields nested under an `implementation` object and
+   expression parameters supplied in a string `value` field.
+3. Convert prose implementations, undeclared expressions, missing profiles/patterns, and unsupported targets to
+   explicit `unsupported` operations.
+4. Recompile every accepted project from its Feature Graph before worker execution and ignore request `cad.source`.
+5. Treat invalid plan or repair JSON as `needs_review`; save the response for replay and do not return 500 or execute fallback code.
+6. Run `make test-e2e-real`, then replay saved responses offline as part of `make test-capabilities`.
+
+### Verification
+
+`make test-e2e-real` completed successfully against the configured providers. `make test-capabilities` then passed
+95 tests, including 35 independent capability drawings and 70 STL/STEP variant exports. Shipped fixture smoke also
+exported both formats successfully.
+
+### Failure pattern avoided
+
+DeepSeek responses varied between strict Feature Graph fields, geometry nested in an `implementation` object,
+expression parameters stored in `value`, prose operations, missing profiles, and repair updates outside declared
+`repaired_feature_ids`. Passing these directly to Pydantic or CadQuery caused schema exceptions and failed requests.
+
+### Ruled-out approaches
+
+- Tried requiring every real provider response to produce STL immediately; rejected because unsupported structured
+  output must be a controlled review outcome, not an excuse for executable fallback.
+- Tried interpreting arbitrary expression strings and prose geometry; rejected because that recreates an unsafe,
+  nondeterministic programming interface.
+- Tried treating transformed copies of one drawing as independent capability evidence; replaced with five
+  geometrically distinct technical drawings per supported capability.
+
+### Notes
+
+Capability worker evidence and provider-quality evidence are separate. Both are now measured from five independent
+drawings per supported capability; future fixture additions must record provider outcomes before changing support labels.
+
+## 2026-07-13 — Compiler-owned operation catalogue and repair boundary
+
+### Goal
+
+Keep the planner prompt, provider normalization, and trusted compiler aligned when adding CAD primitives.
+
+### Golden path
+
+1. Register every canonical operation type and compatibility alias in `app.feature_compiler.COMPILER_OPERATION_TYPES`.
+2. Generate the planner's allowed-type list from that registry; only canonical names are offered to the LLM.
+3. Normalize accepted aliases to their canonical type before Feature Graph validation.
+4. In repair responses allow parameters, placement, profile, pattern, status, and assumption only; reject changes to
+   type, boolean operation, target, dependencies, and source feature IDs.
+5. When a provider supplies a non-scalar parameter that the Feature Graph cannot represent, remove that value and
+   retain the operation as `unsupported` with an explicit assumption rather than sending invalid data to Pydantic.
+
+### Verification
+
+`make test` passed 107 tests plus STL and STEP smoke exports on 2026-07-13. The suite covers a compiled cylinder,
+catalogue alias normalization, rejected repair type/target replacements, and a provider `edges: ["front_edge"]`
+response becoming reviewable instead of producing HTTP 422.
+
+### Failure pattern avoided
+
+The compiler and planner maintained separate hand-written operation lists, while a DeepSeek repair response replaced a
+`fillet` with a `cylinder` and another plan sent `edges` as an array parameter. The former changed model semantics and
+the latter failed Pydantic validation before the controlled review path.
+
+### Ruled-out approaches
+
+- Allowed repair responses to replace an operation type; rejected because a repair can silently change the Feature Graph's geometry.
+- Kept non-scalar provider fields in an operation marked unsupported; rejected because Pydantic validates field types before status is used.

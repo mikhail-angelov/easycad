@@ -1,0 +1,137 @@
+{
+  "analysis": {
+    "construction_strategy": "Extrude a rectangle of 80x40mm to an arbitrary height. Shell the body with a 3mm wall thickness removing the top face. Add a central rib/partition wall of 3mm thickness at the L/2 position.",
+    "dimensions": [
+      {
+        "id": "dim_l",
+        "label": "L 80",
+        "parameter": "length",
+        "unit": "mm",
+        "value": 80
+      },
+      {
+        "id": "dim_w",
+        "label": "W 40",
+        "parameter": "width",
+        "unit": "mm",
+        "value": 40
+      },
+      {
+        "id": "dim_t",
+        "label": "T3",
+        "parameter": "wall_thickness",
+        "unit": "mm",
+        "value": 3
+      }
+    ],
+    "features": [
+      {
+        "confidence": 1,
+        "depends_on": [],
+        "evidence": {
+          "dimension_ids": [
+            "dim_l",
+            "dim_w"
+          ],
+          "source_view_ids": [
+            "top_view"
+          ]
+        },
+        "id": "base_block",
+        "name": "Main Rectangular Body",
+        "operation_hint": "add",
+        "placement": {
+          "origin": [
+            0,
+            0,
+            0
+          ],
+          "plane": "XY"
+        },
+        "profile": "Rectangular 80x40mm",
+        "target": null,
+        "type": "body"
+      },
+      {
+        "confidence": 0.9,
+        "depends_on": [
+          "base_block"
+        ],
+        "evidence": {
+          "dimension_ids": [
+            "dim_t"
+          ],
+          "source_view_ids": [
+            "top_view"
+          ]
+        },
+        "id": "internal_pocket",
+        "name": "Open Top Cavity",
+        "operation_hint": "cut",
+        "placement": {
+          "offset": 3,
+          "reference": "top face"
+        },
+        "profile": "Rectangular offset by wall thickness T3",
+        "target": "base_block",
+        "type": "pocket"
+      },
+      {
+        "confidence": 0.95,
+        "depends_on": [
+          "base_block"
+        ],
+        "evidence": {
+          "source_view_ids": [
+            "top_view"
+          ]
+        },
+        "id": "central_divider",
+        "name": "Internal Partition Wall",
+        "operation_hint": "add",
+        "placement": {
+          "axis": "Y",
+          "reference": "center of length L"
+        },
+        "profile": "Vertical line dividing the length into two equal sections",
+        "target": "base_block",
+        "type": "rib"
+      }
+    ],
+    "overall_shape": "Rectangular box with an open top and a single internal divider splitting the volume into two equal rectangular compartments.",
+    "title": "SHELLS - VARIANT 2",
+    "uncertainties": [
+      {
+        "description": "The vertical height (Z-axis) of the shell is not specified in the drawing.",
+        "parameter": "height"
+      },
+      {
+        "description": "The thickness of the central divider is inferred to be T3 but not explicitly labeled.",
+        "parameter": "divider_thickness"
+      },
+      {
+        "description": "The thickness of the floor/base is not specified; 'OPEN TOP' implies a bottom exists, but its dimension is missing.",
+        "parameter": "bottom_thickness"
+      }
+    ],
+    "units": "millimeters",
+    "views": [
+      {
+        "description": "Plan view showing the rectangular shell with a central divider",
+        "id": "top_view",
+        "type": "top"
+      }
+    ]
+  },
+  "capability": "shells",
+  "detected": true,
+  "dimension_errors_mm": [
+    0.0,
+    0.0
+  ],
+  "expected_dimensions_mm": [
+    80,
+    40
+  ],
+  "variant": "resized"
+}

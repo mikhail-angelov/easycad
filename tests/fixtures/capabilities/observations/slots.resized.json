@@ -1,0 +1,121 @@
+{
+  "analysis": {
+    "construction_strategy": "1. Create a rectangular sketch of 80mm x 40mm on the XY plane. 2. Extrude the sketch to an arbitrary thickness (solid part for 3D printing). 3. Create a second sketch on the top face for the 21mm x 6mm slot. 4. Center the slot sketch relative to the plate edges. 5. Perform a cut operation through the plate.",
+    "dimensions": [
+      {
+        "id": "dim_l80",
+        "label": "L 80",
+        "type": "length",
+        "value": 80,
+        "view_id": "top_view"
+      },
+      {
+        "id": "dim_w40",
+        "label": "W 40",
+        "type": "width",
+        "value": 40,
+        "view_id": "top_view"
+      },
+      {
+        "id": "dim_slot_l21",
+        "label": "21",
+        "type": "slot_length",
+        "value": 21,
+        "view_id": "top_view"
+      },
+      {
+        "id": "dim_slot_w6",
+        "label": "6",
+        "type": "slot_width",
+        "value": 6,
+        "view_id": "top_view"
+      }
+    ],
+    "features": [
+      {
+        "confidence": 1.0,
+        "depends_on": [],
+        "evidence": {
+          "dimension_ids": [
+            "dim_l80",
+            "dim_w40"
+          ],
+          "source_view_ids": [
+            "top_view"
+          ]
+        },
+        "id": "base_plate",
+        "name": "Base Plate",
+        "operation_hint": "add",
+        "placement": {
+          "plane": "XY",
+          "reference": "origin"
+        },
+        "profile": "Rectangle 80mm x 40mm",
+        "target": null,
+        "type": "body"
+      },
+      {
+        "confidence": 0.9,
+        "depends_on": [
+          "base_plate"
+        ],
+        "evidence": {
+          "dimension_ids": [
+            "dim_slot_l21",
+            "dim_slot_w6"
+          ],
+          "source_view_ids": [
+            "top_view"
+          ]
+        },
+        "id": "central_slot",
+        "name": "Central Slot",
+        "operation_hint": "cut",
+        "placement": {
+          "origin": "inferred center",
+          "plane": "XY",
+          "reference": "center of base_plate"
+        },
+        "profile": "Obround slot 21mm x 6mm",
+        "target": "base_plate",
+        "type": "slot"
+      }
+    ],
+    "overall_shape": "A rectangular flat plate with a single centered obround slot.",
+    "title": "SLOTS - VARIANT 2",
+    "uncertainties": [
+      {
+        "description": "The thickness of the plate is not specified in the drawing.",
+        "id": "thickness"
+      },
+      {
+        "description": "The slot is visually centered, but no explicit coordinate dimensions are provided to confirm its exact offset from the edges.",
+        "id": "slot_position"
+      },
+      {
+        "description": "The dimension 21x6 for the slot is interpreted as total length and total width; it is unclear if 21 refers to center-to-center distance or overall length.",
+        "id": "slot_geometry"
+      }
+    ],
+    "units": "millimeters",
+    "views": [
+      {
+        "description": "Plan view showing the rectangular plate and the central slot",
+        "id": "top_view",
+        "type": "top"
+      }
+    ]
+  },
+  "capability": "slots",
+  "detected": true,
+  "dimension_errors_mm": [
+    0.0,
+    0.0
+  ],
+  "expected_dimensions_mm": [
+    80,
+    40
+  ],
+  "variant": "resized"
+}

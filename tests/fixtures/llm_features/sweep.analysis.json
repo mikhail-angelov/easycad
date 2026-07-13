@@ -1,5 +1,5 @@
 {
-  "construction_strategy": "1. Create a sketch for the sweep path consisting of a vertical line (250mm), a 90-degree arc (R50mm), and a horizontal line (230mm). 2. Create a circular profile sketch (D8mm) perpendicular to the start of the path. 3. Perform a Sweep operation using the circular profile along the defined path.",
+  "construction_strategy": "1. Create a 2D sketch for the sweep path using the vertical leg, horizontal leg, and R50 fillet. 2. Create a 2D sketch for the circular profile (D8) on a plane normal to the path start/end. 3. Perform a Sweep operation using the circular profile along the path.",
   "dimensions": [
     {
       "id": "profile_diameter",
@@ -41,10 +41,11 @@
       "name": "Sweep Path",
       "operation_hint": "add",
       "placement": {
+        "direction": "Up then Right",
         "origin": "Bottom end of vertical leg",
         "reference": "XY Plane"
       },
-      "profile": "L-shaped path with a 90 degree arc",
+      "profile": "L-shaped path consisting of a vertical line, a 90-degree arc, and a horizontal line",
       "target": null,
       "type": "sketch"
     },
@@ -59,12 +60,12 @@
           "front_view"
         ]
       },
-      "id": "tube_profile_sketch",
+      "id": "tube_cross_section",
       "name": "Circular Profile",
       "operation_hint": "add",
       "placement": {
-        "origin": "Centerline of tube",
-        "reference": "Normal to sweep path start/end"
+        "origin": "Centerline endpoint",
+        "reference": "Normal to end of sweep path"
       },
       "profile": "Circle with diameter 8mm",
       "target": null,
@@ -74,37 +75,37 @@
       "confidence": 1.0,
       "depends_on": [
         "sweep_path_sketch",
-        "tube_profile_sketch"
+        "tube_cross_section"
       ],
-      "description": "Solid rod created by sweeping the circular profile along the 90 degree path",
+      "description": "Solid rod created by sweeping the 8mm circular profile along the defined path",
       "evidence": {
         "source_view_ids": [
           "front_view"
         ]
       },
-      "id": "bent_round_tube_body",
-      "name": "Bent Round Tube",
+      "id": "bent_tube_body",
+      "name": "Solid Bent Rod",
       "operation_hint": "add",
       "target": null,
-      "type": "body"
+      "type": "sweep"
     }
   ],
   "overall_shape": "An L-shaped solid cylindrical rod with a 90-degree radiused bend.",
   "title": "BENT ROUND TUBE - SWEEP FEATURE",
   "uncertainties": [
     {
-      "description": "It is unclear if leg lengths (250 and 230) are overall dimensions including the bend or lengths of the straight segments only. Usually, in sweep features, these refer to the total distance along the centerline axes.",
+      "description": "It is unclear if the leg lengths (250 and 230) are overall dimensions including the bend or lengths of the straight segments only. Standard practice usually implies overall tangent-to-end or intersection-to-end.",
       "id": "leg_length_definition"
     },
     {
-      "description": "The exact coordinate origin is not specified.",
-      "id": "origin_point"
+      "description": "Specified as 'SOLID ROD FOR 3D PRINTING', but specific material type is not defined.",
+      "id": "material"
     }
   ],
   "units": "millimeters",
   "views": [
     {
-      "description": "Side profile showing the sweep path and cross-section",
+      "description": "Side profile view showing the L-shaped bent tube with centerline and cross-section profile",
       "id": "front_view",
       "type": "orthographic"
     }

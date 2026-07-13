@@ -57,7 +57,22 @@ app = FastAPI(title="EasyCAD")
 
 
 def load_project_json(text: str) -> CADProject:
-    return CADProject.model_validate_json(text)
+    project = CADProject.model_validate_json(text)
+    if project.cad.source_kind != "compiled" or not project.feature_graph.operations:
+        mark_generation_error(
+            project,
+            "legacy_project",
+            "Legacy source-only projects require Feature Graph migration before preview or export",
+        )
+    return project
+
+
+def validate_trusted_project(project: CADProject) -> None:
+    if project.cad.source_kind != "compiled" or not project.feature_graph.operations:
+        raise RunnerError(
+            "legacy_project",
+            "Legacy source-only projects require Feature Graph migration before preview or export",
+        )
 
 
 def apply_generation_metadata(project: CADProject, result: Dict[str, object]) -> None:
@@ -293,7 +308,11 @@ async def finalize_project_with_auto_repair(
             user_feedback.strip()
             or f"Automatic repair for {error.get('stage', 'generation_error')}: {error.get('message', '')}"
         )
-        project = await repair_project(project, repair_feedback, validate_result=False)
+        try:
+            project = await repair_project(project, repair_feedback, validate_result=False)
+        except GenerationError as exc:
+            mark_generation_error(project, "repair_generation", str(exc), exc.detail)
+            return {"status": "needs_review", "project": json.loads(project.model_dump_json())}
         repairs_used += 1
 
 
@@ -479,6 +498,7 @@ async def repair_visual_issue(req: VisualRepairRequest):
 @app.post("/api/projects/preview")
 def preview(req: PreviewRequest):
     try:
+        validate_trusted_project(req.project)
         result = run_project(req.project, req.parameters, fmt="stl")
     except ValidationError as exc:
         raise HTTPException(422, {"stage": "static_validation", "message": str(exc)})
@@ -496,6 +516,7 @@ def preview(req: PreviewRequest):
 def export(req: PreviewRequest, format: str = "step"):
     fmt = format.lower()
     try:
+        validate_trusted_project(req.project)
         validate_feature_coverage(req.project)
     except RunnerError as exc:
         raise HTTPException(422, {"stage": exc.stage, "message": str(exc), "detail": exc.detail})

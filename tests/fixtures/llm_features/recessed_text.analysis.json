@@ -1,5 +1,5 @@
 {
-  "construction_strategy": "1. Create a base box primitive of 60x40x30mm. 2. Create a rectangular sketch on the top face (Z=30) and extrude a cut 1.2mm deep. 3. Place Cyrillic text 'ПРОБА' within the cut area and perform a boolean subtraction or further recessing as per the 'real printable geometry' instruction.",
+  "construction_strategy": "1. Create a base extrusion of 60mm x 40mm to a height of 30mm. 2. Create a sketch on the top face. 3. Define a rectangular pocket or text geometry for 'ПРОБА'. 4. Perform a cut operation to a depth of 1.2mm.",
   "dimensions": [
     {
       "id": "length",
@@ -24,9 +24,9 @@
       "depends_on": [],
       "evidence": {
         "dimension_ids": [
-          "length",
-          "width",
-          "height"
+          "60 mm",
+          "40 mm",
+          "30 mm"
         ],
         "source_view_ids": [
           "top_view",
@@ -34,21 +34,17 @@
         ]
       },
       "id": "main_block",
-      "name": "Main Block Body",
+      "name": "Main Rectangular Block",
       "operation_hint": "add",
       "placement": {
-        "dimensions": [
-          60,
-          40,
-          30
-        ],
         "origin": [
           0,
           0,
           0
-        ]
+        ],
+        "plane": "XY"
       },
-      "profile": "rectangular",
+      "profile": "Rectangular 60x40",
       "target": null,
       "type": "body"
     },
@@ -59,28 +55,28 @@
       ],
       "evidence": {
         "dimension_ids": [
-          "recess_depth"
+          "1.2 mm recess"
         ],
         "source_view_ids": [
           "top_view",
           "section_aa"
         ]
       },
-      "id": "recessed_pocket",
+      "id": "text_recess_pocket",
       "name": "Recessed Text Pocket",
       "operation_hint": "cut",
       "placement": {
         "depth": 1.2,
         "reference": "top face"
       },
-      "profile": "rectangular",
+      "profile": "Rectangular area containing text",
       "target": "main_block",
       "type": "pocket"
     },
     {
       "confidence": 1.0,
       "depends_on": [
-        "recessed_pocket"
+        "text_recess_pocket"
       ],
       "evidence": {
         "source_view_ids": [
@@ -92,43 +88,44 @@
       "name": "Cyrillic Text ПРОБА",
       "operation_hint": "cut",
       "placement": {
-        "alignment": "centered",
-        "reference": "bottom of recessed_pocket"
+        "depth": 1.2,
+        "reference": "centered in recessed pocket"
       },
+      "profile": "Cyrillic characters",
       "target": "main_block",
       "type": "text"
     }
   ],
-  "overall_shape": "Rectangular cuboid with a shallow rectangular indentation on the top face containing embossed/recessed text.",
+  "overall_shape": "Solid rectangular prism with a shallow rectangular recess on the top face containing embossed/cut text.",
   "title": "3D printing test part - recessed text block",
   "uncertainties": [
     {
-      "description": "Font style and specific character dimensions are not specified.",
-      "id": "text_font"
+      "description": "Exact horizontal and vertical coordinates for the text/pocket center are not dimensioned; assumed centered on top face.",
+      "id": "text_alignment"
     },
     {
-      "description": "The exact length and width of the rectangular pocket containing the text are not explicitly dimensioned, though it is visually centered.",
+      "description": "Font type and size are not specified; inferred from visual representation.",
+      "id": "font_specifications"
+    },
+    {
+      "description": "The outer dimensions of the gray 'recessed pocket' area are not explicitly dimensioned, only its depth.",
       "id": "pocket_dimensions"
-    },
-    {
-      "description": "Exact X-Y coordinates for the text placement are inferred as centered on the top face.",
-      "id": "text_position"
     }
   ],
   "units": "millimeters",
   "views": [
     {
-      "description": "Shows the 60x40 face with recessed text area",
+      "description": "Shows the 60x40 footprint and the recessed text area",
       "id": "top_view",
       "name": "TOP VIEW"
     },
     {
-      "description": "Shows the 60x30 face",
+      "description": "Shows the 30mm height of the block",
       "id": "front_view",
       "name": "FRONT VIEW"
     },
     {
-      "description": "Cross-section showing the depth of the recess",
+      "description": "Cross-section showing the 1.2mm depth of the recess",
       "id": "section_aa",
       "name": "SECTION A-A"
     }

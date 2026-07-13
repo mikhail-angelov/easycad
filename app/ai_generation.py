@@ -5,6 +5,7 @@ import json
 import logging
 import os
 import re
+import warnings
 from datetime import datetime
 from pathlib import Path
 from typing import Any, Dict, List, Optional
@@ -29,7 +30,14 @@ from .models import (
     SourceInfo,
     VisualComparison,
 )
-from .feature_compiler import CompilerError, compile_project_feature_graph
+from .feature_compiler import (
+    CompilerError,
+    canonical_operation_type,
+    compile_project_feature_graph,
+    compiler_operation_types,
+    planner_operation_types,
+)
+from .expressions import ExpressionError, evaluate_expression
 from .source_images import get_source_image, store_source_image
 from .validator import validate_project
 
@@ -59,11 +67,13 @@ def validate_image_upload(data: bytes, filename: str = "", mime_type: str = "") 
     try:
         import io
 
-        with Image.open(io.BytesIO(data)) as image:
-            image.verify()
-            width, height = image.size
-            detected_format = (image.format or "").lower()
-    except (UnidentifiedImageError, OSError):
+        with warnings.catch_warnings():
+            warnings.simplefilter("error", Image.DecompressionBombWarning)
+            with Image.open(io.BytesIO(data)) as image:
+                image.verify()
+                width, height = image.size
+                detected_format = (image.format or "").lower()
+    except (UnidentifiedImageError, OSError, Image.DecompressionBombError, Image.DecompressionBombWarning):
         raise HTTPException(400, "Invalid image")
 
     if width > MAX_IMAGE_DIMENSION or height > MAX_IMAGE_DIMENSION:
@@ -74,6 +84,8 @@ def validate_image_upload(data: bytes, filename: str = "", mime_type: str = "") 
         "png": "image/png",
         "webp": "image/webp",
     }.get(detected_format, mime_type)
+    if mime_type and detected_mime and mime_type != detected_mime:
+        raise HTTPException(400, "Image content does not match MIME type")
     return {
         "filename": filename,
         "mime_type": detected_mime or mime_type,
@@ -220,10 +232,22 @@ async def plan_cad_project(analysis: Dict[str, Any], instructions: str, api_key:
         "Supported parameter types are number, expression, text, and choice. Choice parameters may include options. "
         "feature_summary must contain id, name, type, description. "
         "feature_graph must contain operations mapping every drawing_analysis feature id. Each operation must contain id, type, "
-        "operation, source_feature_ids, target when applicable, confidence, status, and implementation. Use status implemented "
+        "operation, source_feature_ids, target when applicable, confidence, status, parameters, and placement/profile where required. "
+        "Operation id must equal the source drawing feature id when one operation represents that feature. When a feature is split "
+        "into multiple operations, every operation must include that drawing feature id in source_feature_ids. Use status implemented "
         "when a trusted compiler operation represents the feature. Use approximated, "
         "unresolved, or unsupported with an assumption when exact implementation is not possible. Never silently omit a feature. "
         "Do not return Python or CadQuery source. Every engineering dimension must be represented by a parameter reference. "
+        f"Use only trusted compiler operation types: {planner_operation_types()}. "
+        "A box requires parameters length, width, height. A cylinder requires radius and height; use placement.plane to choose its axis. "
+        "Extrude requires a rectangle, circle, or polyline profile and parameter distance. "
+        "Hole requires diameter and depth. Slot and pocket require length, width, depth. Modifiers require target. "
+        "Patterns require target plus pattern type, count, axis, and pitch or angle. Placement origin is exactly three parameter IDs or numbers. "
+        "Do not use center_x, center_y, face names, or expressions such as overall_width/2 in operations. Create a named derived "
+        "parameter with type expression, then reference that parameter ID. Do not put geometry inside an implementation object. "
+        "For an L-shaped body, use two box operations: a base box followed by an upright box targeting the base; do not use an L-shape profile. "
+        "For example, a base operation is {\"id\":\"base_body\",\"type\":\"box\",\"operation\":\"add\",\"source_feature_ids\":[\"base_body\"],\"parameters\":{\"length\":\"overall_length\",\"width\":\"overall_width\",\"height\":\"base_height\"},\"placement\":{\"origin\":[0,0,0]},\"status\":\"implemented\"}. "
+        "If this schema cannot represent a feature, set status unsupported with an assumption; never invent a new implemented type. "
         "Prefer simple extrusions, revolutions, holes, pockets, chamfers, fillets, and simple top-face text features. "
         "If the drawing shows engraved, embossed, stamped, or printed lettering, transcribe it exactly, including Cyrillic, and add parameters "
         "text_content (type text), text_mode (type choice with options none, engrave, emboss), and text_size (type number, mm). "
@@ -283,7 +307,12 @@ async def plan_repair(
         "operation_updates, repaired_feature_ids. Do not return Python or CadQuery source. "
         "Make the smallest correction needed. Preserve parameter IDs and do not remove features silently. "
         "When error_feature_ids are present, repair only those Feature Graph operations and required dependencies. "
+        "Use only trusted compiler operation types already allowed by the supplied Feature Graph schema. Mark an unrepresentable "
+        "operation unsupported with an assumption instead of returning executable code or inventing a new operation type. "
         "Preserve every unrelated operation ID and definition exactly. Report repaired_feature_ids in the response. "
+        "Each operation_updates item must be {id, parameters?, placement?, profile?, pattern?, status?, assumption?}. "
+        "Do not wrap modifications in a changes object. Use only existing parameter IDs or numeric literals in operation fields; "
+        "do not put arithmetic expressions in an update. "
         "If export or boolean operations failed, update only the responsible structured operation. "
         "Avoid tangent/zero-thickness booleans and fragile sweeps. "
         "If the error reports a bounding-box mismatch, fix coordinate placement so overall_length, overall_width, and overall_height match the model extents. "
@@ -395,9 +424,22 @@ def _apply_feature_operation_updates(
                 "cad_generation",
                 f"Operation update '{operation_id}' is not declared in repaired_feature_ids",
             )
-        merged = operations[operation_id].model_dump()
-        merged.update(raw_update)
+        changes = raw_update.get("changes")
+        if changes is not None and not isinstance(changes, dict):
+            raise GenerationError("cad_generation", "Repair operation changes must be an object")
+        update = dict(changes or raw_update)
+        update["id"] = operation_id
+        existing = operations[operation_id].model_dump()
+        for field in {"type", "operation", "target", "depends_on", "source_feature_ids"}:
+            if field in update and update[field] != existing[field]:
+                raise GenerationError(
+                    "cad_generation",
+                    f"Repair cannot change operation {field} for '{operation_id}'",
+                )
+        merged = existing
+        merged.update(update)
         merged["id"] = operation_id
+        merged = _normalize_operation_update(merged)
         try:
             operations[operation_id] = FeatureOperation.model_validate(merged)
         except PydanticValidationError as exc:
@@ -405,7 +447,52 @@ def _apply_feature_operation_updates(
                 "cad_generation",
                 f"Invalid repair for feature operation '{operation_id}': {exc.errors()[0]['msg']}",
             ) from exc
+    unsupported_ids = {
+        operation.id for operation in operations.values() if operation.status in {"unsupported", "unresolved"}
+    }
+    for item in project.feature_graph.operations:
+        operation = operations[item.id]
+        if operation.target in unsupported_ids and operation.status == "implemented":
+            payload = operation.model_dump()
+            payload.update(
+                {
+                    "status": "unsupported",
+                    "capability_status": "unsupported",
+                    "implementation": None,
+                    "assumption": "Target operation is unsupported by the trusted compiler.",
+                }
+            )
+            operations[item.id] = FeatureOperation.model_validate(payload)
+            unsupported_ids.add(item.id)
     project.feature_graph = FeatureGraph(operations=[operations[item.id] for item in project.feature_graph.operations])
+
+
+def _normalize_operation_update(update: Dict[str, Any]) -> Dict[str, Any]:
+    normalized = dict(update)
+    placement = normalized.get("placement")
+    if isinstance(placement, dict):
+        allowed_placement = {
+            key: value
+            for key, value in placement.items()
+            if key in {"reference", "plane", "origin", "axis", "direction", "rotation_deg", "offsets"}
+        }
+        normalized["placement"] = allowed_placement or None
+    parameters = normalized.get("parameters") if isinstance(normalized.get("parameters"), dict) else {}
+    unsafe_expression = any(
+        isinstance(value, str) and _parameter_id(value) != value for value in parameters.values()
+    )
+    origin = normalized.get("placement", {}).get("origin", []) if isinstance(normalized.get("placement"), dict) else []
+    unsafe_expression = unsafe_expression or any(
+        isinstance(value, str) and _parameter_id(value) != value for value in origin
+    )
+    if unsafe_expression:
+        normalized["status"] = "unsupported"
+        normalized["capability_status"] = "unsupported"
+        normalized["assumption"] = "Repair contains an expression not represented by declared parameters."
+        normalized["implementation"] = None
+    elif normalized.get("status") == "implemented" and not normalized.get("implementation"):
+        normalized["implementation"] = normalized.get("id")
+    return normalized
 
 
 def project_from_plan(
@@ -418,9 +505,11 @@ def project_from_plan(
     if not parameters:
         raise GenerationError("cad_generation", "CAD plan did not include parameters")
 
+    graph_payload = plan.get("feature_graph")
+    _lift_inline_feature_expressions(graph_payload, parameters)
     feature_summary = _normalize_features(plan.get("feature_summary", plan.get("features", [])))
     analysis_features = _normalize_analysis_features(analysis.get("features"))
-    feature_graph = _normalize_feature_graph(plan.get("feature_graph"), analysis_features)
+    feature_graph = _normalize_feature_graph(graph_payload, analysis_features)
     feature_coverage = _build_feature_coverage(analysis_features, feature_graph)
     assumptions = [str(item) for item in plan.get("assumptions", []) if str(item).strip()]
     source_info = SourceInfo(
@@ -461,6 +550,14 @@ def project_from_plan(
     try:
         return compile_project_feature_graph(project)
     except CompilerError as exc:
+        if exc.operation_id == "feature_graph":
+            project.generation.status = "needs_review"
+            project.generation.error = {
+                "stage": "feature_compiler",
+                "message": str(exc),
+                "detail": {"operation_id": exc.operation_id},
+            }
+            return project
         raise GenerationError("cad_generation", f"Feature Graph cannot compile: {exc}", {"operation_id": exc.operation_id}) from exc
 
 
@@ -488,6 +585,9 @@ def _normalize_parameters(raw: Any) -> Dict[str, CADParameter]:
         payload["source"] = _normalize_parameter_source(str(payload.get("source") or "manual"))
         declared_type = str(payload.get("type") or "").strip()
         payload.setdefault("editable", payload.get("type") != "expression")
+        if declared_type.lower() in {"expression", "derived", "formula"} and not payload.get("expression"):
+            if isinstance(payload.get("value"), str):
+                payload["expression"] = payload.pop("value")
         if payload.get("expression"):
             payload["type"] = "expression"
         elif key == "text_content":
@@ -604,6 +704,55 @@ def normalize_drawing_analysis(raw: Dict[str, Any]) -> Dict[str, Any]:
     return normalized
 
 
+def _lift_inline_feature_expressions(raw: Any, parameters: Dict[str, CADParameter]) -> None:
+    operations = raw.get("operations") if isinstance(raw, dict) else raw
+    if not isinstance(operations, list):
+        return
+    known = {key: 2.0 for key in parameters}
+    expression_ids: Dict[str, str] = {}
+
+    def lift(value: Any) -> Any:
+        if not isinstance(value, str) or _parameter_id(value) == value:
+            return value
+        try:
+            evaluate_expression(value, known)
+        except (ExpressionError, SyntaxError, ZeroDivisionError):
+            return value
+        if value not in expression_ids:
+            parameter_id = f"derived_expr_{len(expression_ids) + 1}"
+            while parameter_id in parameters:
+                parameter_id = f"derived_expr_{len(expression_ids) + 1}_{len(parameters)}"
+            expression_ids[value] = parameter_id
+            parameters[parameter_id] = CADParameter(
+                label="Derived geometry value",
+                type="expression",
+                expression=value,
+                unit="mm",
+                source="derived",
+                editable=False,
+            )
+            known[parameter_id] = 2.0
+        return expression_ids[value]
+
+    for operation in operations:
+        if not isinstance(operation, dict):
+            continue
+        if isinstance(operation.get("parameters"), dict):
+            operation["parameters"] = {key: lift(value) for key, value in operation["parameters"].items()}
+        placement = operation.get("placement")
+        if isinstance(placement, dict) and isinstance(placement.get("origin"), list):
+            placement["origin"] = [lift(value) for value in placement["origin"]]
+        profile = operation.get("profile")
+        if isinstance(profile, dict):
+            if isinstance(profile.get("dimensions"), dict):
+                profile["dimensions"] = {key: lift(value) for key, value in profile["dimensions"].items()}
+            if isinstance(profile.get("points"), list):
+                profile["points"] = [
+                    [lift(value) for value in point] if isinstance(point, list) else point
+                    for point in profile["points"]
+                ]
+
+
 def _normalize_feature_graph(raw: Any, analysis_features: List[Dict[str, Any]]) -> FeatureGraph:
     if isinstance(raw, dict):
         raw_operations = raw.get("operations", [])
@@ -621,7 +770,7 @@ def _normalize_feature_graph(raw: Any, analysis_features: List[Dict[str, Any]]) 
         operation_id = _parameter_id(str(payload.get("id") or f"operation_{idx}")) or f"operation_{idx}"
         payload["id"] = operation_id
         payload["type"] = str(payload.get("type") or payload.pop("kind", None) or "feature")
-        payload["operation"] = _normalize_feature_operation(str(payload.get("operation") or "add"))
+        payload = _adapt_provider_operation(payload)
         if payload.get("target"):
             payload["target"] = _parameter_id(str(payload["target"]))
         dependencies = payload.get("depends_on", [])
@@ -640,9 +789,33 @@ def _normalize_feature_graph(raw: Any, analysis_features: List[Dict[str, Any]]) 
         ]
         if operation_id in {str(feature.get("id")) for feature in analysis_features}:
             payload["source_feature_ids"].append(operation_id)
+        if not payload["source_feature_ids"]:
+            inferred_source_id = _infer_source_feature_id(operation_id, analysis_features)
+            if inferred_source_id:
+                payload["source_feature_ids"].append(inferred_source_id)
         payload["source_feature_ids"] = list(dict.fromkeys(payload["source_feature_ids"]))
+        source_types = {
+            str(feature.get("type") or "").strip().lower()
+            for feature in analysis_features
+            if str(feature.get("id") or "") in payload["source_feature_ids"]
+        }
+        if "groove" in source_types and payload.get("type") in {"slot", "slot2d"}:
+            payload["status"] = "approximated"
+            payload["capability_status"] = "experimental"
+            payload["assumption"] = "A semicircular groove is approximated by a slot; its section is not verified."
         mapped_feature_ids.update(payload["source_feature_ids"])
         operations.append(payload)
+
+    unsupported_ids = {
+        operation["id"] for operation in operations if operation.get("status") in {"unsupported", "unresolved"}
+    }
+    for operation in operations:
+        if operation.get("target") in unsupported_ids and operation.get("status") == "implemented":
+            operation["status"] = "unsupported"
+            operation["capability_status"] = "unsupported"
+            operation["assumption"] = "Target operation is unsupported by the trusted compiler."
+            operation.pop("implementation", None)
+            unsupported_ids.add(operation["id"])
 
     for feature in analysis_features:
         feature_id = str(feature.get("id") or "")
@@ -678,6 +851,164 @@ def _normalize_feature_graph(raw: Any, analysis_features: List[Dict[str, Any]]) 
         return FeatureGraph.model_validate({"operations": operations})
     except PydanticValidationError as exc:
         raise GenerationError("cad_generation", f"Invalid Feature Graph: {exc.errors()[0]['msg']}") from exc
+
+
+def _adapt_provider_operation(payload: Dict[str, Any]) -> Dict[str, Any]:
+    feature_type = canonical_operation_type(str(payload.get("type") or "feature"))
+    payload["type"] = feature_type
+    invalid_profile_shape = _normalize_provider_shape_fields(payload)
+    implementation = payload.get("implementation")
+    trusted_types = compiler_operation_types()
+    if isinstance(implementation, str) and (
+        feature_type not in trusted_types or payload.get("parameters") or payload.get("profile")
+    ) and not invalid_profile_shape:
+        payload["operation"] = _normalize_feature_operation(str(payload.get("operation") or "add"))
+        return payload
+    if implementation is None and (payload.get("parameters") or payload.get("profile")):
+        # A structured operation needs no model-owned implementation payload. The trusted compiler assigns the stage ID.
+        implementation = {}
+    if isinstance(implementation, dict):
+        parameters = dict(payload.get("parameters") or {})
+        for key, value in implementation.items():
+            if key not in {"placement", "profile", "profile_parameters", "profile_params"}:
+                parameters.setdefault(key, value)
+        payload["parameters"] = parameters
+        placement = implementation.get("placement")
+        if isinstance(placement, dict) and isinstance(placement.get("origin"), list):
+            payload["placement"] = {"origin": placement["origin"]}
+        profile = implementation.get("profile")
+        if isinstance(profile, dict):
+            profile_type = str(profile.get("type") or "").lower()
+            if profile_type in {"rectangle", "rect"}:
+                payload["profile"] = {
+                    "type": "rectangle",
+                    "dimensions": {"width": profile.get("length"), "height": profile.get("width")},
+                }
+            elif profile_type == "circle":
+                payload["profile"] = {
+                    "type": "circle",
+                    "dimensions": {"diameter": profile.get("diameter")},
+                }
+        elif profile in {"rectangle", "rect"}:
+            profile_parameters = implementation.get("profile_params", implementation)
+            payload["profile"] = {
+                "type": "rectangle",
+                "dimensions": {
+                    "width": profile_parameters.get("length"),
+                    "height": profile_parameters.get("width"),
+                },
+            }
+        elif profile == "circle":
+            payload["profile"] = {
+                "type": "circle",
+                "dimensions": {"diameter": implementation.get("diameter")},
+            }
+        payload["implementation"] = payload["id"]
+
+    operation = "add"
+    if feature_type in {"hole", "through_hole", "counterbore", "countersink", "slot", "pocket"}:
+        operation = "cut"
+    elif feature_type in {"fillet", "chamfer", "shell", "mirror"}:
+        operation = "modify"
+    elif "pattern" in feature_type:
+        operation = "pattern"
+    payload["operation"] = operation
+
+    values = list((payload.get("parameters") or {}).values())
+    has_non_scalar_parameter = any(isinstance(value, (list, dict)) for value in values)
+    profile_dimensions = (payload.get("profile") or {}).get("dimensions", {})
+    values.extend(profile_dimensions.values())
+    placement = payload.get("placement") or {}
+    values.extend(placement.get("origin", []) if isinstance(placement, dict) else [])
+    has_expression = any(isinstance(value, str) and not _parameter_id(value) == value for value in values)
+    missing_profile = feature_type in {"extrude", "revolve", "gusset"} and not payload.get("profile")
+    missing_pattern = "pattern" in feature_type and not isinstance(payload.get("pattern"), dict)
+    required_parameters = {
+        "box": {"length", "width", "height"},
+        "cylinder": {"radius", "height"},
+        "extrude": {"distance"},
+        "hole": {"diameter", "depth"},
+        "through_hole": {"diameter", "depth"},
+        "slot": {"length", "width", "depth"},
+        "pocket": {"length", "width", "depth"},
+        "fillet": {"radius"},
+        "chamfer": {"distance"},
+        "shell": {"thickness"},
+        "text": {"content", "size", "distance"},
+    }.get(feature_type, set())
+    missing_parameters = required_parameters - set(payload.get("parameters") or {})
+    invalid_profile = bool(payload.get("profile")) and any(value is None for value in profile_dimensions.values())
+    if (
+        feature_type not in trusted_types
+        or not isinstance(implementation, dict)
+        or has_expression
+        or missing_profile
+        or missing_pattern
+        or missing_parameters
+        or invalid_profile
+        or invalid_profile_shape
+        or has_non_scalar_parameter
+    ):
+        if has_non_scalar_parameter:
+            payload["parameters"] = {
+                key: value
+                for key, value in (payload.get("parameters") or {}).items()
+                if not isinstance(value, (list, dict))
+            }
+        payload["status"] = "unsupported"
+        payload["capability_status"] = "unsupported"
+        payload["assumption"] = "Provider operation cannot be mapped safely to the trusted compiler schema."
+        payload.pop("implementation", None)
+    elif payload.get("status") == "implemented":
+        payload["implementation"] = payload["id"]
+    return payload
+
+
+def _normalize_provider_shape_fields(payload: Dict[str, Any]) -> bool:
+    placement = payload.get("placement")
+    if isinstance(placement, dict):
+        normalized_placement = {
+            key: value
+            for key, value in placement.items()
+            if key in {"reference", "plane", "origin", "axis", "direction", "rotation_deg", "offsets"}
+        }
+        if not isinstance(normalized_placement.get("direction"), str):
+            normalized_placement.pop("direction", None)
+        if not isinstance(normalized_placement.get("axis"), str):
+            normalized_placement.pop("axis", None)
+        payload["placement"] = normalized_placement or None
+
+    profile = payload.get("profile")
+    if profile is None:
+        return False
+    if not isinstance(profile, dict):
+        payload["profile"] = None
+        return True
+    profile_type = str(profile.get("type") or "").lower()
+    dimensions = profile.get("dimensions") if isinstance(profile.get("dimensions"), dict) else {}
+    if profile_type in {"rectangle", "rect"}:
+        dimensions = {
+            "width": dimensions.get("width", profile.get("length")),
+            "height": dimensions.get("height", profile.get("width")),
+        }
+        payload["profile"] = {"type": "rectangle", "dimensions": dimensions}
+    elif profile_type == "circle":
+        payload["profile"] = {
+            "type": "circle",
+            "dimensions": {"diameter": dimensions.get("diameter", profile.get("diameter"))},
+        }
+    return False
+
+
+def _infer_source_feature_id(operation_id: str, analysis_features: List[Dict[str, Any]]) -> str | None:
+    """Recover only unambiguous provider IDs such as ``op_base_plate`` -> ``base_plate``."""
+    canonical_id = re.sub(r"^(?:op|operation|feature)_+", "", operation_id)
+    matches = [
+        str(feature.get("id"))
+        for feature in analysis_features
+        if canonical_id == str(feature.get("id") or "")
+    ]
+    return matches[0] if len(matches) == 1 else None
 
 
 def _build_feature_coverage(
@@ -893,10 +1224,9 @@ async def _chat_json(url: str, api_key: str, payload: Dict[str, Any], stage: str
             async with httpx.AsyncClient(timeout=120) as client:
                 response = await client.post(url, headers=headers, json=request_payload)
         except httpx.HTTPError as exc:
-            raise GenerationError(stage, f"Provider request failed: {exc}") from exc
+            raise GenerationError(stage, "Provider request failed") from exc
 
         if response.status_code >= 400:
-            message = _provider_error_message(response.text) or f"Provider returned HTTP {response.status_code}"
             _log_model_response(
                 stage,
                 request_payload,
@@ -905,7 +1235,11 @@ async def _chat_json(url: str, api_key: str, payload: Dict[str, Any], stage: str
                 response.text,
                 {"error_body": response.text},
             )
-            raise GenerationError(stage, message, {"status_code": response.status_code, "body": response.text[:1000]})
+            raise GenerationError(
+                stage,
+                f"Provider returned HTTP {response.status_code}",
+                {"status_code": response.status_code},
+            )
 
         try:
             response_payload = response.json()
@@ -925,7 +1259,7 @@ async def _chat_json(url: str, api_key: str, payload: Dict[str, Any], stage: str
             return _parse_json_object(content, stage)
         except GenerationError:
             last_content = str(content)
-    raise GenerationError(stage, "Provider did not return a JSON object", {"content": last_content[:1000]})
+    raise GenerationError(stage, "Provider did not return a JSON object")
 
 
 def _parse_json_object(content: Any, stage: str) -> Dict[str, Any]:
@@ -954,19 +1288,8 @@ def _parse_json_object(content: Any, stage: str) -> Dict[str, Any]:
                 return parsed
         except json.JSONDecodeError:
             continue
-    raise GenerationError(stage, "Provider did not return a JSON object", {"content": content[:1000]})
+    raise GenerationError(stage, "Provider did not return a JSON object")
 
 
 def normalize_model_id(model: str) -> str:
     return MODEL_ALIASES.get(model.strip(), model.strip())
-
-
-def _provider_error_message(body: str) -> str:
-    try:
-        payload = json.loads(body)
-    except json.JSONDecodeError:
-        return ""
-    error = payload.get("error")
-    if isinstance(error, dict):
-        return str(error.get("message") or "")
-    return ""

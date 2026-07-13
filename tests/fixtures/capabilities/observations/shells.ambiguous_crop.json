@@ -1,0 +1,130 @@
+{
+  "analysis": {
+    "construction_strategy": "Extrude a 110x55 rectangle to an unspecified height. Shell the top face with a 6mm thickness. Add a central rib at the 55mm mark along the length to create two internal pockets.",
+    "dimensions": [
+      {
+        "id": "length",
+        "value": 110
+      },
+      {
+        "id": "width",
+        "value": 55
+      },
+      {
+        "id": "wall_thickness",
+        "value": 6
+      }
+    ],
+    "features": [
+      {
+        "confidence": 1.0,
+        "depends_on": [],
+        "evidence": {
+          "dimension_ids": [
+            "L 110",
+            "W 55"
+          ],
+          "source_view_ids": [
+            "top_view"
+          ]
+        },
+        "id": "main_body",
+        "name": "Outer Shell Body",
+        "operation_hint": "add",
+        "placement": {
+          "origin": [
+            0,
+            0,
+            0
+          ]
+        },
+        "profile": "Rectangle 110mm x 55mm",
+        "target": null,
+        "type": "body"
+      },
+      {
+        "confidence": 0.9,
+        "depends_on": [
+          "main_body"
+        ],
+        "evidence": {
+          "dimension_ids": [
+            "WALL T6"
+          ],
+          "source_view_ids": [
+            "top_view"
+          ]
+        },
+        "id": "internal_pocket",
+        "name": "Open Top Cavity",
+        "operation_hint": "cut",
+        "placement": {
+          "reference": "Top face"
+        },
+        "profile": "Rectangle with 6mm offset from outer boundary",
+        "target": "main_body",
+        "type": "pocket"
+      },
+      {
+        "confidence": 0.95,
+        "depends_on": [
+          "main_body",
+          "internal_pocket"
+        ],
+        "evidence": {
+          "source_view_ids": [
+            "top_view"
+          ]
+        },
+        "id": "central_divider",
+        "name": "Central Partition",
+        "operation_hint": "add",
+        "placement": {
+          "axis": "Width-wise",
+          "reference": "Center of length L 110"
+        },
+        "target": "main_body",
+        "type": "rib"
+      }
+    ],
+    "overall_shape": "A rectangular box-like shell with an open top, uniform wall thickness, and a single internal divider splitting the volume into two equal compartments.",
+    "title": "SHELLS - VARIANT 5",
+    "uncertainties": [
+      {
+        "description": "The vertical height (Z-axis) of the shell is not specified in the drawing.",
+        "id": "height"
+      },
+      {
+        "description": "The thickness of the central divider is not explicitly dimensioned, though it appears similar to the wall thickness.",
+        "id": "divider_thickness"
+      },
+      {
+        "description": "The thickness of the floor/base is not specified; it is unclear if the shell is a through-hole or has a bottom.",
+        "id": "bottom_thickness"
+      },
+      {
+        "description": "The text 'OPEN TOP WALL T6' overlaps the geometry, making the exact T6 reference point slightly inferred as the wall thickness.",
+        "id": "text_overlap"
+      }
+    ],
+    "units": "millimeters",
+    "views": [
+      {
+        "description": "Top-down view showing the rectangular shell with a central divider",
+        "id": "top_view",
+        "type": "top"
+      }
+    ]
+  },
+  "capability": "shells",
+  "detected": true,
+  "dimension_errors_mm": [
+    0.0,
+    0.0
+  ],
+  "expected_dimensions_mm": [
+    110,
+    55
+  ],
+  "variant": "ambiguous_crop"
+}

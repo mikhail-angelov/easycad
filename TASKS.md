@@ -149,8 +149,8 @@ Milestone exit: support claims are based on measured feature capabilities rather
 
 Acceptance checklist:
 
-- [ ] `M9-AC1` every supported capability has at least five geometrically representative source drawings.
-- [ ] `M9-AC2` supported capabilities meet gates calculated from observed provider and worker results.
+- [x] `M9-AC1` every supported capability has at least five geometrically representative source drawings.
+- [x] `M9-AC2` supported capabilities meet gates calculated from observed provider and worker results.
 - [x] `M9-AC3` sanitized real-provider recordings replay deterministically without network access.
 - [x] `M9-AC4` API and UI expose every capability and coverage status before export.
 - [x] `M9-AC5` one documented local `uv` command runs the complete capability regression suite without Docker.
@@ -170,25 +170,43 @@ Acceptance checklist:
 Milestone exit: every supported model is produced from validated Feature Graph operations by trusted backend code;
 no request path executes model-generated Python or changes runtime because a Docker image happens to exist.
 
+## Milestone 11 — Reliability And Evidence
+
+- [x] Make the complete `make test` suite pass through the trusted Feature Graph pipeline.
+- [x] Add HTTP integration coverage for upload, generation, preview, repair, compare, and export routes.
+- [x] Replace the real-provider generation E2E contract with structured Feature Graph plans without executable source.
+- [x] Record and replay operation-only repair responses through recompilation and reverification.
+- [x] Define legacy project loading as explicit `needs_review` and block execution of legacy source.
+- [x] Prove API-level model `code` and `source` fields are ignored.
+- [x] Clamp worker timeout and terminate the worker process group on timeout.
+- [x] Run workers with a minimal explicit environment.
+- [x] Add decompression-bomb, corrupt-image, MIME mismatch, and dimension-limit upload tests.
+- [x] Sanitize provider errors before returning them to the UI.
+- [x] Add negative compiler/worker fixtures for invalid booleans, modifiers, patterns, references, and text.
+- [x] Replace transformed-image capability variants with geometrically independent drawings and observed worker outcomes.
+
+Milestone exit: the complete local and HTTP suites exercise only the trusted pipeline, real-provider recordings match
+the current structured contracts, unsafe inputs fail predictably, and capability claims derive from observed results.
+
 ## Validation And Tests
 
 - [x] `make test` local test runner.
 - [x] Unit tests for project/source validation.
-- [~] Unit tests for expression evaluation.
-- [~] Security tests for forbidden generated-code samples.
+- [x] Unit tests for expression evaluation.
+- [x] Security tests for forbidden source and ignored request-source samples.
 - [x] Unit tests for AI plan normalization.
 - [x] Unit tests for mocked repair flow.
 - [x] Unit tests for automatic repair loop.
 - [x] Recorded real LLM fixture replay tests.
 - [x] Integration smoke for fixture STL/STEP generation.
 - [x] Real provider e2e test for fixture images.
-- [ ] HTTP smoke for upload inspect and export routes.
+- [x] HTTP smoke for upload, generation, preview, repair, compare, and export routes.
 
 ## Security Hardening
 
-- [ ] Clamp worker timeout config to an allowed range.
-- [ ] Sanitize provider error bodies before returning to UI.
-- [ ] Add decompression-bomb protection for image uploads.
+- [x] Clamp worker timeout config to an allowed range.
+- [x] Sanitize provider error bodies before returning to UI.
+- [x] Add decompression-bomb protection for image uploads.
 - [x] Ensure source code references only declared parameters.
 - [x] Ensure parameter ids are valid `snake_case`.
 - [x] Ensure number parameter `min <= value <= max`.

@@ -1,5 +1,5 @@
 {
-  "construction_strategy": "Create a 30x30 square sketch on the base plane. Create an offset plane at 40mm height. Create an 18mm diameter circle sketch on the offset plane, centered relative to the square. Perform a loft operation between the two sketches to create the solid body.",
+  "construction_strategy": "Create a 30x30 square sketch on the base plane. Create an offset plane at 40mm height. Create an 18mm diameter circle sketch on the offset plane, centered relative to the square. Perform a Loft operation between the two sketches to create the solid body.",
   "dimensions": [
     {
       "id": "top_diameter",
@@ -23,10 +23,13 @@
       "confidence": 1.0,
       "depends_on": [],
       "evidence": {
-        "source_view_ids": [
-          "iso_view"
+        "dimension_ids": [
+          "bottom_width",
+          "bottom_depth"
         ],
-        "text_reference": "BOTTOM PROFILE: SQUARE 30 x 30"
+        "source_view_ids": [
+          "isometric_view"
+        ]
       },
       "id": "bottom_square_profile",
       "name": "Bottom Square Profile",
@@ -40,8 +43,11 @@
         "reference": "XY Plane"
       },
       "profile": {
-        "shape": "square",
-        "side_length": 30
+        "dimensions": [
+          30,
+          30
+        ],
+        "shape": "square"
       },
       "target": null,
       "type": "profile"
@@ -50,10 +56,13 @@
       "confidence": 1.0,
       "depends_on": [],
       "evidence": {
-        "source_view_ids": [
-          "iso_view"
+        "dimension_ids": [
+          "top_diameter",
+          "loft_height"
         ],
-        "text_reference": "TOP PROFILE: CIRCLE D18"
+        "source_view_ids": [
+          "isometric_view"
+        ]
       },
       "id": "top_circle_profile",
       "name": "Top Circle Profile",
@@ -65,7 +74,7 @@
           0,
           40
         ],
-        "reference": "Offset Plane from XY"
+        "reference": "Offset Plane"
       },
       "profile": {
         "diameter": 18,
@@ -80,28 +89,21 @@
         "bottom_square_profile",
         "top_circle_profile"
       ],
+      "description": "A solid lofted volume transitioning from a 30x30 square base to an 18mm diameter circular top over a height of 40mm.",
       "evidence": {
-        "dimension_ids": [
-          "loft_height"
-        ],
         "source_view_ids": [
-          "iso_view"
+          "isometric_view"
         ],
         "text_reference": "SOLID TRANSITION FOR 3D PRINTING"
       },
       "id": "loft_body",
-      "loft": {
-        "end_profile": "top_circle_profile",
-        "height": 40,
-        "start_profile": "bottom_square_profile"
-      },
-      "name": "Lofted Solid Body",
+      "name": "Square-to-Circle Loft Body",
       "operation_hint": "add",
       "target": null,
       "type": "body"
     }
   ],
-  "overall_shape": "A solid transition piece (loft) changing from a 30mm square base to an 18mm diameter circular top over a height of 40mm.",
+  "overall_shape": "Frustum-like lofted solid with a square base and circular top.",
   "title": "SQUARE-TO-CIRCLE LOFT",
   "uncertainties": [
     {
@@ -109,15 +111,15 @@
       "id": "units"
     },
     {
-      "description": "The transition curvature (smoothness of the loft) is not specified, assumed linear/standard loft.",
-      "id": "tangency"
+      "description": "The square base is shown with sharp corners; no fillet radius is specified.",
+      "id": "corner_radius"
     }
   ],
   "units": "millimeters",
   "views": [
     {
-      "description": "Isometric representation of the lofted solid",
-      "id": "iso_view",
+      "description": "3D representation showing the transition from a square base to a circular top.",
+      "id": "isometric_view",
       "type": "isometric"
     }
   ]

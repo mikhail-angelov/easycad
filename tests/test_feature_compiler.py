@@ -6,10 +6,14 @@ import io
 import app.main as main
 from PIL import Image
 from app.feature_compiler import (
+    COMPILER_OPERATION_TYPES,
     CompilerError,
+    canonical_operation_type,
+    compiler_operation_types,
     compile_feature_graph,
     compile_project_feature_graph,
     pattern_instance_offsets,
+    planner_operation_types,
 )
 from app.models import CADProject, CADSource, FeatureGraph
 from app.runner import RunnerError, concrete_parameters, run_project
@@ -91,6 +95,31 @@ class FeatureCompilerTests(unittest.TestCase):
         self.assertEqual(result["status"], "success")
         self.assertEqual(result["bounding_box"], {"x": 60.0, "y": 40.0, "z": 20.0})
         self.assertLess(result["volume_mm3"], 60 * 40 * 10 + 20 * 12 * 10)
+
+    def test_compiles_cylinder_from_planner_catalog(self):
+        self.assertIn("cylinder", planner_operation_types())
+        self.assertEqual(canonical_operation_type("rectangular_body"), "box")
+        self.assertEqual(canonical_operation_type("counterbore_hole"), "counterbore")
+        self.assertIn("slot2d", COMPILER_OPERATION_TYPES["slot"])
+        self.assertIn("rectangular_body", compiler_operation_types())
+        project = self.project(
+            [
+                {
+                    "id": "round_base",
+                    "type": "cylinder",
+                    "operation": "add",
+                    "parameters": {"radius": "radius", "height": "height"},
+                }
+            ],
+            {"radius": 12, "height": 20},
+        )
+
+        result = run_project(project, {}, fmt="stl")
+
+        self.assertEqual(result["status"], "success")
+        self.assertAlmostEqual(result["bounding_box"]["x"], 24.0)
+        self.assertAlmostEqual(result["bounding_box"]["y"], 24.0)
+        self.assertAlmostEqual(result["bounding_box"]["z"], 20.0)
 
     def test_runner_recompiles_graph_and_ignores_request_source(self):
         project = self.project(

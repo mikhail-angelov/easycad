@@ -1,83 +1,138 @@
 {
   "assumptions": [
-    "Threads are represented as a plain cylinder at major diameter; no helical geometry.",
-    "Washer face thickness assumed 2mm.",
-    "End chamfer length assumed 2mm.",
-    "Head chamfer angle assumed 20 degrees (typical range 15-30)."
+    "Thread pitch not specified; assumed standard M16 coarse pitch of 2mm.",
+    "End chamfer angle not dimensioned; assumed 45 degrees with length 2mm.",
+    "Fillet radius between head and shank not specified; omitted.",
+    "Threads modeled as plain cylinder at major diameter; no helical geometry.",
+    "Chamfer angle on head assumed average of 15-30 degrees (22.5 deg)."
   ],
-  "code": "import cadquery as cq\n\n# Parameters\nacross_flats = PARAMETERS['across_flats']\nhead_thickness = PARAMETERS['head_thickness']\nwasher_face_diameter = PARAMETERS['washer_face_diameter']\nwasher_face_thickness = PARAMETERS['washer_face_thickness']\nnominal_diameter = PARAMETERS['nominal_diameter']\ntotal_length = PARAMETERS['total_length']\nthread_length = PARAMETERS['thread_length']\nhead_chamfer_angle = PARAMETERS['head_chamfer_angle']\nend_chamfer_length = PARAMETERS['end_chamfer_length']\n\n# Hex head\nhex_head = (cq.Workplane(\"XY\")\n            .polygon(6, across_flats, circumscribed=True)\n            .extrude(head_thickness))\n\n# Washer face\nwasher_face = (cq.Workplane(\"XY\")\n               .circle(washer_face_diameter / 2)\n               .extrude(washer_face_thickness))\n\n# Combine head and washer face\nhead_assembly = hex_head.union(washer_face.translate((0, 0, -washer_face_thickness)))\n\n# Bolt shank\nshank_length = total_length - head_thickness - washer_face_thickness\nbolt_shank = (cq.Workplane(\"XY\")\n              .circle(nominal_diameter / 2)\n              .extrude(shank_length))\n\n# Position shank at bottom of head assembly\nbolt = head_assembly.union(bolt_shank.translate((0, 0, -shank_length)))\n\n# Thread zone (plain cylinder, no threads)\n# Already included in shank, no modification needed.\n\n# Head chamfer: chamfer top edge of hex head\n# Select top face of hex head and chamfer its edges\nhead_chamfer = (bolt.faces(\">Z\").workplane()\n                .chamfer(head_chamfer_angle, head_thickness * 0.1))\n# Note: chamfer on top face edges; simplified approach\n# Actually, we need to chamfer the top edges of the hex head.\n# Use edges of the top face.\nbolt = bolt.faces(\">Z\").edges().chamfer(head_thickness * 0.1)\n\n# End chamfer: chamfer bottom edge of shank\nbolt = bolt.faces(\"<Z\").edges().chamfer(end_chamfer_length)\n\nresult = bolt",
   "confidence": 0.85,
   "feature_graph": {
     "operations": [
       {
         "confidence": 1.0,
         "id": "hex_head",
-        "implementation": "hex_head",
-        "operation": "extrude",
-        "source_feature_ids": [],
-        "status": "implemented",
-        "target": null,
-        "type": "body"
-      },
-      {
-        "confidence": 0.9,
-        "id": "washer_face",
-        "implementation": "washer_face",
-        "operation": "extrude",
+        "operation": "add",
+        "parameters": {
+          "distance": "head_thickness"
+        },
+        "placement": {
+          "direction": [
+            0,
+            0,
+            1
+          ],
+          "origin": [
+            0,
+            0,
+            0
+          ]
+        },
+        "profile": {
+          "circumscribed_circle_diameter": "head_width_across_corners",
+          "sides": 6,
+          "type": "polygon"
+        },
         "source_feature_ids": [
           "hex_head"
         ],
         "status": "implemented",
-        "target": "hex_head",
-        "type": "body"
+        "type": "extrude"
       },
       {
-        "confidence": 1.0,
-        "id": "bolt_shank",
-        "implementation": "bolt_shank",
-        "operation": "extrude",
-        "source_feature_ids": [
-          "hex_head",
-          "washer_face"
-        ],
-        "status": "implemented",
-        "target": null,
-        "type": "body"
-      },
-      {
-        "assumption": "Threads are represented as a plain cylinder at major diameter; no helical geometry.",
-        "confidence": 1.0,
-        "id": "thread_zone",
-        "implementation": "thread_zone",
+        "assumption": "Chamfer applied to top face; angle assumed average of 15-30 degrees.",
+        "confidence": 0.9,
+        "id": "head_chamfer",
         "operation": "modify",
+        "parameters": {
+          "angle": "chamfer_angle",
+          "diameter": "chamfer_diameter"
+        },
+        "placement": {
+          "reference": "top_face_of_hex_head"
+        },
         "source_feature_ids": [
-          "bolt_shank"
+          "head_chamfer"
         ],
         "status": "approximated",
-        "target": "bolt_shank",
-        "type": "text"
-      },
-      {
-        "confidence": 0.95,
-        "id": "head_chamfer",
-        "implementation": "head_chamfer",
-        "operation": "cut",
-        "source_feature_ids": [
-          "hex_head"
-        ],
-        "status": "implemented",
         "target": "hex_head",
         "type": "chamfer"
       },
       {
-        "confidence": 0.8,
-        "id": "end_chamfer",
-        "implementation": "end_chamfer",
-        "operation": "cut",
+        "confidence": 1.0,
+        "id": "bolt_shank",
+        "operation": "add",
+        "parameters": {
+          "distance": "total_shank_length"
+        },
+        "placement": {
+          "direction": [
+            0,
+            0,
+            1
+          ],
+          "origin": [
+            0,
+            0,
+            "head_thickness"
+          ]
+        },
+        "profile": {
+          "diameter": "shank_diameter",
+          "type": "circle"
+        },
         "source_feature_ids": [
           "bolt_shank"
         ],
         "status": "implemented",
+        "type": "extrude"
+      },
+      {
+        "assumption": "Threads represented as plain cylinder at major diameter; no helical geometry.",
+        "confidence": 0.5,
+        "id": "threaded_section",
+        "operation": "add",
+        "parameters": {
+          "distance": "thread_length"
+        },
+        "placement": {
+          "direction": [
+            0,
+            0,
+            1
+          ],
+          "origin": [
+            0,
+            0,
+            "total_shank_length - thread_length + head_thickness"
+          ]
+        },
+        "profile": {
+          "diameter": "shank_diameter",
+          "type": "circle"
+        },
+        "source_feature_ids": [
+          "threaded_section"
+        ],
+        "status": "approximated",
+        "type": "extrude"
+      },
+      {
+        "assumption": "End chamfer length assumed 2mm at 45 degrees; angle not specified.",
+        "confidence": 0.5,
+        "id": "end_chamfer",
+        "operation": "modify",
+        "parameters": {
+          "angle": 45,
+          "length": "end_chamfer_length"
+        },
+        "placement": {
+          "reference": "bottom_face_of_shank"
+        },
+        "source_feature_ids": [
+          "end_chamfer"
+        ],
+        "status": "approximated",
         "target": "bolt_shank",
         "type": "chamfer"
       }
@@ -85,37 +140,31 @@
   },
   "feature_summary": [
     {
-      "description": "Hexagonal head extruded from a hexagon with across-flats dimension.",
+      "description": "Hexagonal prism representing the bolt head.",
       "id": "hex_head",
       "name": "Hexagonal Head",
       "type": "body"
     },
     {
-      "description": "Cylindrical washer face under the head.",
-      "id": "washer_face",
-      "name": "Washer Face",
-      "type": "body"
-    },
-    {
-      "description": "Cylindrical shank of the bolt.",
-      "id": "bolt_shank",
-      "name": "Bolt Shank",
-      "type": "body"
-    },
-    {
-      "description": "Threaded portion of the shank, represented as plain cylinder.",
-      "id": "thread_zone",
-      "name": "Threaded Section",
-      "type": "text"
-    },
-    {
-      "description": "Chamfer on the top edge of the hexagonal head.",
+      "description": "Chamfer on the top face of the hex head.",
       "id": "head_chamfer",
       "name": "Head Top Chamfer",
       "type": "chamfer"
     },
     {
-      "description": "Chamfer at the free end of the shank.",
+      "description": "Cylindrical shank of the bolt.",
+      "id": "bolt_shank",
+      "name": "Cylindrical Shank",
+      "type": "body"
+    },
+    {
+      "description": "Threaded portion of the shank (simplified as plain cylinder).",
+      "id": "threaded_section",
+      "name": "Threaded Section",
+      "type": "body"
+    },
+    {
+      "description": "Chamfer at the end of the shank.",
       "id": "end_chamfer",
       "name": "Shank End Chamfer",
       "type": "chamfer"
@@ -123,66 +172,79 @@
   ],
   "parameters": [
     {
-      "confidence": 0.9,
-      "editable": true,
-      "id": "across_flats",
-      "label": "Across Flats",
-      "max": 35,
-      "min": 20,
-      "source": "drawing_analysis",
-      "step": 0.5,
-      "type": "number",
-      "unit": "mm",
-      "value": 27
-    },
-    {
-      "confidence": 0.9,
+      "confidence": 1.0,
       "editable": true,
       "id": "head_thickness",
       "label": "Head Thickness",
-      "max": 16,
-      "min": 8,
-      "source": "drawing_analysis",
+      "max": 14,
+      "min": 10,
+      "source": "drawing",
       "step": 0.5,
       "type": "number",
       "unit": "mm",
       "value": 12
     },
     {
-      "confidence": 0.8,
+      "confidence": 1.0,
       "editable": true,
-      "id": "washer_face_diameter",
-      "label": "Washer Face Diameter",
-      "max": 30,
-      "min": 20,
-      "source": "drawing_analysis",
+      "id": "head_width_across_flats",
+      "label": "Head Width Across Flats",
+      "max": 28,
+      "min": 26,
+      "source": "drawing",
       "step": 0.5,
       "type": "number",
       "unit": "mm",
-      "value": 25
-    },
-    {
-      "confidence": 0.7,
-      "editable": true,
-      "id": "washer_face_thickness",
-      "label": "Washer Face Thickness",
-      "max": 4,
-      "min": 1,
-      "source": "drawing_analysis",
-      "step": 0.5,
-      "type": "number",
-      "unit": "mm",
-      "value": 2
+      "value": 27
     },
     {
       "confidence": 1.0,
       "editable": true,
-      "id": "nominal_diameter",
-      "label": "Nominal Diameter (M16)",
-      "max": 18,
-      "min": 14,
-      "source": "drawing_analysis",
+      "id": "head_width_across_corners",
+      "label": "Head Width Across Corners",
+      "max": 32,
+      "min": 30,
+      "source": "drawing",
       "step": 0.5,
+      "type": "number",
+      "unit": "mm",
+      "value": 31
+    },
+    {
+      "confidence": 1.0,
+      "editable": true,
+      "id": "total_shank_length",
+      "label": "Total Shank Length",
+      "max": 52,
+      "min": 48,
+      "source": "drawing",
+      "step": 1,
+      "type": "number",
+      "unit": "mm",
+      "value": 50
+    },
+    {
+      "confidence": 1.0,
+      "editable": true,
+      "id": "thread_length",
+      "label": "Thread Length",
+      "max": 40,
+      "min": 36,
+      "source": "drawing",
+      "step": 1,
+      "type": "number",
+      "unit": "mm",
+      "value": 38
+    },
+    {
+      "confidence": 1.0,
+      "editable": true,
+      "id": "shank_diameter",
+      "label": "Shank Diameter (M16 major diameter)",
+      "max": 16.5,
+      "min": 15.5,
+      "source": "drawing",
+      "step": 0.1,
       "type": "number",
       "unit": "mm",
       "value": 16
@@ -190,50 +252,50 @@
     {
       "confidence": 0.9,
       "editable": true,
-      "id": "total_length",
-      "label": "Total Length",
-      "max": 100,
-      "min": 30,
-      "source": "drawing_analysis",
-      "step": 1,
+      "id": "chamfer_diameter",
+      "label": "Chamfer Diameter",
+      "max": 26,
+      "min": 24,
+      "source": "drawing",
+      "step": 0.5,
       "type": "number",
       "unit": "mm",
-      "value": 50
-    },
-    {
-      "confidence": 0.9,
-      "editable": true,
-      "id": "thread_length",
-      "label": "Thread Length",
-      "max": 60,
-      "min": 20,
-      "source": "drawing_analysis",
-      "step": 1,
-      "type": "number",
-      "unit": "mm",
-      "value": 38
+      "value": 25
     },
     {
       "confidence": 0.8,
       "editable": true,
-      "id": "head_chamfer_angle",
-      "label": "Head Chamfer Angle",
+      "id": "chamfer_angle",
+      "label": "Chamfer Angle",
       "max": 30,
       "min": 15,
-      "source": "drawing_analysis",
+      "source": "drawing",
       "step": 1,
       "type": "number",
       "unit": "deg",
-      "value": 20
+      "value": 22.5
     },
     {
-      "confidence": 0.7,
+      "confidence": 0.5,
       "editable": true,
       "id": "end_chamfer_length",
       "label": "End Chamfer Length",
-      "max": 4,
+      "max": 3,
       "min": 1,
-      "source": "drawing_analysis",
+      "source": "assumed",
+      "step": 0.5,
+      "type": "number",
+      "unit": "mm",
+      "value": 2
+    },
+    {
+      "confidence": 0.5,
+      "editable": true,
+      "id": "thread_pitch",
+      "label": "Thread Pitch (assumed coarse)",
+      "max": 2.5,
+      "min": 1.5,
+      "source": "assumed",
       "step": 0.5,
       "type": "number",
       "unit": "mm",

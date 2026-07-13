@@ -1,5 +1,5 @@
 {
-  "construction_strategy": "Extrude the outer rectangular profile to a height of 30mm. Shell or pocket the interior leaving a 4mm wall and bottom. Create two longitudinal ribs of 4mm thickness. Sketch a 6mm circle on the rib face and apply a linear pattern with a count of 5 and pitch of 18mm to cut through the ribs.",
+  "construction_strategy": "Extrude a base rectangle to 30mm. Shell or pocket the interior leaving 4mm walls and bottom. Create two longitudinal ribs of 4mm thickness. Sketch a 6mm circle on the rib face and apply a linear pattern with 18mm pitch for 5 instances, then perform a through-all cut across the rib thickness.",
   "dimensions": [
     {
       "id": "overall_length",
@@ -7,7 +7,7 @@
     },
     {
       "id": "overall_width",
-      "value": "unlabeled"
+      "value": "unlabeled_vertical_arrow"
     },
     {
       "id": "overall_depth",
@@ -26,21 +26,25 @@
       "value": 4
     },
     {
-      "id": "rib_hole_diameter",
+      "id": "hole_diameter",
       "value": 6
     },
     {
-      "id": "rib_hole_count",
+      "id": "hole_pitch",
+      "value": 18
+    },
+    {
+      "id": "hole_count_per_rib",
       "value": 5
     },
     {
-      "id": "rib_hole_pitch",
-      "value": 18
+      "id": "rib_count",
+      "value": 2
     }
   ],
   "features": [
     {
-      "confidence": 0.9,
+      "confidence": 1,
       "depends_on": [],
       "evidence": {
         "dimension_ids": [
@@ -49,7 +53,7 @@
         ],
         "source_view_ids": [
           "top_view",
-          "section_a_a"
+          "section_aa"
         ]
       },
       "id": "main_body",
@@ -67,7 +71,7 @@
       "type": "body"
     },
     {
-      "confidence": 1.0,
+      "confidence": 0.9,
       "depends_on": [
         "main_body"
       ],
@@ -78,18 +82,22 @@
         ],
         "source_view_ids": [
           "top_view",
-          "section_a_a"
+          "section_aa"
         ]
       },
       "id": "internal_pocket",
-      "name": "Open Top Pocket",
+      "name": "Shell Interior Pocket",
       "operation_hint": "cut",
+      "placement": {
+        "depth": 26,
+        "reference": "top_face"
+      },
       "profile": "Rectangular offset by wall thickness",
       "target": "main_body",
       "type": "pocket"
     },
     {
-      "confidence": 1.0,
+      "confidence": 1,
       "depends_on": [
         "internal_pocket"
       ],
@@ -99,7 +107,7 @@
         ],
         "source_view_ids": [
           "top_view",
-          "section_a_a"
+          "section_aa"
         ]
       },
       "id": "internal_rib_1",
@@ -112,7 +120,7 @@
       "type": "rib"
     },
     {
-      "confidence": 1.0,
+      "confidence": 1,
       "depends_on": [
         "internal_pocket"
       ],
@@ -122,7 +130,7 @@
         ],
         "source_view_ids": [
           "top_view",
-          "section_a_a"
+          "section_aa"
         ]
       },
       "id": "internal_rib_2",
@@ -135,15 +143,15 @@
       "type": "rib"
     },
     {
-      "confidence": 1.0,
+      "confidence": 1,
       "depends_on": [
         "internal_rib_1"
       ],
       "evidence": {
         "dimension_ids": [
-          "rib_hole_diameter",
-          "rib_hole_pitch",
-          "rib_hole_count"
+          "hole_diameter",
+          "hole_pitch",
+          "hole_count_per_rib"
         ],
         "source_view_ids": [
           "top_view"
@@ -159,18 +167,18 @@
         "type": "linear"
       },
       "target": "internal_rib_1",
-      "type": "perforation"
+      "type": "repeated_pattern"
     },
     {
-      "confidence": 1.0,
+      "confidence": 1,
       "depends_on": [
         "internal_rib_2"
       ],
       "evidence": {
         "dimension_ids": [
-          "rib_hole_diameter",
-          "rib_hole_pitch",
-          "rib_hole_count"
+          "hole_diameter",
+          "hole_pitch",
+          "hole_count_per_rib"
         ],
         "source_view_ids": [
           "top_view"
@@ -186,18 +194,41 @@
         "type": "linear"
       },
       "target": "internal_rib_2",
-      "type": "perforation"
+      "type": "repeated_pattern"
+    },
+    {
+      "confidence": 1,
+      "depends_on": [
+        "internal_rib_1"
+      ],
+      "evidence": {
+        "dimension_ids": [
+          "hole_diameter"
+        ],
+        "source_view_ids": [
+          "section_aa"
+        ]
+      },
+      "id": "individual_hole_cut",
+      "name": "Rib Through Hole",
+      "operation_hint": "cut",
+      "placement": {
+        "direction": "transverse_through_rib"
+      },
+      "profile": "Circle D6",
+      "target": "internal_rib_1",
+      "type": "hole"
     }
   ],
-  "overall_shape": "A rectangular open-top tray with a wall thickness of 4mm, containing two longitudinal internal ribs, each featuring five evenly spaced 6mm diameter through-holes.",
-  "title": "TOP VIEW - OPEN-TOP SHELL",
+  "overall_shape": "A rectangular open-top tray containing two longitudinal internal ribs, each featuring five evenly spaced circular through-holes.",
+  "title": "OPEN-TOP SHELL WITH PERFORATED RIBS",
   "uncertainties": [
     {
-      "description": "The vertical dimension in the Top View is indicated by arrows but no numerical value is provided.",
+      "description": "The vertical dimension arrow in the top view has no numerical value assigned.",
       "id": "overall_width"
     },
     {
-      "description": "The distance between the two ribs and their distance from the outer walls is not specified.",
+      "description": "The distance between the two ribs and their distance from the walls is not specified.",
       "id": "rib_spacing"
     },
     {
@@ -205,20 +236,20 @@
       "id": "rib_height"
     },
     {
-      "description": "The vertical center-line of the holes relative to the rib height is not explicitly dimensioned, though shown centered in Section A-A.",
-      "id": "hole_vertical_alignment"
+      "description": "The vertical center-line of the holes within the rib height is not explicitly dimensioned, though shown centered in Section A-A.",
+      "id": "hole_vertical_placement"
     }
   ],
   "units": "millimeters",
   "views": [
     {
       "id": "top_view",
-      "name": "Top View",
+      "name": "TOP VIEW - OPEN-TOP SHELL",
       "type": "orthographic"
     },
     {
-      "id": "section_a_a",
-      "name": "Section A-A",
+      "id": "section_aa",
+      "name": "SECTION A-A",
       "type": "cross_section"
     }
   ]

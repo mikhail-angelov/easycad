@@ -120,6 +120,32 @@
       "editable": false
     }
   },
+  "feature_graph": {
+    "operations": [
+      {
+        "id": "head",
+        "type": "extrude",
+        "operation": "add",
+        "profile": {"type": "circle", "dimensions": {"diameter": "head_flats"}},
+        "parameters": {"distance": "head_thickness"},
+        "status": "implemented",
+        "implementation": "head",
+        "capability_status": "supported"
+      },
+      {
+        "id": "shank",
+        "type": "extrude",
+        "operation": "add",
+        "target": "head",
+        "profile": {"type": "circle", "dimensions": {"diameter": "thread_major_diameter"}},
+        "parameters": {"distance": "shank_total_length"},
+        "placement": {"origin": [0, 0, "head_thickness"]},
+        "status": "implemented",
+        "implementation": "shank",
+        "capability_status": "supported"
+      }
+    ]
+  },
   "feature_summary": [
     {
       "id": "head",
@@ -140,6 +166,7 @@
   ],
   "cad": {
     "language": "cadquery-python",
+    "source_kind": "compiled",
     "source": "p = PARAMETERS\n\nhead = cq.Workplane(\"XY\").polygon(6, p[\"head_flats\"] * 2 / math.sqrt(3), circumscribed=True).extrude(p[\"head_thickness\"])\n\nchamfered_head = head.faces(\">Z\").chamfer(p[\"head_chamfer\"])\n\nsmooth_shank = cq.Workplane(\"XY\").circle(p[\"thread_major_diameter\"] / 2).extrude(-p[\"shank_smooth_length\"])\n\nthread_section = cq.Workplane(\"XY\").workplane(offset=-p[\"shank_smooth_length\"]).circle(p[\"thread_major_diameter\"] / 2).extrude(-p[\"thread_length\"])\n\nresult = chamfered_head.union(smooth_shank).union(thread_section)\n",
     "entry_variable": "result",
     "generation_attempt": 1

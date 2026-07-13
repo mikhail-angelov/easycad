@@ -1,0 +1,103 @@
+{
+  "analysis": {
+    "construction_strategy": "Extrude a 90x45 rectangle to an arbitrary thickness, then create a centered rectangular sketch on the top face and perform a blind cut to a depth of 4mm.",
+    "dimensions": [
+      {
+        "id": "l",
+        "value": 90
+      },
+      {
+        "id": "w",
+        "value": 45
+      },
+      {
+        "id": "d",
+        "value": 4
+      }
+    ],
+    "features": [
+      {
+        "confidence": 0.9,
+        "depends_on": [],
+        "evidence": {
+          "dimension_ids": [
+            "L",
+            "W"
+          ],
+          "source_view_ids": [
+            "top_view"
+          ]
+        },
+        "id": "main_body",
+        "name": "Rectangular Block",
+        "operation_hint": "add",
+        "placement": {
+          "plane": "XY",
+          "reference": "origin"
+        },
+        "profile": "Rectangle 90mm x 45mm",
+        "target": null,
+        "type": "body"
+      },
+      {
+        "confidence": 0.8,
+        "depends_on": [
+          "main_body"
+        ],
+        "evidence": {
+          "dimension_ids": [
+            "D"
+          ],
+          "source_view_ids": [
+            "top_view"
+          ]
+        },
+        "id": "internal_pocket",
+        "name": "Rectangular Pocket",
+        "operation_hint": "cut",
+        "placement": {
+          "depth": 4,
+          "reference": "centered on main_body"
+        },
+        "profile": "Rectangle",
+        "target": "main_body",
+        "type": "pocket"
+      }
+    ],
+    "overall_shape": "A rectangular prism with a centered rectangular blind pocket.",
+    "title": "POCKETS - VARIANT 3",
+    "uncertainties": [
+      {
+        "description": "The total height/thickness of the main body is not specified.",
+        "id": "overall_height"
+      },
+      {
+        "description": "The length and width of the internal pocket are not explicitly dimensioned, though they are visually represented as a concentric offset.",
+        "id": "pocket_dimensions"
+      },
+      {
+        "description": "Exact offset values from the outer edges to the pocket edges are not provided.",
+        "id": "pocket_placement"
+      }
+    ],
+    "units": "millimeters",
+    "views": [
+      {
+        "description": "Top down view showing the rectangular block and the internal pocket",
+        "id": "top_view",
+        "type": "top"
+      }
+    ]
+  },
+  "capability": "pockets",
+  "detected": true,
+  "dimension_errors_mm": [
+    0.0,
+    0.0
+  ],
+  "expected_dimensions_mm": [
+    90,
+    45
+  ],
+  "variant": "high_contrast"
+}

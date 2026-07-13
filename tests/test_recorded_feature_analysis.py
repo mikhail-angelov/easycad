@@ -59,8 +59,8 @@ class RecordedFeatureAnalysisTests(unittest.TestCase):
         analysis = self.load("loft")
         feature_text = json.dumps(analysis["features"], ensure_ascii=False).lower()
 
-        self.assertIn("square profile", feature_text)
-        self.assertIn("circle profile", feature_text)
+        self.assertTrue("square profile" in feature_text or "square base profile" in feature_text)
+        self.assertTrue("circle profile" in feature_text or "circular top profile" in feature_text)
         self.assertIn("loft", analysis["construction_strategy"].lower())
 
     def test_recordings_normalize_deterministically_and_contain_no_secret_fields(self):

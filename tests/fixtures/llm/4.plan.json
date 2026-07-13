@@ -1,85 +1,134 @@
 {
   "assumptions": [
-    "Front slot is centered on the front face of the base plate.",
-    "Top riser is centered on the base plate along the length.",
-    "Top slot is centered on the top face of the riser and runs the full length of the riser.",
-    "No fillets or chamfers are specified."
+    "Top block is centered along the length of the base plate (X-axis).",
+    "Front slot is centered along the width of the base plate (Y-axis).",
+    "Top slot is centered along the width of the top block (X-axis).",
+    "Rear side is assumed flat and symmetrical."
   ],
-  "code": "import cadquery as cq\n\n# Parameters\nbase_length = PARAMETERS['base_length']\nbase_width = PARAMETERS['base_width']\nbase_height = PARAMETERS['base_height']\nriser_height = PARAMETERS['riser_height']\nriser_width = PARAMETERS['riser_width']\nfront_slot_width = PARAMETERS['front_slot_width']\nfront_slot_depth = PARAMETERS['front_slot_depth']\ntop_slot_width = PARAMETERS['top_slot_width']\ntop_slot_depth = PARAMETERS['top_slot_depth']\n\n# Base plate\nbase_plate = cq.Workplane(\"XY\").box(base_length, base_width, base_height)\n\n# Top riser (centered on base along length, flush with back? Assume centered)\n# Place riser on top of base, centered along length and width? \n# Actually, typical: riser sits on base, centered along length, flush with back? \n# Assume centered along length and width for simplicity.\nriser = cq.Workplane(\"XY\").workplane(offset=base_height).box(base_length, riser_width, riser_height)\n# Center riser on base\nriser = riser.translate((0, (base_width - riser_width)/2, 0))\ntop_riser = base_plate.union(riser)\n\n# Front slot: cut on front face (Y positive direction? Assume front is Y+)\n# Slot centered on front face, width along X, depth along Y\nfront_slot = cq.Workplane(\"XY\").workplane(offset=base_height/2).box(front_slot_width, front_slot_depth, base_height)\nfront_slot = front_slot.translate((0, base_width/2, 0))\nresult = top_riser.cut(front_slot)\n\n# Top U-slot: longitudinal slot on top of riser, centered, full length\n# Slot width along X, depth along Z, length along Y? Actually length along X (since riser length is along X)\n# Assume slot runs full length of riser (base_length) along X, centered on top face\n# Create slot as a box and cut\nslot = cq.Workplane(\"XY\").workplane(offset=base_height + riser_height).box(base_length, top_slot_width, top_slot_depth)\nslot = slot.translate((0, (base_width - riser_width)/2 + riser_width/2, -top_slot_depth/2))\nresult = result.cut(slot)\n\n# Final result\nresult = result\n",
   "confidence": 0.9,
   "feature_graph": {
     "operations": [
       {
-        "confidence": 1.0,
         "id": "base_plate",
-        "implementation": "base_plate",
-        "operation": "extrude",
-        "source_feature_ids": [],
-        "status": "implemented",
-        "target": null,
-        "type": "add"
-      },
-      {
-        "confidence": 1.0,
-        "id": "top_riser",
-        "implementation": "top_riser",
-        "operation": "extrude",
+        "operation": "add",
+        "parameters": {
+          "height": "base_height",
+          "length": "overall_length",
+          "width": "overall_width"
+        },
+        "placement": {
+          "origin": [
+            0,
+            0,
+            0
+          ]
+        },
         "source_feature_ids": [
           "base_plate"
         ],
         "status": "implemented",
-        "target": "base_plate",
-        "type": "add"
+        "type": "box"
       },
       {
-        "confidence": 0.95,
-        "id": "front_slot",
-        "implementation": "front_slot",
-        "operation": "cut_extrude",
+        "id": "top_central_block",
+        "operation": "add",
+        "parameters": {
+          "height": "overall_height - base_height",
+          "length": "top_block_width",
+          "width": "overall_width"
+        },
+        "placement": {
+          "origin": [
+            "top_block_x_offset",
+            0,
+            "base_height"
+          ]
+        },
         "source_feature_ids": [
-          "base_plate"
+          "top_central_block"
+        ],
+        "status": "implemented",
+        "type": "box"
+      },
+      {
+        "id": "front_rectangular_slot",
+        "operation": "cut",
+        "parameters": {
+          "depth": "overall_width",
+          "length": "central_slot_width",
+          "width": "central_slot_depth"
+        },
+        "placement": {
+          "origin": [
+            "top_block_x_offset",
+            "central_slot_y_offset",
+            0
+          ]
+        },
+        "profile": {
+          "length": "central_slot_width",
+          "type": "rectangle",
+          "width": "central_slot_depth"
+        },
+        "source_feature_ids": [
+          "front_rectangular_slot"
         ],
         "status": "implemented",
         "target": "base_plate",
-        "type": "cut"
+        "type": "slot"
       },
       {
-        "confidence": 0.9,
         "id": "top_u_slot",
-        "implementation": "top_u_slot",
-        "operation": "cut_extrude",
+        "operation": "cut",
+        "parameters": {
+          "depth": "overall_width",
+          "length": "top_slot_width",
+          "width": "top_slot_depth"
+        },
+        "placement": {
+          "origin": [
+            "top_block_x_offset + top_slot_x_offset",
+            0,
+            "base_height"
+          ]
+        },
+        "profile": {
+          "length": "top_slot_width",
+          "type": "rectangle",
+          "width": "top_slot_depth"
+        },
         "source_feature_ids": [
-          "top_riser"
+          "top_u_slot"
         ],
         "status": "implemented",
-        "target": "top_riser",
-        "type": "cut"
+        "target": "top_central_block",
+        "type": "slot"
       }
     ]
   },
   "feature_summary": [
     {
-      "description": "Rectangular block 60x40x10 mm",
+      "description": "Rectangular base plate 60x40x10 mm",
       "id": "base_plate",
       "name": "Base Plate",
       "type": "body"
     },
     {
-      "description": "Rectangular cutout on front face of base plate, 20 mm wide, 10 mm deep",
-      "id": "front_slot",
+      "description": "Through slot on front face of base, 20x10 mm",
+      "id": "front_rectangular_slot",
       "name": "Front Rectangular Slot",
       "type": "slot"
     },
     {
-      "description": "Rectangular block 60x20x20 mm sitting on base plate",
-      "id": "top_riser",
-      "name": "Top Riser Block",
+      "description": "Raised block on top of base, 20x40x20 mm",
+      "id": "top_central_block",
+      "name": "Top Central Block",
       "type": "body"
     },
     {
-      "description": "Longitudinal U-shaped slot on top of riser, 10 mm wide, 15 mm deep",
+      "description": "Through slot on top of raised block, 10x15 mm",
       "id": "top_u_slot",
-      "name": "Top U-Channel Slot",
+      "name": "Top U-Shaped Slot",
       "type": "slot"
     }
   ],
@@ -87,11 +136,11 @@
     {
       "confidence": 1.0,
       "editable": true,
-      "id": "base_length",
-      "label": "Base Length",
-      "max": 200,
-      "min": 10,
-      "source": "drawing_analysis",
+      "id": "overall_length",
+      "label": "Overall Length",
+      "max": 100,
+      "min": 0,
+      "source": "drawing",
       "step": 1,
       "type": "number",
       "unit": "mm",
@@ -100,11 +149,11 @@
     {
       "confidence": 1.0,
       "editable": true,
-      "id": "base_width",
-      "label": "Base Width",
-      "max": 200,
-      "min": 10,
-      "source": "drawing_analysis",
+      "id": "overall_width",
+      "label": "Overall Width",
+      "max": 100,
+      "min": 0,
+      "source": "drawing",
       "step": 1,
       "type": "number",
       "unit": "mm",
@@ -113,11 +162,24 @@
     {
       "confidence": 1.0,
       "editable": true,
+      "id": "overall_height",
+      "label": "Overall Height",
+      "max": 100,
+      "min": 0,
+      "source": "drawing",
+      "step": 1,
+      "type": "number",
+      "unit": "mm",
+      "value": 30
+    },
+    {
+      "confidence": 1.0,
+      "editable": true,
       "id": "base_height",
       "label": "Base Height",
       "max": 100,
-      "min": 1,
-      "source": "drawing_analysis",
+      "min": 0,
+      "source": "drawing",
       "step": 1,
       "type": "number",
       "unit": "mm",
@@ -126,11 +188,11 @@
     {
       "confidence": 1.0,
       "editable": true,
-      "id": "riser_height",
-      "label": "Riser Height",
+      "id": "central_slot_width",
+      "label": "Central Slot Width",
       "max": 100,
-      "min": 1,
-      "source": "drawing_analysis",
+      "min": 0,
+      "source": "drawing",
       "step": 1,
       "type": "number",
       "unit": "mm",
@@ -139,67 +201,93 @@
     {
       "confidence": 1.0,
       "editable": true,
-      "id": "riser_width",
-      "label": "Riser Width",
+      "id": "central_slot_depth",
+      "label": "Central Slot Depth",
       "max": 100,
-      "min": 1,
-      "source": "drawing_analysis",
-      "step": 1,
-      "type": "number",
-      "unit": "mm",
-      "value": 20
-    },
-    {
-      "confidence": 0.95,
-      "editable": true,
-      "id": "front_slot_width",
-      "label": "Front Slot Width",
-      "max": 100,
-      "min": 1,
-      "source": "drawing_analysis",
-      "step": 1,
-      "type": "number",
-      "unit": "mm",
-      "value": 20
-    },
-    {
-      "confidence": 0.95,
-      "editable": true,
-      "id": "front_slot_depth",
-      "label": "Front Slot Depth",
-      "max": 100,
-      "min": 1,
-      "source": "drawing_analysis",
+      "min": 0,
+      "source": "drawing",
       "step": 1,
       "type": "number",
       "unit": "mm",
       "value": 10
     },
     {
-      "confidence": 0.9,
+      "confidence": 1.0,
       "editable": true,
       "id": "top_slot_width",
       "label": "Top Slot Width",
       "max": 100,
-      "min": 1,
-      "source": "drawing_analysis",
+      "min": 0,
+      "source": "drawing",
       "step": 1,
       "type": "number",
       "unit": "mm",
       "value": 10
     },
     {
-      "confidence": 0.9,
+      "confidence": 1.0,
       "editable": true,
       "id": "top_slot_depth",
       "label": "Top Slot Depth",
       "max": 100,
-      "min": 1,
-      "source": "drawing_analysis",
+      "min": 0,
+      "source": "drawing",
       "step": 1,
       "type": "number",
       "unit": "mm",
       "value": 15
+    },
+    {
+      "confidence": 0.9,
+      "editable": true,
+      "id": "top_block_width",
+      "label": "Top Block Width",
+      "max": 100,
+      "min": 0,
+      "source": "drawing",
+      "step": 1,
+      "type": "number",
+      "unit": "mm",
+      "value": 20
+    },
+    {
+      "confidence": 0.9,
+      "editable": true,
+      "id": "top_block_x_offset",
+      "label": "Top Block X Offset",
+      "max": 100,
+      "min": 0,
+      "source": "derived",
+      "step": 1,
+      "type": "expression",
+      "unit": "mm",
+      "value": "(overall_length - top_block_width) / 2"
+    },
+    {
+      "confidence": 0.9,
+      "editable": true,
+      "id": "central_slot_y_offset",
+      "label": "Central Slot Y Offset",
+      "max": 100,
+      "min": 0,
+      "source": "derived",
+      "step": 1,
+      "type": "expression",
+      "unit": "mm",
+      "value": "(overall_width - central_slot_width) / 2"
+    },
+    {
+      "confidence": 0.9,
+      "editable": true,
+      "id": "top_slot_x_offset",
+      "label": "Top Slot X Offset",
+      "max": 100,
+      "min": 0,
+      "source": "derived",
+      "step": 1,
+      "type": "expression",
+      "unit": "mm",
+      "value": "(top_block_width - top_slot_width) / 2"
     }
   ],
   "title": "Mechanical Block with Slots"

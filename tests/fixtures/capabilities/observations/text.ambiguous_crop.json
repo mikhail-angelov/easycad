@@ -1,0 +1,108 @@
+{
+  "analysis": {
+    "construction_strategy": "Extrude a 110x55mm rectangle to an unspecified thickness. Create a sketch on the top face for the text 'OUTV5'. Perform a pocket/cut operation with the text profile to a depth of 2.0mm.",
+    "dimensions": [
+      {
+        "id": "length",
+        "value": 110.0
+      },
+      {
+        "id": "width",
+        "value": 55.0
+      },
+      {
+        "id": "recess_depth",
+        "value": 2.0
+      }
+    ],
+    "features": [
+      {
+        "confidence": 1.0,
+        "depends_on": [],
+        "evidence": {
+          "dimension_ids": [
+            "L 110",
+            "W 55"
+          ],
+          "source_view_ids": [
+            "top_view"
+          ]
+        },
+        "id": "base_plate",
+        "name": "Base Plate",
+        "operation_hint": "add",
+        "placement": {
+          "dimensions": {
+            "length": 110.0,
+            "width": 55.0
+          },
+          "plane": "XY",
+          "reference": "origin"
+        },
+        "profile": "rectangular",
+        "target": null,
+        "type": "body"
+      },
+      {
+        "confidence": 0.9,
+        "depends_on": [
+          "base_plate"
+        ],
+        "evidence": {
+          "dimension_ids": [
+            "RECESSED 2.0"
+          ],
+          "source_view_ids": [
+            "top_view"
+          ]
+        },
+        "id": "text_recess",
+        "name": "Recessed Text",
+        "operation_hint": "cut",
+        "placement": {
+          "depth": 2.0,
+          "plane": "XY",
+          "reference": "center"
+        },
+        "profile": "OUTV5",
+        "target": "base_plate",
+        "type": "text"
+      }
+    ],
+    "overall_shape": "A rectangular flat plate with a length of 110mm and a width of 55mm, featuring centered recessed text.",
+    "title": "TEXT - VARIANT 5",
+    "uncertainties": [
+      {
+        "description": "The overall thickness of the base plate is not specified, only the recess depth of 2.0mm.",
+        "id": "thickness"
+      },
+      {
+        "description": "The specific font and exact size of the 'OUTV5' text are not dimensioned.",
+        "id": "text_font"
+      },
+      {
+        "description": "Text appears centered horizontally and vertically, but no explicit alignment dimensions are provided.",
+        "id": "text_alignment"
+      }
+    ],
+    "units": "millimeters",
+    "views": [
+      {
+        "description": "Top down view of a rectangular plate with centered text",
+        "id": "top_view",
+        "type": "top"
+      }
+    ]
+  },
+  "capability": "text",
+  "detected": true,
+  "dimension_errors_mm": [
+    0.0,
+    0.0
+  ],
+  "expected_dimensions_mm": [
+    110,
+    55
+  ],
+  "variant": "ambiguous_crop"
+}
