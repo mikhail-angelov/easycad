@@ -11,6 +11,18 @@ make test-capabilities
 The command does not use Docker and writes its machine-readable result to
 `artifacts/capability-summary.json`.
 
+### Evidence states
+
+The capability report uses four evidence states. They are deliberately distinct from an implementation checkbox:
+
+- `implemented`: code path exists, but there is no paired deterministic failure proving the claimed effect.
+- `verified`: a deterministic positive fixture passes and its paired negative fixture fails for the expected reason.
+- `observed`: a sanitized real-provider response was captured and replayed without network access.
+- `supported`: both `verified` deterministic evidence and an `observed` provider success exist for the capability.
+
+`needs_review` is not evidence of support. It means the application safely refused to claim verification and must not
+be counted as a verified export or a successful provider observation.
+
 The summary reports worker and provider evidence separately. A passing worker export suite does not imply measured
 provider precision, recall, or dimension accuracy. Provider gates are calculated only after recorded outcomes exist
 for every independent capability drawing.

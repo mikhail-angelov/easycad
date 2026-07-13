@@ -4,31 +4,31 @@ Status legend: `[ ]` not started, `[~]` in progress, `[x]` verified. A task cann
 
 ## Milestone 0 — Make completion evidence explicit
 
-- [ ] Add `implemented`, `verified`, `observed`, and `supported` evidence definitions to capability-report documentation.
-- [ ] Change report schema so missing observations yield `insufficient_evidence`, never synthetic success.
-- [ ] Add report-schema tests for all outcome counters and missing-evidence behavior.
+- [x] Add `implemented`, `verified`, `observed`, and `supported` evidence definitions to capability-report documentation.
+- [x] Change report schema so missing observations yield `insufficient_evidence`, never synthetic success.
+- [x] Add report-schema tests for all outcome counters and missing-evidence behavior.
 
 Acceptance: a report with no observations cannot say `passed`; invalid plans, worker failures, and `needs_review` each have a distinct counter.
 
 ## Milestone 1 — Replace weak capability metrics
 
-- [ ] Extend each supported capability case with expected normalized Feature Graph fragments and named measurements.
-- [ ] Compare expected and actual graph operation type, target, placement, parameter bindings, and coverage state.
-- [ ] Compute dimension error from matching named graph parameters or worker measurements.
-- [ ] Record individual STL and STEP results for every case; remove suite-wide export-rate substitution.
-- [ ] Add evaluator mutations for wrong type/target, omitted operation, wrong named parameter, and one failed export among successes.
-- [ ] Assert that every mutation makes the capability gate fail.
+- [x] Extend each supported capability case with expected normalized Feature Graph fragments and named measurements.
+- [x] Compare expected and actual graph operation type, target, placement, parameter bindings, and coverage state.
+- [x] Compute dimension error from matching named graph parameters or worker measurements.
+- [x] Record individual STL and STEP results for every case; remove suite-wide export-rate substitution.
+- [x] Add evaluator mutations for wrong type/target, omitted operation, wrong named parameter, and one failed export among successes.
+- [x] Assert that every mutation makes the capability gate fail.
 
 Acceptance: correct feature words and numbers paired with a wrong graph target or operation fail the quality gate.
 
 ## Milestone 2 — Restore the bracket as a blocking integration regression
 
-- [ ] Replace the base-only graph in `projects/bracket_fixture.json` with generic base, upright, groove, through-hole, and front-notch operations.
-- [ ] Remove stale compiled source from the fixture, or prove it is ignored and absent from all assertions.
-- [ ] Assert exact normalized graph IDs, operation types, targets, placement, and parameter bindings.
-- [ ] Assert worker evidence for bounds, upright contribution, hole count/diameter, groove depth, and notch material removal.
-- [ ] Add one negative mutation fixture per protected bracket feature.
-- [ ] Include these regressions in the default local test command.
+- [x] Replace the base-only graph in `projects/bracket_fixture.json` with generic base, upright, groove, through-hole, and front-notch operations.
+- [x] Remove stale compiled source from the fixture, or prove it is ignored and absent from all assertions.
+- [x] Assert exact normalized graph IDs, operation types, targets, placement, and parameter bindings.
+- [x] Assert worker evidence for bounds, upright contribution, hole count/diameter, groove depth, and notch material removal.
+- [x] Add one negative mutation fixture per protected bracket feature.
+- [x] Include these regressions in the default local test command.
 
 Acceptance: removing, retargeting, or changing dimensions of any protected bracket feature fails with the related operation ID.
 

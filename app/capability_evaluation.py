@@ -1,7 +1,64 @@
 from __future__ import annotations
 
 from statistics import median
-from typing import Iterable
+from typing import Any, Iterable
+
+
+GRAPH_FIELDS = ("type", "operation", "target", "placement", "parameters", "status")
+
+
+def compare_feature_graph(
+    expected_operations: Iterable[dict[str, Any]], actual_operations: Iterable[dict[str, Any]]
+) -> dict[str, object]:
+    expected_by_id = {operation["id"]: operation for operation in expected_operations}
+    actual_by_id = {operation["id"]: operation for operation in actual_operations}
+    mismatches: list[dict[str, object]] = []
+
+    for operation_id, expected in expected_by_id.items():
+        actual = actual_by_id.get(operation_id)
+        if actual is None:
+            mismatches.append({"operation_id": operation_id, "field": "operation", "expected": "present", "actual": "missing"})
+            continue
+        for field in GRAPH_FIELDS:
+            expected_value = expected.get(field, "implemented" if field == "status" else None)
+            actual_value = actual.get(field, "implemented" if field == "status" else None)
+            if actual_value != expected_value:
+                mismatches.append(
+                    {
+                        "operation_id": operation_id,
+                        "field": field,
+                        "expected": expected_value,
+                        "actual": actual_value,
+                    }
+                )
+
+    for operation_id in sorted(actual_by_id.keys() - expected_by_id.keys()):
+        mismatches.append({"operation_id": operation_id, "field": "operation", "expected": "absent", "actual": "present"})
+
+    return {
+        "expected_operation_ids": sorted(expected_by_id),
+        "actual_operation_ids": sorted(actual_by_id),
+        "matches": not mismatches,
+        "mismatches": mismatches,
+    }
+
+
+def compare_named_dimensions(
+    expected_parameters: dict[str, float | int], actual_parameters: dict[str, Any]
+) -> dict[str, object]:
+    errors_mm: dict[str, float] = {}
+    missing_parameter_ids: list[str] = []
+    for parameter_id, expected_value in expected_parameters.items():
+        if isinstance(expected_value, bool) or not isinstance(expected_value, (int, float)):
+            continue
+        actual = actual_parameters.get(parameter_id)
+        if isinstance(actual, dict):
+            actual = actual.get("value")
+        if isinstance(actual, bool) or not isinstance(actual, (int, float)):
+            missing_parameter_ids.append(parameter_id)
+            continue
+        errors_mm[parameter_id] = abs(float(actual) - float(expected_value))
+    return {"errors_mm": errors_mm, "missing_parameter_ids": sorted(missing_parameter_ids)}
 
 
 def evaluate_capability(

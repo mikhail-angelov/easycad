@@ -32,6 +32,19 @@ class CapabilityFixtureTests(unittest.TestCase):
                 self.assertTrue((ROOT / case["source_drawing"]).exists())
                 graph = FeatureGraph.model_validate({"operations": case["operations"]})
                 if case["status"] == "supported":
+                    expected_measurements = case.get("expected_measurements")
+                    self.assertIsInstance(expected_measurements, dict)
+                    self.assertEqual(expected_measurements.get("result", {}).get("solid_count"), 1)
+                    self.assertEqual(
+                        set(expected_measurements.get("operations", {})),
+                        {operation.id for operation in graph.operations},
+                    )
+                    self.assertTrue(
+                        all(
+                            expectation.get("volume_delta_sign") in {"positive", "negative"}
+                            for expectation in expected_measurements["operations"].values()
+                        )
+                    )
                     validate_source(compile_feature_graph(graph, case["parameters"]))
                 else:
                     with self.assertRaises(CompilerError):

@@ -28,18 +28,27 @@
     "dimensions": [],
     "features": [
       {
+        "id": "base",
         "type": "base_body",
         "confidence": 0.9
       },
       {
+        "id": "main_hole",
         "type": "through_hole",
         "confidence": 0.92
       },
       {
+        "id": "upright",
+        "type": "upright_body",
+        "confidence": 0.9
+      },
+      {
+        "id": "front_notch",
         "type": "semicircular_notch",
         "confidence": 0.8
       },
       {
+        "id": "top_groove",
         "type": "upper_groove",
         "confidence": 0.75
       }
@@ -179,6 +188,62 @@
       "unit": "mm",
       "source": "derived",
       "editable": false
+    },
+    "upright_x": {
+      "label": "Upright X",
+      "type": "expression",
+      "expression": "overall_length - upright_length",
+      "unit": "mm",
+      "source": "derived",
+      "editable": false
+    },
+    "main_hole_y": {
+      "label": "Main hole Y",
+      "type": "expression",
+      "expression": "overall_width / 2",
+      "unit": "mm",
+      "source": "derived",
+      "editable": false
+    },
+    "hole_cut_depth": {
+      "label": "Hole cut depth",
+      "type": "expression",
+      "expression": "base_thickness + 2",
+      "unit": "mm",
+      "source": "derived",
+      "editable": false
+    },
+    "groove_y": {
+      "label": "Groove Y",
+      "type": "expression",
+      "expression": "overall_width / 2",
+      "unit": "mm",
+      "source": "derived",
+      "editable": false
+    },
+    "groove_x": {
+      "label": "Groove X",
+      "type": "expression",
+      "expression": "upright_x + upright_length / 2",
+      "unit": "mm",
+      "source": "derived",
+      "editable": false
+    },
+    "groove_z": {
+      "label": "Groove Z",
+      "type": "expression",
+      "expression": "overall_height - groove_depth",
+      "unit": "mm",
+      "source": "derived",
+      "editable": false
+    },
+    "front_notch_diameter": {
+      "label": "Front notch diameter",
+      "type": "expression",
+      "expression": "front_notch_radius * 2",
+      "unit": "mm",
+      "source": "derived",
+      "editable": false
     }
   },
   "feature_graph": {
@@ -187,9 +252,59 @@
         "id": "base",
         "type": "box",
         "operation": "add",
+        "source_feature_ids": ["base"],
         "parameters": {"length": "overall_length", "width": "overall_width", "height": "base_thickness"},
+        "placement": {"origin": [0, 0, 0]},
         "status": "implemented",
         "implementation": "base",
+        "capability_status": "supported"
+      },
+      {
+        "id": "upright",
+        "type": "box",
+        "operation": "add",
+        "target": "base",
+        "source_feature_ids": ["upright"],
+        "parameters": {"length": "upright_length", "width": "overall_width", "height": "upright_height"},
+        "placement": {"origin": ["upright_x", 0, "base_thickness"]},
+        "status": "implemented",
+        "implementation": "upright",
+        "capability_status": "supported"
+      },
+      {
+        "id": "top_groove",
+        "type": "pocket",
+        "operation": "cut",
+        "target": "upright",
+        "source_feature_ids": ["top_groove"],
+        "parameters": {"length": "upright_length", "width": "groove_width", "depth": "groove_depth"},
+        "placement": {"origin": ["groove_x", "groove_y", "groove_z"]},
+        "status": "implemented",
+        "implementation": "top_groove",
+        "capability_status": "supported"
+      },
+      {
+        "id": "main_hole",
+        "type": "through_hole",
+        "operation": "cut",
+        "target": "top_groove",
+        "source_feature_ids": ["main_hole"],
+        "parameters": {"diameter": "main_hole_diameter", "depth": "hole_cut_depth"},
+        "placement": {"origin": ["main_hole_x", "main_hole_y", -1]},
+        "status": "implemented",
+        "implementation": "main_hole",
+        "capability_status": "supported"
+      },
+      {
+        "id": "front_notch",
+        "type": "through_hole",
+        "operation": "cut",
+        "target": "main_hole",
+        "source_feature_ids": ["front_notch"],
+        "parameters": {"diameter": "front_notch_diameter", "depth": "hole_cut_depth"},
+        "placement": {"origin": [0, "main_hole_y", -1]},
+        "status": "implemented",
+        "implementation": "front_notch",
         "capability_status": "supported"
       }
     ]
@@ -218,6 +333,12 @@
       "name": "Front notch",
       "type": "cut",
       "description": "Semicircular cut at the front edge"
+    },
+    {
+      "id": "top_groove",
+      "name": "Top groove",
+      "type": "pocket",
+      "description": "Top-center rectangular groove in the rear upright"
     }
   ],
   "assumptions": [
@@ -227,7 +348,7 @@
   "cad": {
     "language": "cadquery-python",
     "source_kind": "compiled",
-    "source": "p = PARAMETERS\n\nbase = cq.Workplane(\"XY\").box(p[\"overall_length\"], p[\"overall_width\"], p[\"base_thickness\"], centered=False)\n\nupright = cq.Workplane(\"XY\").box(p[\"upright_length\"], p[\"overall_width\"], p[\"upright_height\"], centered=False).translate((p[\"overall_length\"] - p[\"upright_length\"], 0, p[\"base_thickness\"]))\n\nbody = base.union(upright)\n\ngroove = cq.Workplane(\"XY\").box(p[\"upright_length\"], p[\"groove_width\"], p[\"groove_depth\"], centered=False).translate((p[\"overall_length\"] - p[\"upright_length\"], (p[\"overall_width\"] - p[\"groove_width\"]) / 2, p[\"overall_height\"] - p[\"groove_depth\"]))\n\nwith_groove = body.cut(groove)\n\nmain_hole = cq.Workplane(\"XY\").circle(p[\"main_hole_diameter\"] / 2).extrude(p[\"base_thickness\"] + 2).translate((p[\"main_hole_x\"], p[\"overall_width\"] / 2, -1))\n\nwith_main_hole = with_groove.cut(main_hole)\n\nfront_notch = cq.Workplane(\"XY\").circle(p[\"front_notch_radius\"]).extrude(p[\"base_thickness\"] + 2).translate((0, p[\"overall_width\"] / 2, -1))\n\nresult = with_main_hole.cut(front_notch)\n",
+    "source": "",
     "entry_variable": "result",
     "generation_attempt": 1
   },
