@@ -251,6 +251,11 @@ class SpecificationTests(unittest.TestCase):
         draft = DraftSpecification.model_validate(ai.normalize_draft_specification_payload(payload))
         self.assertEqual(draft.features[0].id, "base")
 
+    def test_draft_normalizes_deepseek_draft_specification_wrapper(self):
+        payload = {"draft_specification": {"title": "Plate", "dimensions": [], "features": [{"id": "base", "label": "Base", "type": "box", "operation": "add"}], "assumptions": [], "questions": [], "annotations": []}}
+        draft = DraftSpecification.model_validate(ai.normalize_draft_specification_payload(payload))
+        self.assertEqual(draft.features[0].id, "base")
+
     def test_confirmed_specification_compiles_to_trusted_feature_graph(self):
         project = project_from_specification(complete_specification())
         self.assertEqual(project.cad.source_kind, "compiled")

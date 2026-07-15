@@ -98,7 +98,13 @@ def validate_image_upload(data: bytes, filename: str = "", mime_type: str = "") 
 def normalize_draft_specification_payload(payload: Dict[str, Any]) -> Dict[str, Any]:
     """Translate observed provider field variants into the narrow DraftSpecification contract."""
     wrapped_parameters = payload.get("parameters")
-    normalized = dict(wrapped_parameters) if isinstance(wrapped_parameters, dict) and "features" in wrapped_parameters else dict(payload)
+    wrapped_specification = payload.get("draft_specification")
+    if isinstance(wrapped_parameters, dict) and "features" in wrapped_parameters:
+        normalized = dict(wrapped_parameters)
+    elif isinstance(wrapped_specification, dict) and "features" in wrapped_specification:
+        normalized = dict(wrapped_specification)
+    else:
+        normalized = dict(payload)
     if str(normalized.get("units", "")).lower() in {"millimeter", "millimeters", "millimetre", "millimetres"}:
         normalized["units"] = "mm"
 
