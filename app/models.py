@@ -90,6 +90,25 @@ class SpecificationDimension(BaseModel):
     evidence: List[str] = Field(default_factory=list)
 
 
+class FeaturePlacement(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    reference: Optional[str] = None
+    plane: Optional[Literal["XY", "XZ", "YZ"]] = None
+    origin: Optional[List[FeatureValue]] = None
+    axis: Optional[str] = None
+    direction: Optional[str] = None
+    rotation_deg: Optional[FeatureValue] = None
+    offsets: Dict[str, FeatureValue] = Field(default_factory=dict)
+
+    @field_validator("origin")
+    @classmethod
+    def origin_has_three_coordinates(cls, value: Optional[List[FeatureValue]]) -> Optional[List[FeatureValue]]:
+        if value is not None and len(value) != 3:
+            raise ValueError("feature placement origin must contain exactly three coordinates")
+        return value
+
+
 class SpecificationFeature(BaseModel):
     id: str = Field(pattern=r"^[a-z][a-z0-9_]*$")
     label: str
@@ -97,7 +116,7 @@ class SpecificationFeature(BaseModel):
     operation: FeatureOperationKind
     target: Optional[str] = None
     parameters: Dict[str, FeatureValue] = Field(default_factory=dict)
-    placement: Dict[str, FeatureValue | List[FeatureValue]] = Field(default_factory=dict)
+    placement: FeaturePlacement = Field(default_factory=FeaturePlacement)
     status: SpecificationStatus = "needs_input"
     critical_fields: List[str] = Field(default_factory=list)
     confidence: float = Field(default=0.5, ge=0, le=1)
@@ -171,25 +190,6 @@ class FeatureProfile(BaseModel):
     def profile_points_are_two_dimensional(cls, value: List[List[FeatureValue]]) -> List[List[FeatureValue]]:
         if any(len(point) != 2 for point in value):
             raise ValueError("feature profile points must contain exactly two coordinates")
-        return value
-
-
-class FeaturePlacement(BaseModel):
-    model_config = ConfigDict(extra="forbid")
-
-    reference: Optional[str] = None
-    plane: Optional[Literal["XY", "XZ", "YZ"]] = None
-    origin: Optional[List[FeatureValue]] = None
-    axis: Optional[str] = None
-    direction: Optional[str] = None
-    rotation_deg: Optional[FeatureValue] = None
-    offsets: Dict[str, FeatureValue] = Field(default_factory=dict)
-
-    @field_validator("origin")
-    @classmethod
-    def origin_has_three_coordinates(cls, value: Optional[List[FeatureValue]]) -> Optional[List[FeatureValue]]:
-        if value is not None and len(value) != 3:
-            raise ValueError("feature placement origin must contain exactly three coordinates")
         return value
 
 

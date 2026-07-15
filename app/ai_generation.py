@@ -454,7 +454,8 @@ async def plan_draft_specification(
         ],
         "temperature": 0.1,
         "max_tokens": 5000,
-        "response_format": {"type": "json_object"},
+        "tools": [{"type": "function", "function": {"name": "submit_draft_specification", "description": "Return the DraftSpecification.", "parameters": DraftSpecification.model_json_schema(), "strict": True}}],
+        "tool_choice": {"type": "function", "function": {"name": "submit_draft_specification"}},
     }
     result = normalize_draft_specification_payload(await _chat_json(url, api_key, payload, "draft_specification"))
     try:

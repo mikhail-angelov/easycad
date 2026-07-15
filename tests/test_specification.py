@@ -8,6 +8,7 @@ from unittest.mock import AsyncMock, patch
 import app.ai_generation as ai
 from app.feature_compiler import planner_operation_types
 from app.models import DraftSpecification, SpecificationAssumption, SpecificationDimension, SpecificationFeature
+from pydantic import ValidationError as PydanticValidationError
 from app.specification import (
     SpecificationValidationError,
     apply_specification_edits,
@@ -50,9 +51,13 @@ class SpecificationTests(unittest.TestCase):
 
     def test_unknown_placement_field_blocks_validation_before_build(self):
         specification = complete_specification()
-        specification.features[0].placement = {"reference": "base", "offset": [0, 0, 20]}
-        with self.assertRaisesRegex(SpecificationValidationError, "placement is invalid"):
-            validate_specification(specification)
+        with self.assertRaisesRegex(PydanticValidationError, "offset"):
+            SpecificationFeature.model_validate({**specification.features[0].model_dump(), "placement": {"reference": "base", "offset": [0, 0, 20]}})
+
+    def test_draft_planner_schema_forbids_unknown_placement_fields(self):
+        placement_schema = DraftSpecification.model_json_schema()["$defs"]["FeaturePlacement"]
+        self.assertFalse(placement_schema["additionalProperties"])
+        self.assertNotIn("offset", placement_schema["properties"])
 
     def test_missing_critical_dimension_blocks_build(self):
         specification = complete_specification()
@@ -152,6 +157,10 @@ class SpecificationTests(unittest.TestCase):
         self.assertEqual(request_context["drawing_analysis"], analysis)
         self.assertEqual(request_context["previous_specification"], previous.model_dump(mode="json"))
         self.assertEqual(request_context["user_inputs"], user_inputs)
+        self.assertTrue(payload["tools"][0]["function"]["strict"])
+        placement_schema = payload["tools"][0]["function"]["parameters"]["$defs"]["FeaturePlacement"]
+        self.assertFalse(placement_schema["additionalProperties"])
+        self.assertNotIn("offset", placement_schema["properties"])
 
     def test_draft_planner_normalizes_known_provider_field_variants(self):
         response = {
@@ -203,7 +212,7 @@ class SpecificationTests(unittest.TestCase):
             "annotations": [{"id": "ann1", "x": 0.5, "y": 0.1, "text": "Outer length 80mm", "links_to": "outer_length"}],
         }
         draft = ai.DraftSpecification.model_validate(ai.normalize_draft_specification_payload(payload))
-        self.assertEqual(draft.features[1].placement, {})
+        self.assertIsNone(draft.features[1].placement.origin)
         self.assertEqual(draft.dimensions[0].source, "drawing")
         self.assertEqual(draft.questions[0].field_id, "main_body")
         self.assertEqual(draft.annotations[0].label, "Outer length 80mm")

@@ -138,12 +138,12 @@ def validate_specification(specification: DraftSpecification) -> Dict[str, float
         if feature.type not in compiler_operation_types():
             field_ids.append(feature.id)
             messages.append(f"{feature.id} uses unsupported operation type {feature.type}")
-        if feature.placement:
-            try:
-                FeaturePlacement.model_validate(feature.placement)
-            except PydanticValidationError:
-                field_ids.append(feature.id)
-                messages.append(f"{feature.id} placement is invalid")
+        try:
+            placement = FeaturePlacement.model_validate(feature.placement).model_dump(exclude_none=True)
+        except PydanticValidationError:
+            field_ids.append(feature.id)
+            messages.append(f"{feature.id} placement is invalid")
+            placement = {}
         if feature.operation in {"cut", "intersect", "modify", "pattern"} and not feature.target:
             field_ids.append(feature.id)
             messages.append(f"{feature.id} requires a target")
@@ -151,9 +151,9 @@ def validate_specification(specification: DraftSpecification) -> Dict[str, float
             field_ids.append(feature.id)
             messages.append(f"{feature.id} targets an unknown or later feature")
         for field in feature.critical_fields:
-            if field in {"placement", "position"} and feature.placement:
+            if field in {"placement", "position"} and placement:
                 continue
-            if field not in feature.parameters and field not in feature.placement:
+            if field not in feature.parameters and field not in placement:
                 field_ids.append(feature.id)
                 messages.append(f"{feature.id} is missing {field}")
         known_features.add(feature.id)
@@ -183,7 +183,8 @@ def project_from_specification(specification: DraftSpecification) -> CADProject:
     operations = []
     summaries = []
     for feature in specification.features:
-        placement = FeaturePlacement.model_validate(feature.placement) if feature.placement else None
+        placement_model = FeaturePlacement.model_validate(feature.placement)
+        placement = placement_model if placement_model.model_dump(exclude_none=True) else None
         operations.append(
             FeatureOperation(
                 id=feature.id,
