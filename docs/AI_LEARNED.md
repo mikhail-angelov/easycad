@@ -208,29 +208,29 @@ the latter failed Pydantic validation before the controlled review path.
 - Allowed repair responses to replace an operation type; rejected because a repair can silently change the Feature Graph's geometry.
 - Kept non-scalar provider fields in an operation marked unsupported; rejected because Pydantic validates field types before status is used.
 
-## 2026-07-15 — Reviewable clarification patches
+## 2026-07-15 — Full specification replanning after clarification
 
 ### Goal
 
-Apply free-text answers to a `DraftSpecification` without allowing the planner to silently rewrite the model.
+Refresh a drawing specification after user clarification without re-running vision analysis.
 
 ### Golden path
 
-1. Require the client to identify the unresolved question that a clarification answers.
-2. Ask the planner for a constrained patch limited to the linked field and existing unresolved IDs.
-3. Validate and apply only existing dimension values and a feature's `parameters`, `placement`, or `target`.
-4. Mark returned values and feature details as `assumed`; return the updated specification with diagnostics when acceptance is still required.
-5. Have the user explicitly accept each proposal, then run deterministic specification validation and rebuild.
+1. Run vision analysis once at upload and retain it in the browser's `DraftSpecification` session.
+2. Preserve every question-scoped user clarification in client state.
+3. On validation, send the original vision analysis, prior specification, and all user inputs to the draft planner in one request.
+4. Replace the browser specification with the returned complete `DraftSpecification`; do not apply a model-generated patch.
+5. Keep normalization technical only, and return specification diagnostics to the UI instead of HTTP 422 for an incomplete draft.
 
 ### Verification
 
-`make test-unit` and `npm run build` passed after tests verified that a width clarification becomes a proposal, cannot alter an unrelated confirmed dimension, and is returned to the client for review.
+`make test` and `npm run build` passed after API tests verified that multiple question clarifications are sent in one complete replan with the original analysis available to the planner.
 
 ### Failure pattern avoided
 
-Returning HTTP 422 immediately after a planner patch discards the updated specification, so the user cannot review or accept the clarification. Ignoring `unresolved_question` also leaves the UI without the planner's requested follow-up.
+Provider responses naturally return full dimensions and feature records, not the artificially narrow patch shape. Rejecting these responses with HTTP 422 prevents the user from continuing review.
 
 ### Ruled-out approaches
 
-- Tried treating planner output as confirmed edits; rejected because SPEC 3 requires returned clarification changes to remain proposed for review.
-- Tried accepting a global free-text field without a linked question; rejected because a clarification patch may only affect user-referenced or unresolved IDs.
+- Tried a constrained patch contract; rejected because providers returned new dimensions and complete feature updates that did not fit the patch schema.
+- Tried one planner request per question; rejected because related answers must be interpreted together.

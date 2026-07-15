@@ -123,6 +123,7 @@ def normalize_draft_specification_payload(payload: Dict[str, Any]) -> Dict[str, 
         description = str(item.get("description", ""))
         item.setdefault("value", description)
         item.setdefault("rationale", description)
+        item.setdefault("affected_ids", item.get("affects", []))
         assumptions.append(item)
     normalized["assumptions"] = assumptions
 
@@ -131,9 +132,13 @@ def normalize_draft_specification_payload(payload: Dict[str, Any]) -> Dict[str, 
         if not isinstance(question, dict):
             continue
         item = dict(question)
-        related = item.get("related_features") or item.get("related_dimensions") or [item["related_feature"]] if item.get("related_feature") else item.get("related_features") or item.get("related_dimensions") or []
+        related = item.get("related_features") or item.get("related_dimensions") or item.get("required_for") or []
+        if not related and item.get("related_feature"):
+            related = [item["related_feature"]]
+        if isinstance(related, str):
+            related = [related]
         item.setdefault("field_id", related[0] if related else item.get("id", "question"))
-        item.setdefault("prompt", item.get("question", "Please provide the missing detail."))
+        item.setdefault("prompt", item.get("question", item.get("description", "Please provide the missing detail.")))
         questions.append(item)
     normalized["questions"] = questions
 
@@ -142,7 +147,14 @@ def normalize_draft_specification_payload(payload: Dict[str, Any]) -> Dict[str, 
         if not isinstance(annotation, dict):
             continue
         item = dict(annotation)
-        item.setdefault("field_id", item.get("links_to", item.get("id", "annotation")))
+        links = item.get("links_to", item.get("field_ids", item.get("field_id", [])))
+        if isinstance(links, str):
+            links = [links]
+        if not isinstance(links, list):
+            links = []
+        field_ids = [link for link in links if isinstance(link, str) and link]
+        item["field_ids"] = field_ids
+        item["field_id"] = field_ids[0] if field_ids else str(item.get("field_id") or item.get("id", "annotation"))
         item.setdefault("label", item.get("text", item["field_id"]))
         annotations.append(item)
     normalized["annotations"] = annotations
@@ -392,7 +404,14 @@ async def plan_cad_project(analysis: Dict[str, Any], instructions: str, api_key:
     return result
 
 
-async def plan_draft_specification(analysis: Dict[str, Any], instructions: str, api_key: str) -> DraftSpecification:
+async def plan_draft_specification(
+    analysis: Dict[str, Any],
+    instructions: str,
+    api_key: str,
+    *,
+    previous_specification: DraftSpecification | None = None,
+    user_inputs: Dict[str, Any] | None = None,
+) -> DraftSpecification:
     """Convert image observations into an editable pre-CAD specification."""
     model = normalize_model_id(os.environ.get("DEEP_SEEK_MODEL", os.environ.get("DEEPSEEK_MODEL", "deepseek-chat")))
     url = os.environ.get("DEEP_SEEK_BASE_URL", "https://api.deepseek.com/chat/completions")
@@ -401,18 +420,37 @@ async def plan_draft_specification(analysis: Dict[str, Any], instructions: str, 
         "Return only JSON with title, units, dimensions, features, assumptions, questions, annotations. "
         "Each dimension requires id, label, value or expression, unit, source, confidence, status, critical, evidence. "
         "Each feature requires id, label, type, operation, target when known, parameters, placement, status, critical_fields, confidence, evidence. "
+        f"Feature type must be exactly one of these trusted compiler types: {planner_operation_types()}. "
+        "The vision-analysis terms body and groove are observations, not valid feature types: choose a supported type that represents them, "
+        "such as box or extrude, or mark the feature unsupported when no trusted type can represent it. "
+        "Feature placement may contain only reference, plane, origin, axis, direction, rotation_deg, and offsets. "
+        "Use origin as exactly three numeric values or dimension IDs for translation; never use offset, center, position, depth, or centered_on_width. "
         "Use status confirmed only for unambiguous observed values. Use needs_input for missing critical data, conflicted for contradictions, "
         "and assumed only with an assumption describing the proposal. Every missing size, position, target, cut direction, or depth needed "
         "for a printable feature must become a required question. Never silently invent a dimension. "
         "Annotations use normalized x and y coordinates from 0 to 1 and link to a dimension, feature, or question. "
     )
+    if previous_specification is not None:
+        prompt += (
+            "Return a complete replacement DraftSpecification, not a patch. The previous specification is reference context only; "
+            "use the drawing analysis and user inputs to resolve it again. Keep IDs for the same dimensions, features, and questions "
+            "when possible so the review UI remains connected. Treat user inputs as the latest clarification. "
+            "User input contract: dimension_values are direct user-entered facts and must be returned as confirmed; "
+            "accepted_assumption_ids and accepted_feature_ids are explicit user approvals and their matching items must be returned "
+            "with status confirmed. Do not return a question that is answered by a direct value or an accepted proposal. "
+            "Only create a new question when the user inputs still leave a necessary modelling fact unresolved."
+        )
     if instructions.strip():
         prompt += f"\nUser instructions: {instructions.strip()}"
     payload = {
         "model": model,
         "messages": [
             {"role": "system", "content": prompt},
-            {"role": "user", "content": json.dumps({"drawing_analysis": analysis}, ensure_ascii=False)},
+            {"role": "user", "content": json.dumps({
+                "drawing_analysis": analysis,
+                "previous_specification": previous_specification.model_dump(mode="json") if previous_specification else None,
+                "user_inputs": user_inputs or {},
+            }, ensure_ascii=False)},
         ],
         "temperature": 0.1,
         "max_tokens": 5000,
@@ -420,42 +458,11 @@ async def plan_draft_specification(analysis: Dict[str, Any], instructions: str, 
     }
     result = normalize_draft_specification_payload(await _chat_json(url, api_key, payload, "draft_specification"))
     try:
-        canonical_analysis = {"views": analysis.get("views", []), "dimensions": [], "features": analysis.get("features", []), "uncertainties": []}
-        return DraftSpecification.model_validate({"analysis": canonical_analysis, **result})
+        return DraftSpecification.model_validate({"analysis": analysis, **result})
     except PydanticValidationError as exc:
         errors = [{"field": ".".join(str(part) for part in error["loc"]), "message": error["msg"]} for error in exc.errors()[:8]]
         logger.warning("draft_specification_validation_failed errors=%s", errors)
         return fallback_draft_specification(result, analysis, errors)
-
-
-async def plan_specification_patch(
-    specification: DraftSpecification, question_id: str, free_text: str, api_key: str
-) -> Dict[str, Any]:
-    """Request a narrow patch only when user free text needs interpretation."""
-    if not free_text.strip():
-        return {"dimension_values": {}, "feature_updates": {}}
-    model = normalize_model_id(os.environ.get("DEEP_SEEK_MODEL", os.environ.get("DEEPSEEK_MODEL", "deepseek-chat")))
-    url = os.environ.get("DEEP_SEEK_BASE_URL", "https://api.deepseek.com/chat/completions")
-    payload = {
-        "model": model,
-        "messages": [
-            {
-                "role": "system",
-                "content": (
-                    "Interpret the user's clarification for the named unresolved question in this DraftSpecification. Return only JSON with "
-                    "dimension_values, feature_updates, resolved_question, and optional unresolved_question. Update only the linked field "
-                    "or existing unresolved fields needed to answer it. feature_updates may contain only parameters, placement, or target. "
-                    "All returned values are proposals for user review, not confirmations. Do not create CAD code, Feature Graph operations, "
-                    "new IDs, or unrelated changes. If the clarification is insufficient, return unresolved_question with a clearer prompt."
-                ),
-            },
-            {"role": "user", "content": json.dumps({"specification": specification.model_dump(), "question_id": question_id, "clarification": free_text}, ensure_ascii=False)},
-        ],
-        "temperature": 0.0,
-        "max_tokens": 2000,
-        "response_format": {"type": "json_object"},
-    }
-    return await _chat_json(url, api_key, payload, "specification_patch")
 
 
 def project_from_plan(
@@ -1268,7 +1275,6 @@ async def _chat_json(url: str, api_key: str, payload: Dict[str, Any], stage: str
         "HTTP-Referer": "http://localhost:8852",
         "X-Title": "EasyCAD",
     }
-    last_content = ""
     for attempt in range(2):
         request_payload = dict(payload)
         if attempt:
@@ -1301,7 +1307,19 @@ async def _chat_json(url: str, api_key: str, payload: Dict[str, Any], stage: str
 
         try:
             response_payload = response.json()
-            message = response_payload["choices"][0]["message"]
+            choice = response_payload["choices"][0]
+            message = choice["message"]
+            provider_error = choice.get("error")
+            if provider_error or choice.get("finish_reason") == "error":
+                error_type = "provider_error"
+                if isinstance(provider_error, dict):
+                    metadata = provider_error.get("metadata")
+                    candidate = metadata.get("error_type") if isinstance(metadata, dict) else provider_error.get("code")
+                    if isinstance(candidate, str) and candidate:
+                        error_type = candidate
+                _log_model_response(stage, request_payload, attempt + 1, response.status_code, message.get("content", ""), response_payload)
+                user_message = "Provider temporarily rate-limited the request. Please try again." if "rate_limit" in error_type else "Provider could not complete the request. Please try again."
+                raise GenerationError(stage, user_message, {"provider_error": error_type})
             tool_calls = message.get("tool_calls", [])
             content = tool_calls[0]["function"]["arguments"] if tool_calls else message["content"]
         except (KeyError, IndexError, TypeError, json.JSONDecodeError) as exc:
@@ -1318,7 +1336,7 @@ async def _chat_json(url: str, api_key: str, payload: Dict[str, Any], stage: str
         try:
             return _parse_json_object(content, stage)
         except GenerationError:
-            last_content = str(content)
+            continue
     raise GenerationError(stage, "Provider did not return a JSON object")
 
 
@@ -1333,21 +1351,10 @@ def _parse_json_object(content: Any, stage: str) -> Dict[str, Any]:
         content = re.sub(r"\s*```$", "", content).strip()
     try:
         parsed = json.loads(content)
-        if isinstance(parsed, dict):
-            return parsed
     except json.JSONDecodeError:
-        pass
-
-    decoder = json.JSONDecoder()
-    for index, char in enumerate(content):
-        if char != "{":
-            continue
-        try:
-            parsed, _ = decoder.raw_decode(content[index:])
-            if isinstance(parsed, dict):
-                return parsed
-        except json.JSONDecodeError:
-            continue
+        parsed = None
+    if isinstance(parsed, dict):
+        return parsed
     raise GenerationError(stage, "Provider did not return a JSON object")
 
 

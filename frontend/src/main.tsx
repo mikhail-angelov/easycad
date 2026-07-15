@@ -25,10 +25,6 @@ function buildableSpecification(specification: DraftSpecification): DraftSpecifi
   return { ...specification, features: specification.features.filter((feature) => feature.status !== 'unsupported') }
 }
 
-function restoreOmittedFeatures(specification: DraftSpecification, previous: DraftSpecification): DraftSpecification {
-  return { ...specification, features: [...specification.features, ...previous.features.filter((feature) => feature.status === 'unsupported')] }
-}
-
 function statusLabel(status: string): string {
   return ({ needs_input: 'Needs a value', assumed: 'Proposed value', conflicted: 'Conflict', confirmed: 'Confirmed', unsupported: 'Not included' }[status] || status)
 }
@@ -68,8 +64,7 @@ function UploadScreen() {
       <p class="intro">Upload a technical drawing. EasyCAD will identify dimensions and questions for you to confirm before creating an STL.</p>
       <input ref={input} class="sr-only" type="file" accept="image/png,image/jpeg,image/webp" onChange={change} />
       <button class="upload-target" type="button" disabled={busy} onClick={() => input.current?.click()}>
-        <strong>{busy ? 'Reading your drawing…' : 'Choose a drawing'}</strong>
-        <span>PNG, JPEG, or WebP</span>
+        {busy ? <><span class="spinner" aria-hidden="true" /><span><strong>Analyzing your drawing…</strong><small>This can take a moment while EasyCAD reads the image.</small></span></> : <><strong>Choose a drawing</strong><span>PNG, JPEG, or WebP</span></>}
       </button>
       <p class="fine-print">Best results come from a drawing with dimensions and clear views.</p>
     </div>
@@ -116,9 +111,9 @@ function ReviewWorkspace() {
     try {
       const result = await requestJson<{ valid: boolean; specification: DraftSpecification; diagnostics?: { field_ids: string[]; messages: string[] } }>('/api/specifications/validate', {
         method: 'POST', headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ specification: buildableSpecification(spec), dimension_values: state.draftValues, accepted_feature_ids: state.acceptedFeatureIds, accepted_assumption_ids: state.acceptedAssumptionIds, free_text: state.freeText, clarification_question_id: state.clarificationQuestionId }),
+        body: JSON.stringify({ specification: spec, dimension_values: state.draftValues, accepted_feature_ids: state.acceptedFeatureIds, accepted_assumption_ids: state.acceptedAssumptionIds, clarifications: state.clarifications }),
       })
-      state.setSpecification(restoreOmittedFeatures(result.specification, spec))
+      state.setSpecification(result.specification)
       state.setValidationPassed(result.valid)
       if (!result.valid) {
         const diagnostics = result.diagnostics || { field_ids: [], messages: ['Review the proposed clarification before building.'] }
@@ -164,6 +159,9 @@ function ReviewWorkspace() {
         {spec.questions.length > 0 && <ReviewSection title="Questions" count={String(spec.questions.length)}>
           {spec.questions.map((question) => <QuestionRow key={question.id} question={question} />)}
         </ReviewSection>}
+        {Object.values(state.clarifications).some((text) => text.trim()) && <ReviewSection title="Your clarifications">
+          {Object.entries(state.clarifications).filter(([, text]) => text.trim()).map(([questionId, text]) => <p class="omitted" key={questionId}><strong>{questionId}:</strong> {text}</p>)}
+        </ReviewSection>}
         {spec.features.some((feature) => feature.status === 'assumed') && <ReviewSection title="Proposed feature details">
           {spec.features.filter((feature) => feature.status === 'assumed').map((feature) => <label class="assumption" key={feature.id}><input type="checkbox" checked={state.acceptedFeatureIds.includes(feature.id)} onChange={() => state.toggleFeature(feature.id)} /> <span><strong>Use this proposed detail</strong><br />{feature.label}</span></label>)}
         </ReviewSection>}
@@ -182,15 +180,11 @@ function ReviewWorkspace() {
 function QuestionRow({ question }: { question: DraftSpecification['questions'][number] }) {
   const state = useAppStore()
   const specification = state.specification!
-  const isActive = state.clarificationQuestionId === question.id
   const answerAlternative = (alternative: number | string) => {
     if (specification.dimensions.some((dimension) => dimension.id === question.field_id)) state.setDraftValue(question.field_id, alternative)
-    else {
-      state.setClarificationQuestionId(question.id)
-      state.setFreeText(`The answer is: ${String(alternative)}.`)
-    }
+    else state.setClarification(question.id, `The answer is: ${String(alternative)}.`)
   }
-  return <div class="question" id={`item-${question.field_id}`}><strong>{question.prompt}</strong><div class="choices">{(question.alternatives || []).map((alternative) => <button type="button" key={String(alternative)} onClick={() => answerAlternative(alternative)}>{String(alternative)} {typeof alternative === 'number' ? 'mm' : ''}</button>)}</div><label class="question-clarification">Add a clarification<textarea value={isActive ? state.freeText : ''} placeholder="Describe this detail, for example: “the hole is centered on the plate.”" onFocus={() => state.setClarificationQuestionId(question.id)} onInput={(event) => { state.setClarificationQuestionId(question.id); state.setFreeText(event.currentTarget.value) }} /></label></div>
+  return <div class="question" id={`item-${question.field_id}`}><strong>{question.prompt}</strong><div class="choices">{(question.alternatives || []).map((alternative) => <button type="button" key={String(alternative)} onClick={() => answerAlternative(alternative)}>{String(alternative)} {typeof alternative === 'number' ? 'mm' : ''}</button>)}</div><label class="question-clarification">Add a clarification<textarea value={state.clarifications[question.id] || ''} placeholder="Describe this detail, for example: “the hole is centered on the plate.”" onInput={(event) => state.setClarification(question.id, event.currentTarget.value)} /></label></div>
 }
 
 function ReviewSection({ title, count, tone, children }: { title: string; count?: string; tone?: string; children: preact.ComponentChildren }) {

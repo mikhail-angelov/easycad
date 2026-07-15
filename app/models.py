@@ -124,6 +124,7 @@ class SpecificationQuestion(BaseModel):
 class SpecificationAnnotation(BaseModel):
     id: str = Field(pattern=r"^[a-z][a-z0-9_]*$")
     field_id: str
+    field_ids: List[str] = Field(default_factory=list)
     x: float = Field(ge=0, le=1)
     y: float = Field(ge=0, le=1)
     label: str
@@ -155,8 +156,7 @@ class SpecificationEditRequest(BaseModel):
     dimension_values: Dict[str, ParameterValue] = Field(default_factory=dict)
     accepted_feature_ids: List[str] = Field(default_factory=list)
     accepted_assumption_ids: List[str] = Field(default_factory=list)
-    free_text: str = ""
-    clarification_question_id: Optional[str] = None
+    clarifications: Dict[str, str] = Field(default_factory=dict)
 
 
 class FeatureProfile(BaseModel):

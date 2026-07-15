@@ -34,6 +34,7 @@ export interface Question {
 export interface Annotation {
   id: string
   field_id: string
+  field_ids: string[]
   x: number
   y: number
   label: string

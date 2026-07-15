@@ -20,7 +20,7 @@ from .ai_generation import (
     GenerationError,
     compare_project_renders,
     generate_draft_specification_from_image,
-    plan_specification_patch,
+    plan_draft_specification,
     validate_image_upload,
 )
 from .models import (
@@ -34,8 +34,6 @@ from .models import (
 )
 from .specification import (
     SpecificationValidationError,
-    apply_clarification_patch,
-    apply_specification_edits,
     project_from_specification,
     validate_specification,
 )
@@ -385,35 +383,31 @@ async def analyze_specification(
 
 @app.post("/api/specifications/validate")
 async def validate_specification_endpoint(req: SpecificationEditRequest):
-    draft = apply_specification_edits(
-        req.specification,
-        req.dimension_values,
-        req.accepted_assumption_ids,
-        req.free_text,
-        req.accepted_feature_ids,
-    )
-    clarification_applied = False
-    if req.free_text.strip():
-        if not req.clarification_question_id:
-            raise _specification_error(SpecificationValidationError([], ["Choose the question this clarification answers"]))
+    clarifications = [(question_id, text.strip()) for question_id, text in req.clarifications.items() if text.strip()]
+    user_inputs = {
+        "dimension_values": req.dimension_values,
+        "accepted_feature_ids": req.accepted_feature_ids,
+        "accepted_assumption_ids": req.accepted_assumption_ids,
+        "clarifications": dict(clarifications),
+    }
+    if any(user_inputs.values()):
         try:
-            patch = await plan_specification_patch(draft, req.clarification_question_id, req.free_text, os.environ.get("DEEP_SEEK_KEY", ""))
-            draft = apply_clarification_patch(draft, req.clarification_question_id, patch)
-            clarification_applied = True
+            draft = await plan_draft_specification(
+                req.specification.analysis.model_dump(mode="json"),
+                "",
+                os.environ.get("DEEP_SEEK_KEY", ""),
+                previous_specification=req.specification,
+                user_inputs=user_inputs,
+            )
+            draft.source = req.specification.source
         except GenerationError as exc:
-            raise HTTPException(422, {"stage": exc.stage, "message": str(exc), "detail": exc.detail})
-        except SpecificationValidationError as exc:
-            raise _specification_error(exc)
+            return {"valid": False, "specification": req.specification.model_dump(mode="json"), "diagnostics": {"field_ids": [], "messages": [str(exc)]}}
+    else:
+        draft = req.specification
     try:
         values = validate_specification(draft)
     except SpecificationValidationError as exc:
-        if clarification_applied:
-            return {
-                "valid": False,
-                "specification": draft.model_dump(mode="json"),
-                "diagnostics": {"field_ids": exc.field_ids, "messages": exc.messages},
-            }
-        raise _specification_error(exc)
+        return {"valid": False, "specification": draft.model_dump(mode="json"), "diagnostics": {"field_ids": exc.field_ids, "messages": exc.messages}}
     return {"valid": True, "values": values, "specification": draft.model_dump(mode="json")}
 
 

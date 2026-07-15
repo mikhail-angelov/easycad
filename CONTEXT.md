@@ -28,9 +28,9 @@ _Avoid_: Build approval, build gate
 A requested CAD feature whose Feature Graph operation has deterministic compilation and semantic evidence. Unsupported features are disclosed rather than approximated.
 _Avoid_: Best-effort feature, inferred substitute
 
-**Clarification patch**:
-A planner-proposed change to a DraftSpecification in response to free text. It may update only user-referenced or unresolved IDs; indirect consequences are new conflicts or questions.
-_Avoid_: Automatic correction, global rewrite
+**Specification replan**:
+A complete DraftSpecification returned by the planner after free text. It uses the original vision analysis and all session user inputs, replacing the prior DraftSpecification.
+_Avoid_: Clarification patch, automatic geometry repair
 
 **Acceptance**:
 An explicit user decision to allow a model-extracted critical input to be compiled. Each proposal is accepted individually, whether retained or edited, though several decisions may be submitted together.

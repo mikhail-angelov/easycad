@@ -11,8 +11,7 @@ interface AppState {
   acceptedFeatureIds: string[]
   acceptedAssumptionIds: string[]
   selectedId: string | null
-  freeText: string
-  clarificationQuestionId: string | null
+  clarifications: Record<string, string>
   requestState: RequestState
   validationPassed: boolean
   error: ApiError | null
@@ -22,8 +21,7 @@ interface AppState {
   toggleFeature: (id: string) => void
   toggleAssumption: (id: string) => void
   setSelectedId: (id: string | null) => void
-  setFreeText: (freeText: string) => void
-  setClarificationQuestionId: (questionId: string | null) => void
+  setClarification: (questionId: string, text: string) => void
   setRequestState: (requestState: RequestState) => void
   setError: (error: ApiError | null) => void
   setValidationPassed: (validationPassed: boolean) => void
@@ -39,12 +37,11 @@ export const useAppStore = create<AppState>((set) => ({
   acceptedFeatureIds: [],
   acceptedAssumptionIds: [],
   selectedId: null,
-  freeText: '',
-  clarificationQuestionId: null,
+  clarifications: {},
   requestState: 'idle',
   validationPassed: false,
   error: null,
-  setSpecification: (specification) => set({ specification, project: null, draftValues: {}, acceptedFeatureIds: [], acceptedAssumptionIds: [], freeText: '', clarificationQuestionId: null, validationPassed: false, error: null }),
+  setSpecification: (specification) => set({ specification, project: null, draftValues: {}, acceptedFeatureIds: [], acceptedAssumptionIds: [], validationPassed: false, error: null }),
   setSourceUrl: (sourceUrl) => set({ sourceUrl }),
   setDraftValue: (id, value) => set((state) => ({ draftValues: { ...state.draftValues, [id]: value }, project: null, validationPassed: false })),
   toggleFeature: (id) => set((state) => ({
@@ -62,11 +59,10 @@ export const useAppStore = create<AppState>((set) => ({
     validationPassed: false,
   })),
   setSelectedId: (selectedId) => set({ selectedId }),
-  setFreeText: (freeText) => set({ freeText, project: null, validationPassed: false }),
-  setClarificationQuestionId: (clarificationQuestionId) => set({ clarificationQuestionId }),
+  setClarification: (questionId, text) => set((state) => ({ clarifications: { ...state.clarifications, [questionId]: text }, project: null, validationPassed: false })),
   setRequestState: (requestState) => set({ requestState }),
   setError: (error) => set({ error }),
   setValidationPassed: (validationPassed) => set({ validationPassed }),
   setProject: (project) => set({ project }),
-  reset: () => set({ specification: null, project: null, sourceUrl: null, draftValues: {}, acceptedFeatureIds: [], acceptedAssumptionIds: [], selectedId: null, freeText: '', clarificationQuestionId: null, requestState: 'idle', validationPassed: false, error: null }),
+  reset: () => set({ specification: null, project: null, sourceUrl: null, draftValues: {}, acceptedFeatureIds: [], acceptedAssumptionIds: [], selectedId: null, clarifications: {}, requestState: 'idle', validationPassed: false, error: null }),
 }))

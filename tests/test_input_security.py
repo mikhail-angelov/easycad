@@ -30,6 +30,28 @@ class FakeProviderClient:
         return httpx.Response(400, text='{"error":{"message":"private upstream detail"}}', request=request)
 
 
+class FakeProviderChoiceErrorClient:
+    async def __aenter__(self):
+        return self
+
+    async def __aexit__(self, *args):
+        return None
+
+    async def post(self, url, **kwargs):
+        request = httpx.Request("POST", url)
+        return httpx.Response(
+            200,
+            json={
+                "choices": [{
+                    "finish_reason": "error",
+                    "error": {"metadata": {"error_type": "rate_limit_exceeded"}},
+                    "message": {"content": '{"partial": '},
+                }],
+            },
+            request=request,
+        )
+
+
 class InputSecurityTests(unittest.TestCase):
     def test_rejects_corrupt_image(self):
         with self.assertRaisesRegex(Exception, "Invalid image"):
@@ -56,6 +78,14 @@ class InputSecurityTests(unittest.TestCase):
         self.assertEqual(str(raised.exception), "Provider returned HTTP 400")
         self.assertEqual(raised.exception.detail, {"status_code": 400})
         self.assertNotIn("private upstream detail", str(raised.exception.detail))
+
+    def test_choice_error_never_becomes_a_partial_json_object(self):
+        with patch.object(ai.httpx, "AsyncClient", return_value=FakeProviderChoiceErrorClient()):
+            with self.assertRaises(GenerationError) as raised:
+                asyncio.run(ai._chat_json("https://provider.invalid", "key", {"messages": []}, "vision_analysis"))
+
+        self.assertEqual(str(raised.exception), "Provider temporarily rate-limited the request. Please try again.")
+        self.assertEqual(raised.exception.detail, {"provider_error": "rate_limit_exceeded"})
 
 
 if __name__ == "__main__":

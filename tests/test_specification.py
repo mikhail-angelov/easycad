@@ -2,13 +2,14 @@ from __future__ import annotations
 
 import unittest
 import asyncio
+import json
 from unittest.mock import AsyncMock, patch
 
 import app.ai_generation as ai
-from app.models import DraftSpecification, SpecificationAssumption, SpecificationDimension, SpecificationFeature, SpecificationQuestion
+from app.feature_compiler import planner_operation_types
+from app.models import DraftSpecification, SpecificationAssumption, SpecificationDimension, SpecificationFeature
 from app.specification import (
     SpecificationValidationError,
-    apply_clarification_patch,
     apply_specification_edits,
     project_from_specification,
     validate_specification,
@@ -41,6 +42,18 @@ class SpecificationTests(unittest.TestCase):
         values = validate_specification(complete_specification())
         self.assertEqual(values["length"], 40)
 
+    def test_nonempty_feature_placement_satisfies_a_generic_placement_requirement(self):
+        specification = complete_specification()
+        specification.features[0].placement = {"origin": [0, 0, 0], "plane": "XY"}
+        specification.features[0].critical_fields.append("placement")
+        validate_specification(specification)
+
+    def test_unknown_placement_field_blocks_validation_before_build(self):
+        specification = complete_specification()
+        specification.features[0].placement = {"reference": "base", "offset": [0, 0, 20]}
+        with self.assertRaisesRegex(SpecificationValidationError, "placement is invalid"):
+            validate_specification(specification)
+
     def test_missing_critical_dimension_blocks_build(self):
         specification = complete_specification()
         specification.dimensions[0].status = "needs_input"
@@ -54,29 +67,6 @@ class SpecificationTests(unittest.TestCase):
             validate_specification(specification)
         accepted = apply_specification_edits(specification, {}, ["wall_guess"], "")
         validate_specification(accepted)
-
-    def test_clarification_patch_is_proposed_and_cannot_change_confirmed_dimensions(self):
-        specification = complete_specification()
-        specification.dimensions[1].status = "needs_input"
-        specification.questions = [SpecificationQuestion(id="width_question", field_id="width", prompt="Enter width")]
-        patched = apply_clarification_patch(
-            specification,
-            "width_question",
-            {"dimension_values": {"width": 32}, "resolved_question": True},
-        )
-        self.assertEqual(patched.dimensions[1].value, 32)
-        self.assertEqual(patched.dimensions[1].status, "assumed")
-        self.assertEqual(patched.questions, [])
-        with self.assertRaisesRegex(SpecificationValidationError, "assumption must be accepted"):
-            validate_specification(patched)
-        accepted = apply_specification_edits(patched, {"width": 32}, [], "")
-        validate_specification(accepted)
-        with self.assertRaisesRegex(SpecificationValidationError, "unrelated dimension"):
-            apply_clarification_patch(
-                specification,
-                "width_question",
-                {"dimension_values": {"length": 99}},
-            )
 
     def test_unknown_reference_and_unsupported_feature_are_reported(self):
         specification = complete_specification()
@@ -119,6 +109,49 @@ class SpecificationTests(unittest.TestCase):
         self.assertEqual(draft.questions[0].field_id, "width")
         prompt = chat.await_args.args[2]["messages"][0]["content"]
         self.assertIn("Do not return CAD code", prompt)
+        self.assertIn("trusted compiler types", prompt)
+        self.assertIn("body and groove are observations", prompt)
+        self.assertIn("never use offset, center, position, depth, or centered_on_width", prompt)
+
+    def test_draft_planner_preserves_the_complete_vision_analysis_for_replanning(self):
+        response = {"title": "Plate", "dimensions": [], "features": [], "assumptions": [], "questions": [], "annotations": []}
+        analysis = {"views": [{"id": "front"}], "dimensions": [{"id": "length", "value": 40}], "features": [], "uncertainties": [{"id": "depth"}]}
+        with patch.object(ai, "_chat_json", AsyncMock(return_value=response)):
+            draft = asyncio.run(ai.plan_draft_specification(analysis, "", "key"))
+        self.assertEqual(draft.analysis.model_dump(mode="json"), analysis)
+
+    def test_complete_replan_request_constrains_feature_types_and_carries_all_context(self):
+        response = {"title": "Plate", "dimensions": [], "features": [], "assumptions": [], "questions": [], "annotations": []}
+        analysis = {"views": [{"id": "front"}], "dimensions": [{"id": "length", "value": 40}], "features": [{"id": "base", "type": "body"}], "uncertainties": []}
+        previous = complete_specification()
+        user_inputs = {
+            "dimension_values": {"length": 42},
+            "accepted_feature_ids": ["base"],
+            "accepted_assumption_ids": [],
+            "clarifications": {"width_question": "The width is 30 mm."},
+        }
+        with patch.object(ai, "_chat_json", AsyncMock(return_value=response)) as chat:
+            asyncio.run(
+                ai.plan_draft_specification(
+                    analysis,
+                    "",
+                    "key",
+                    previous_specification=previous,
+                    user_inputs=user_inputs,
+                )
+            )
+
+        payload = chat.await_args.args[2]
+        prompt = payload["messages"][0]["content"]
+        request_context = json.loads(payload["messages"][1]["content"])
+        self.assertIn(f"trusted compiler types: {planner_operation_types()}", prompt)
+        self.assertIn("body and groove are observations, not valid feature types", prompt)
+        self.assertIn("Return a complete replacement DraftSpecification, not a patch", prompt)
+        self.assertIn("accepted_assumption_ids and accepted_feature_ids are explicit user approvals", prompt)
+        self.assertIn("Do not return a question that is answered", prompt)
+        self.assertEqual(request_context["drawing_analysis"], analysis)
+        self.assertEqual(request_context["previous_specification"], previous.model_dump(mode="json"))
+        self.assertEqual(request_context["user_inputs"], user_inputs)
 
     def test_draft_planner_normalizes_known_provider_field_variants(self):
         response = {
@@ -138,6 +171,24 @@ class SpecificationTests(unittest.TestCase):
         self.assertEqual(draft.assumptions[0].rationale, "Cavity depth follows the bottom thickness.")
         self.assertEqual(draft.questions[0].field_id, "rim")
         self.assertEqual(draft.annotations[0].label, "Height 30 mm")
+
+    def test_draft_normalizes_multi_link_annotations_and_provider_question_fields(self):
+        response = {
+            "title": "Bracket",
+            "dimensions": [{"id": "width", "label": "Width", "value": 60, "status": "confirmed"}],
+            "features": [{"id": "hole", "label": "Hole", "type": "hole", "operation": "cut", "status": "needs_input"}],
+            "assumptions": [{"id": "hole_center", "description": "Hole is centered", "affects": ["hole"]}],
+            "questions": [{"id": "hole_position", "description": "Where is the hole?", "required_for": ["hole"]}],
+            "annotations": [{"id": "overview", "x": 0.5, "y": 0.5, "text": "Width and hole", "links_to": ["width", "hole"]}],
+        }
+        with patch.object(ai, "_chat_json", AsyncMock(return_value=response)):
+            draft = asyncio.run(ai.plan_draft_specification({"features": []}, "", "key"))
+
+        self.assertEqual(draft.annotations[0].field_id, "width")
+        self.assertEqual(draft.annotations[0].field_ids, ["width", "hole"])
+        self.assertEqual(draft.questions[0].field_id, "hole")
+        self.assertEqual(draft.questions[0].prompt, "Where is the hole?")
+        self.assertEqual(draft.assumptions[0].affected_ids, ["hole"])
 
     def test_draft_normalizes_deepseek_strict_tool_variants(self):
         payload = {

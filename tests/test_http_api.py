@@ -63,10 +63,10 @@ class HTTPAPITests(unittest.TestCase):
         self.assertEqual(detail["detail"], {"status_code": 429})
         self.assertRegex(detail["request_id"], r"^[0-9a-f]{12}$")
 
-    def test_specification_validation_applies_structured_edits_without_llm(self):
+    def test_structured_edits_trigger_a_complete_draft_replan(self):
         specification = complete_specification()
         specification.dimensions[0].status = "needs_input"
-        with patch.object(main, "plan_specification_patch", AsyncMock()) as patcher:
+        with patch.object(main, "plan_draft_specification", AsyncMock(return_value=complete_specification())) as planner:
             response = self.client.post(
                 "/api/specifications/validate",
                 json={
@@ -75,31 +75,61 @@ class HTTPAPITests(unittest.TestCase):
                 },
             )
         self.assertEqual(response.status_code, 200, response.text)
-        patcher.assert_not_awaited()
+        planner.assert_awaited_once()
         self.assertTrue(response.json()["valid"])
 
-    def test_free_text_clarification_returns_a_reviewable_patch(self):
+    def test_clarifications_trigger_one_complete_draft_replan(self):
         specification = complete_specification()
         specification.dimensions[1].status = "needs_input"
         specification.questions = [SpecificationQuestion(id="width_question", field_id="width", prompt="Enter width")]
         with patch.object(
             main,
-            "plan_specification_patch",
-            AsyncMock(return_value={"dimension_values": {"width": 32}, "resolved_question": True}),
-        ) as patcher:
+            "plan_draft_specification",
+            AsyncMock(return_value=complete_specification()),
+        ) as planner:
             response = self.client.post(
                 "/api/specifications/validate",
                 json={
                     "specification": specification.model_dump(mode="json"),
-                    "free_text": "The width is 32 mm.",
-                    "clarification_question_id": "width_question",
+                    "clarifications": {"width_question": "The width is 32 mm."},
                 },
             )
         self.assertEqual(response.status_code, 200, response.text)
-        self.assertFalse(response.json()["valid"])
-        self.assertEqual(response.json()["specification"]["dimensions"][1]["status"], "assumed")
-        self.assertEqual(response.json()["diagnostics"]["field_ids"], ["width"])
-        patcher.assert_awaited_once()
+        self.assertTrue(response.json()["valid"])
+        self.assertEqual(planner.await_count, 1)
+        self.assertEqual(planner.await_args.args[0], specification.analysis.model_dump(mode="json"))
+        self.assertEqual(planner.await_args.kwargs["user_inputs"]["clarifications"], {"width_question": "The width is 32 mm."})
+
+    def test_multiple_question_clarifications_are_sent_in_one_complete_replan(self):
+        specification = complete_specification()
+        specification.dimensions[0].status = "needs_input"
+        specification.dimensions[1].status = "needs_input"
+        specification.questions = [
+            SpecificationQuestion(id="length_question", field_id="length", prompt="Enter length"),
+            SpecificationQuestion(id="width_question", field_id="width", prompt="Enter width"),
+        ]
+        with patch.object(
+            main,
+            "plan_draft_specification",
+            AsyncMock(return_value=complete_specification()),
+        ) as planner:
+            response = self.client.post(
+                "/api/specifications/validate",
+                json={
+                    "specification": specification.model_dump(mode="json"),
+                    "clarifications": {
+                        "length_question": "The length is 42 mm.",
+                        "width_question": "The width is 32 mm.",
+                    },
+                },
+            )
+        self.assertEqual(response.status_code, 200, response.text)
+        self.assertTrue(response.json()["valid"])
+        self.assertEqual(planner.await_count, 1)
+        self.assertEqual(
+            planner.await_args.kwargs["user_inputs"]["clarifications"],
+            {"length_question": "The length is 42 mm.", "width_question": "The width is 32 mm."},
+        )
 
     def test_confirmed_specification_builds_without_repair(self):
         response = self.client.post("/api/specifications/build", json=complete_specification().model_dump(mode="json"))
