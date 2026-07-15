@@ -286,3 +286,27 @@ DeepSeek function calls can return the complete draft nested in `parameters`; tr
 
 - Tried relying on prompt text alone to preserve a full graph; rejected because the provider could still return an empty wrapped payload.
 - Tried validating only the review state; rejected because incorrect cylinder plane/origin coordinates were exposed only by semantic STL build validation.
+
+## 2026-07-15 — Contract-driven draft operations
+
+### Goal
+
+Keep the LLM draft schema, specification validation, and trusted CadQuery compiler aligned.
+
+### Golden path
+
+1. Add a compiler operation to `OPERATION_CONTRACTS`.
+2. Let the registry generate its planner description and strict Draft feature schema.
+3. Run `tests.test_specification`, `tests.test_feature_compiler`, and the real bracket user-flow E2E.
+
+### Verification
+
+The bracket flow reached `artifacts/real-user-flow-3/model.stl` (59,184 bytes) after build diagnostics were supplied as a `build_repair` clarification.
+
+### Failure pattern avoided
+
+A valid JSON draft can still omit CadQuery-required profile/pattern data or use unsupported parameter names.
+
+### Ruled-out approaches
+
+- Duplicating a separate LLM-only operation catalogue; rejected because it can diverge from the compiler.
