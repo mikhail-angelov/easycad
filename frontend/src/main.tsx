@@ -138,7 +138,15 @@ function ReviewWorkspace() {
     try {
       const result = await requestJson<{ status: string; project: Project }>('/api/specifications/build', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(buildableSpecification(spec)) })
       if (result.status === 'success') state.setProject(result.project)
-      else state.setError({ message: result.project.generation?.error?.message || 'The model could not be built. Review the specification and try again.', fieldIds: [] })
+      else {
+        const generationError = result.project.generation?.error
+        const mismatches = generationError?.detail?.mismatches || []
+        state.setError({
+          message: [generationError?.message || 'The model could not be built. Review the specification and try again.', ...mismatches].join('; '),
+          fieldIds: generationError?.detail?.feature_ids || [],
+          stage: generationError?.stage,
+        })
+      }
     } catch (error) {
       state.setError(error as ApiError)
     } finally {

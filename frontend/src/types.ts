@@ -58,7 +58,7 @@ export interface Project {
   title: string
   generation?: {
     render_artifacts?: Record<string, { image_data: string }>
-    error?: { stage?: string; message?: string }
+    error?: { stage?: string; message?: string; detail?: { feature_ids?: string[]; mismatches?: string[] } }
   }
   [key: string]: unknown
 }
