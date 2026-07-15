@@ -1,8 +1,12 @@
 import { render, type TargetedEvent } from 'preact'
-import { useRef } from 'preact/hooks'
+import { useEffect, useRef, useState } from 'preact/hooks'
+import * as THREE from 'three'
+import { OrbitControls } from 'three/examples/jsm/controls/OrbitControls.js'
+import { STLLoader } from 'three/examples/jsm/loaders/STLLoader.js'
 import { useAppStore } from './store'
 import type { ApiError, Dimension, DraftSpecification, Project } from './types'
 import './styles.css'
+import './model-viewer.css'
 
 function errorFrom(response: unknown): ApiError {
   const detail = (response as { detail?: { message?: string; stage?: string; request_id?: string; detail?: { field_ids?: string[]; messages?: string[] } } })?.detail
@@ -159,7 +163,7 @@ function ReviewWorkspace() {
     <header class="topbar"><div class="brand"><span class="brand-mark" aria-hidden="true" /> EasyCAD <span class="project-name">{spec.title} · {spec.units}</span></div><button class="text-button" type="button" onClick={state.reset}>Start over</button></header>
     <section class="headline"><p class="eyebrow">Draft specification</p><h1>Confirm the model before it is built.</h1><p>Resolve the highlighted items. Your drawing stays visible while you review every decision.</p></section>
     <div class="workspace">
-      <DrawingPanel specification={spec} />
+      <DrawingPanel specification={spec} project={state.project} />
       <section class="review-panel" aria-label="Specification review">
         <div class="review-heading"><div><p class="eyebrow">Review specification</p><h2>{blockers ? `${blockers} item${blockers === 1 ? '' : 's'} need attention` : 'Ready to validate'}</h2></div></div>
         <ReviewSection title="Dimensions" count={`${spec.dimensions.filter((item) => item.status === 'confirmed').length} of ${spec.dimensions.length} confirmed`}>
@@ -201,9 +205,87 @@ function ReviewSection({ title, count, tone, children }: { title: string; count?
   return <section class={`review-section ${tone || ''}`}><header><h3>{title}</h3>{count && <span>{count}</span>}</header>{children}</section>
 }
 
-function DrawingPanel({ specification }: { specification: DraftSpecification }) {
+function DrawingPanel({ specification, project }: { specification: DraftSpecification; project: Project | null }) {
   const { selectedId, setSelectedId, sourceUrl } = useAppStore()
-  return <section class="drawing-panel"><header><h2>Source drawing</h2><span>Review markers</span></header><div class="drawing-stage">{sourceUrl ? <img src={sourceUrl} alt="Uploaded technical drawing" /> : <div class="drawing-empty">Drawing preview unavailable</div>}{specification.annotations.map((annotation, index) => <button type="button" class={`marker ${selectedId === annotation.field_id ? 'selected' : ''}`} style={{ left: `${annotation.x * 100}%`, top: `${annotation.y * 100}%` }} onClick={() => { setSelectedId(annotation.field_id); document.getElementById(`item-${annotation.field_id}`)?.scrollIntoView({ behavior: 'smooth', block: 'center' }) }} aria-label={`Show ${annotation.label}`} key={annotation.id}>{index + 1}</button>)}</div><footer><span><i class="legend confirmed" /> Confirmed</span><span><i class="legend proposed" /> Needs review</span><span><i class="legend conflict" /> Conflict</span></footer></section>
+  const [tab, setTab] = useState<'source' | 'model'>('source')
+  useEffect(() => { if (project) setTab('model') }, [project])
+  return <section class="drawing-panel">
+    <header class="drawing-header"><div class="panel-tabs" role="tablist" aria-label="Preview"><button type="button" role="tab" aria-selected={tab === 'source'} class={tab === 'source' ? 'active' : ''} onClick={() => setTab('source')}>Source drawing</button><button type="button" role="tab" aria-selected={tab === 'model'} class={tab === 'model' ? 'active' : ''} disabled={!project} onClick={() => setTab('model')}>3D model</button></div><span>{tab === 'model' ? 'Drag to rotate · Scroll to zoom' : 'Review markers'}</span></header>
+    {tab === 'model' && project ? <ModelViewer project={project} /> : <div class="drawing-stage">{sourceUrl ? <img src={sourceUrl} alt="Uploaded technical drawing" /> : <div class="drawing-empty">Drawing preview unavailable</div>}{specification.annotations.map((annotation, index) => <button type="button" class={`marker ${selectedId === annotation.field_id ? 'selected' : ''}`} style={{ left: `${annotation.x * 100}%`, top: `${annotation.y * 100}%` }} onClick={() => { setSelectedId(annotation.field_id); document.getElementById(`item-${annotation.field_id}`)?.scrollIntoView({ behavior: 'smooth', block: 'center' }) }} aria-label={`Show ${annotation.label}`} key={annotation.id}>{index + 1}</button>)}</div>}
+    {tab === 'source' && <footer><span><i class="legend confirmed" /> Confirmed</span><span><i class="legend proposed" /> Needs review</span><span><i class="legend conflict" /> Conflict</span></footer>}
+  </section>
+}
+
+function ModelViewer({ project }: { project: Project }) {
+  const mount = useRef<HTMLDivElement>(null)
+  const [error, setError] = useState<string | null>(null)
+  useEffect(() => {
+    const element = mount.current
+    if (!element) return
+    setError(null)
+    const controller = new AbortController()
+    const scene = new THREE.Scene()
+    scene.background = new THREE.Color('#f3f4f1')
+    const camera = new THREE.PerspectiveCamera(42, 1, 0.1, 10000)
+    const renderer = new THREE.WebGLRenderer({ antialias: true })
+    renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2))
+    renderer.outputColorSpace = THREE.SRGBColorSpace
+    element.replaceChildren(renderer.domElement)
+    const controls = new OrbitControls(camera, renderer.domElement)
+    controls.enableDamping = true
+    controls.dampingFactor = 0.08
+    scene.add(new THREE.HemisphereLight(0xffffff, 0x52616d, 2.4))
+    const keyLight = new THREE.DirectionalLight(0xffffff, 2.5)
+    keyLight.position.set(3, 5, 6)
+    scene.add(keyLight)
+    const fillLight = new THREE.DirectionalLight(0xb9d8ee, 1.2)
+    fillLight.position.set(-4, -2, 3)
+    scene.add(fillLight)
+    scene.add(new THREE.GridHelper(200, 20, 0xc7ccc4, 0xd8dad2))
+    let frame = 0
+    let geometry: THREE.BufferGeometry | null = null
+    let material: THREE.MeshStandardMaterial | null = null
+    const resize = () => {
+      const { width, height } = element.getBoundingClientRect()
+      renderer.setSize(width || 1, height || 1, false)
+      camera.aspect = (width || 1) / (height || 1)
+      camera.updateProjectionMatrix()
+    }
+    const observer = new ResizeObserver(resize)
+    observer.observe(element)
+    resize()
+    const animate = () => { frame = requestAnimationFrame(animate); controls.update(); renderer.render(scene, camera) }
+    animate()
+    void (async () => {
+      try {
+        const response = await fetch('/api/projects/preview', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ project, parameters: {} }), signal: controller.signal })
+        if (!response.ok) throw errorFrom(await response.json().catch(() => ({})))
+        geometry = new STLLoader().parse(await response.arrayBuffer())
+        geometry.computeVertexNormals()
+        geometry.center()
+        const bounds = geometry.boundingBox || (geometry.computeBoundingBox(), geometry.boundingBox)
+        const size = bounds ? bounds.getSize(new THREE.Vector3()).length() : 1
+        material = new THREE.MeshStandardMaterial({ color: '#2a5c8a', metalness: 0.14, roughness: 0.48 })
+        scene.add(new THREE.Mesh(geometry, material))
+        const distance = Math.max(size * 1.6, 30)
+        camera.position.set(distance, distance * 0.8, distance)
+        controls.target.set(0, 0, 0)
+        controls.update()
+      } catch (cause) {
+        if (!controller.signal.aborted) setError((cause as ApiError).message || 'Unable to load the 3D model.')
+      }
+    })()
+    return () => {
+      controller.abort()
+      cancelAnimationFrame(frame)
+      observer.disconnect()
+      controls.dispose()
+      geometry?.dispose()
+      material?.dispose()
+      renderer.dispose()
+    }
+  }, [project])
+  return <div class="model-stage"><div ref={mount} class="model-canvas" aria-label="Interactive 3D model viewer" />{error && <p class="model-error">{error}</p>}<p class="model-help">Drag to rotate · Scroll to zoom · Right-drag to pan</p></div>
 }
 
 function ActionBar({ blockers, pending, validated, onValidate, onBuild }: { blockers: number; pending: boolean; validated: boolean; onValidate: () => void; onBuild: () => void }) {

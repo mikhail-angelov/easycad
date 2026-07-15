@@ -336,3 +336,28 @@ DeepSeek may use dotted `critical_fields` such as `parameters.distance` and `pro
 
 - Tried requiring `validate_specification` at `finish_draft`; failed because legitimate assumed values and questions are intentionally unresolved before user review.
 - Tried allowing inline values such as `overall_width/2` in feature coordinates; failed because executable feature fields accept only numbers or declared dimension IDs.
+
+## 2026-07-15 — Interactive STL preview in the review panel
+
+### Goal
+
+Show the generated model beside the uploaded drawing without adding another model-generation endpoint.
+
+### Golden path
+
+1. Load the built `Project` into a Three.js `STLLoader` from `POST /api/projects/preview`.
+2. Put the viewer behind a `3D model` tab in the existing drawing panel and automatically select it after Build succeeds.
+3. Use `OrbitControls` for rotation, wheel zoom, and panning.
+4. Run `npm run build` after frontend changes; it performs both TypeScript checking and Vite production build.
+
+### Verification
+
+On 2026-07-15, `npm run build` completed successfully after installing `three` and `@types/three`.
+
+### Failure pattern avoided
+
+The repository has no retained legacy 3D viewer to reuse. A static render artifact is not an interactive STL view; load the existing preview endpoint instead.
+
+### Ruled-out approaches
+
+- Tried finding an old OrbitControls/STL viewer in git history; none was present in the application history.
