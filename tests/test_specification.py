@@ -179,10 +179,15 @@ class SpecificationTests(unittest.TestCase):
         self.assertEqual(request_context["previous_specification"], previous.model_dump(mode="json"))
         self.assertEqual(request_context["user_inputs"], user_inputs)
         self.assertTrue(payload["tools"][0]["function"]["strict"])
-        placement_schema = payload["tools"][0]["function"]["parameters"]["$defs"]["FeaturePlacement"]
+        tool_schema = payload["tools"][0]["function"]["parameters"]
+        self.assertEqual(tool_schema["required"], ["specification"])
+        self.assertFalse(tool_schema["additionalProperties"])
+        specification_schema = tool_schema["properties"]["specification"]
+        self.assertEqual(specification_schema["required"], ["title", "units", "dimensions", "features", "assumptions", "questions", "annotations"])
+        placement_schema = specification_schema["$defs"]["FeaturePlacement"]
         self.assertFalse(placement_schema["additionalProperties"])
         self.assertNotIn("offset", placement_schema["properties"])
-        self.assertEqual(payload["tools"][0]["function"]["parameters"]["properties"]["features"]["minItems"], 1)
+        self.assertEqual(specification_schema["properties"]["features"]["minItems"], 1)
 
     def test_draft_planner_normalizes_known_provider_field_variants(self):
         response = {

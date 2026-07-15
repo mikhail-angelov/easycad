@@ -479,10 +479,14 @@ async def plan_draft_specification(
         ],
         "temperature": 0.1,
         "max_tokens": 5000,
-        "tools": [{"type": "function", "function": {"name": "submit_draft_specification", "description": "Return the DraftSpecification.", "parameters": draft_specification_tool_schema(), "strict": True}}],
+        "tools": [{"type": "function", "function": {"name": "submit_draft_specification", "description": "Return the complete DraftSpecification in the required specification object.", "parameters": submit_draft_specification_tool_schema(), "strict": True}}],
         "tool_choice": {"type": "function", "function": {"name": "submit_draft_specification"}},
     }
-    result = normalize_draft_specification_payload(await _chat_json(url, api_key, payload, "draft_specification"))
+    arguments = await _chat_json(url, api_key, payload, "draft_specification")
+    result_payload = arguments.get("specification") if "specification" in arguments else arguments if "features" in arguments else None
+    if not isinstance(result_payload, dict):
+        raise GenerationError("draft_specification", "Provider returned invalid tool arguments", {"expected": "specification object"})
+    result = normalize_draft_specification_payload(result_payload)
     try:
         return DraftSpecification.model_validate({**result, "analysis": analysis})
     except PydanticValidationError as exc:
@@ -496,6 +500,30 @@ def draft_specification_tool_schema() -> Dict[str, Any]:
     schema = DraftSpecification.model_json_schema()
     schema["properties"]["features"]["minItems"] = 1
     return schema
+
+
+def submit_draft_specification_tool_schema() -> Dict[str, Any]:
+    """Strict function-call arguments for a complete draft, separate from UI defaults."""
+    draft_schema = draft_specification_tool_schema()
+    _forbid_schema_extras(draft_schema)
+    draft_schema["required"] = ["title", "units", "dimensions", "features", "assumptions", "questions", "annotations"]
+    return {
+        "type": "object",
+        "additionalProperties": False,
+        "required": ["specification"],
+        "properties": {"specification": draft_schema},
+    }
+
+
+def _forbid_schema_extras(schema: Any) -> None:
+    if isinstance(schema, dict):
+        if schema.get("type") == "object" and "properties" in schema:
+            schema["additionalProperties"] = False
+        for value in schema.values():
+            _forbid_schema_extras(value)
+    elif isinstance(schema, list):
+        for value in schema:
+            _forbid_schema_extras(value)
 
 
 def project_from_plan(
