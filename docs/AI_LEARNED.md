@@ -260,3 +260,29 @@ DeepSeek previously produced `placement.offset`, which passed review but failed 
 
 - Tried only validating placement at Build; rejected because users discover the provider-format failure too late.
 - Tried merging the planner result over the original vision analysis; rejected because model-produced analysis is not the authoritative one-time vision result.
+
+## 2026-07-15 — Real accepted-specification path to STL
+
+### Goal
+
+Verify that accepting every proposal in a real drawing review reaches a buildable STL, not merely a valid review response.
+
+### Golden path
+
+1. Run `tests.e2e_real_user_specification_flow.RealUserSpecificationFlowE2E.test_accepting_all_proposals_builds_and_exports_stl` with provider keys and network access.
+2. The test uploads `fixtures/3.png`, accepts every returned feature and assumption, replans, builds, and exports `artifacts/real-user-flow-bracket/model.stl`.
+3. Keep the draft planner restricted to feature kinds expressible by `DraftSpecification`; give the provider exact compiler parameter and coordinate contracts.
+4. Unwrap DeepSeek function-call responses that place the submitted draft under `parameters`.
+
+### Verification
+
+On 2026-07-15 the real test produced a 45,684-byte STL. Validation had five retained features and zero questions; Build returned `success`.
+
+### Failure pattern avoided
+
+DeepSeek function calls can return the complete draft nested in `parameters`; treating that wrapper as the draft silently created Pydantic defaults with an empty feature graph. The generic planner catalogue also advertised `extrude`, despite DraftSpecification having no profile field required by that compiler operation.
+
+### Ruled-out approaches
+
+- Tried relying on prompt text alone to preserve a full graph; rejected because the provider could still return an empty wrapped payload.
+- Tried validating only the review state; rejected because incorrect cylinder plane/origin coordinates were exposed only by semantic STL build validation.
