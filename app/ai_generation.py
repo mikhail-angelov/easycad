@@ -459,7 +459,7 @@ async def plan_draft_specification(
     }
     result = normalize_draft_specification_payload(await _chat_json(url, api_key, payload, "draft_specification"))
     try:
-        return DraftSpecification.model_validate({"analysis": analysis, **result})
+        return DraftSpecification.model_validate({**result, "analysis": analysis})
     except PydanticValidationError as exc:
         errors = [{"field": ".".join(str(part) for part in error["loc"]), "message": error["msg"]} for error in exc.errors()[:8]]
         logger.warning("draft_specification_validation_failed errors=%s", errors)

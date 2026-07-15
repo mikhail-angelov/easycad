@@ -125,6 +125,17 @@ class SpecificationTests(unittest.TestCase):
             draft = asyncio.run(ai.plan_draft_specification(analysis, "", "key"))
         self.assertEqual(draft.analysis.model_dump(mode="json"), analysis)
 
+    def test_draft_planner_does_not_allow_provider_analysis_to_replace_vision_analysis(self):
+        response = {
+            "title": "Plate",
+            "analysis": {"dimensions": {"wrong_shape": 40}},
+            "dimensions": [], "features": [], "assumptions": [], "questions": [], "annotations": [],
+        }
+        analysis = {"views": [], "dimensions": [{"id": "length", "value": 40}], "features": [], "uncertainties": []}
+        with patch.object(ai, "_chat_json", AsyncMock(return_value=response)):
+            draft = asyncio.run(ai.plan_draft_specification(analysis, "", "key"))
+        self.assertEqual(draft.analysis.model_dump(mode="json"), analysis)
+
     def test_complete_replan_request_constrains_feature_types_and_carries_all_context(self):
         response = {"title": "Plate", "dimensions": [], "features": [], "assumptions": [], "questions": [], "annotations": []}
         analysis = {"views": [{"id": "front"}], "dimensions": [{"id": "length", "value": 40}], "features": [{"id": "base", "type": "body"}], "uncertainties": []}

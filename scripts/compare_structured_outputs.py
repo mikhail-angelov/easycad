@@ -45,7 +45,7 @@ async def request(name: str, url: str, key: str, payload: dict, analysis: dict) 
         parsed = json.loads(raw) if isinstance(raw, str) else raw
         result["tool_arguments"] = parsed
         canonical_analysis = {"views": analysis.get("views", []), "dimensions": [], "features": analysis.get("features", []), "uncertainties": []}
-        draft = DraftSpecification.model_validate({"analysis": canonical_analysis, **normalize_draft_specification_payload(parsed)})
+        draft = DraftSpecification.model_validate({**normalize_draft_specification_payload(parsed), "analysis": canonical_analysis})
         result["draft_schema_valid"] = True
         result["dimension_count"] = len(draft.dimensions)
         result["feature_count"] = len(draft.features)
