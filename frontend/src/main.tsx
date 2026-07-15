@@ -136,7 +136,7 @@ function ReviewWorkspace() {
     state.setRequestState('building')
     state.setError(null)
     try {
-      const result = await requestJson<{ status: string; project: Project }>('/api/specifications/build', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(buildableSpecification(spec)) })
+      const result = await requestJson<{ status: string; project: Project; repair_hints?: string[] }>('/api/specifications/build', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(buildableSpecification(spec)) })
       if (result.status === 'success') state.setProject(result.project)
       else {
         const generationError = result.project.generation?.error
@@ -145,6 +145,7 @@ function ReviewWorkspace() {
           message: [generationError?.message || 'The model could not be built. Review the specification and try again.', ...mismatches].join('; '),
           fieldIds: generationError?.detail?.feature_ids || [],
           stage: generationError?.stage,
+          hints: result.repair_hints || [],
         })
       }
     } catch (error) {
@@ -170,6 +171,7 @@ function ReviewWorkspace() {
         {Object.values(state.clarifications).some((text) => text.trim()) && <ReviewSection title="Your clarifications">
           {Object.entries(state.clarifications).filter(([, text]) => text.trim()).map(([questionId, text]) => <p class="omitted" key={questionId}><strong>{questionId}:</strong> {text}</p>)}
         </ReviewSection>}
+        {state.error?.stage === 'semantic_validation' && <ReviewSection title="Fix the build issue" tone="warning"><p class="section-note">{state.error.hints?.join(' ')}</p><label class="question-clarification">Describe the intended correction<textarea value={state.clarifications.build_repair || ''} placeholder="For example: “the groove runs along Y, starts at Y=0, and its center is on the top surface at Z=56.”" onInput={(event) => state.setClarification('build_repair', event.currentTarget.value)} /></label><p class="section-note">Then validate the specification to replan it with DeepSeek.</p></ReviewSection>}
         {spec.features.some((feature) => feature.status === 'assumed') && <ReviewSection title="Proposed feature details">
           {spec.features.filter((feature) => feature.status === 'assumed').map((feature) => <label class="assumption" key={feature.id}><input type="checkbox" checked={state.acceptedFeatureIds.includes(feature.id)} onChange={() => state.toggleFeature(feature.id)} /> <span><strong>Use this proposed detail</strong><br />{feature.label}</span></label>)}
         </ReviewSection>}

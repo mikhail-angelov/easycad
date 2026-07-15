@@ -430,8 +430,19 @@ def build_specification(specification: DraftSpecification):
         apply_generation_metadata(project, result)
     except RunnerError as exc:
         mark_generation_error(project, exc.stage, str(exc), exc.detail)
-        return {"status": "needs_review", "project": project.model_dump(mode="json"), "diagnostics": exc.detail}
+        return {"status": "needs_review", "project": project.model_dump(mode="json"), "diagnostics": exc.detail, "repair_hints": build_repair_hints(exc.detail)}
     return {"status": "success", "project": project.model_dump(mode="json")}
+
+
+def build_repair_hints(detail: Dict[str, object]) -> list[str]:
+    hints = []
+    for mismatch in detail.get("mismatches", []) if isinstance(detail.get("mismatches"), list) else []:
+        text = str(mismatch)
+        if "did not remove material" in text:
+            hints.append("Confirm the cut plane, origin, and depth so the cutting solid intersects its target.")
+        elif "expected" in text and "got" in text:
+            hints.append(f"Expected geometry: {text}.")
+    return hints or ["Describe the intended feature position, direction, and dimensions so the planner can revise it."]
 
 
 def validate_input_quality_gate(

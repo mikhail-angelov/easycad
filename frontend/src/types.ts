@@ -68,4 +68,5 @@ export interface ApiError {
   fieldIds: string[]
   stage?: string
   requestId?: string
+  hints?: string[]
 }

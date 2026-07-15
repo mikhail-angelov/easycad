@@ -137,6 +137,10 @@ class HTTPAPITests(unittest.TestCase):
         self.assertEqual(response.json()["status"], "success")
         self.assertEqual(response.json()["project"]["cad"]["source_kind"], "compiled")
 
+    def test_build_repair_hints_explain_semantic_mismatch(self):
+        hints = main.build_repair_hints({"mismatches": ["top_groove: subtractive feature did not remove material"]})
+        self.assertIn("cut plane, origin, and depth", hints[0])
+
     def test_legacy_repair_endpoints_are_removed(self):
         project = make_plate_project().model_dump(mode="json")
         self.assertEqual(self.client.post("/api/projects/repair", json={"project": project}).status_code, 405)
