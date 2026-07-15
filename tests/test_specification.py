@@ -121,6 +121,7 @@ class SpecificationTests(unittest.TestCase):
         self.assertIn("draft-compatible compiler types", prompt)
         self.assertIn("body and groove are observations", prompt)
         self.assertIn("a groove running along Y must use plane XZ", prompt)
+        self.assertIn("through/сквозное is a confirmed instruction", prompt)
         self.assertIn("an XY box has length along X, width along Y, and height along Z", prompt)
         self.assertIn("never use offset, center, position, depth, or centered_on_width", prompt)
 

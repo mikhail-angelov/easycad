@@ -427,6 +427,7 @@ async def plan_draft_specification(
         "such as box or cylinder, or mark the feature unsupported when no trusted type can represent it. "
         "Use only compiler parameter contracts: box needs length, width, height; cylinder needs radius, height; "
         "hole/through_hole need diameter, depth; counterbore needs diameter, depth, bore_diameter, bore_depth; "
+        "A drawing label that says a hole is through/сквозное is a confirmed instruction to cut through its target thickness; do not ask about it again. "
         "countersink needs diameter, depth, sink_diameter, sink_depth; slot/pocket need length, width, depth; "
         "rib needs length, thickness, height; fillet needs radius; chamfer needs distance; shell needs thickness. "
         "For a semi-circular groove, use a cylinder with operation cut: place the cylinder center on the material surface so only its semicircle intersects. "

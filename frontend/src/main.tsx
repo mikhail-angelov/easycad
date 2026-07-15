@@ -175,8 +175,8 @@ function ReviewWorkspace() {
         {spec.features.some((feature) => feature.status === 'assumed') && <ReviewSection title="Proposed feature details">
           {spec.features.filter((feature) => feature.status === 'assumed').map((feature) => <label class="assumption" key={feature.id}><input type="checkbox" checked={state.acceptedFeatureIds.includes(feature.id)} onChange={() => state.toggleFeature(feature.id)} /> <span><strong>Use this proposed detail</strong><br />{feature.label}</span></label>)}
         </ReviewSection>}
-        {spec.assumptions.length > 0 && <ReviewSection title="Proposed decisions" count={String(spec.assumptions.length)}>
-          {spec.assumptions.map((assumption) => <label class="assumption" key={assumption.id}><input type="checkbox" checked={state.acceptedAssumptionIds.includes(assumption.id)} onChange={() => state.toggleAssumption(assumption.id)} /> <span><strong>Use this proposal</strong><br />{assumption.rationale}</span></label>)}
+        {spec.assumptions.filter((assumption) => assumption.status === 'assumed').length > 0 && <ReviewSection title="Proposed decisions" count={String(spec.assumptions.filter((assumption) => assumption.status === 'assumed').length)}>
+          {spec.assumptions.filter((assumption) => assumption.status === 'assumed').map((assumption) => <label class="assumption" key={assumption.id}><input type="checkbox" checked={state.acceptedAssumptionIds.includes(assumption.id)} onChange={() => state.toggleAssumption(assumption.id)} /> <span><strong>Use this proposal</strong><br />{assumption.rationale}</span></label>)}
         </ReviewSection>}
         {omitted.length > 0 && <ReviewSection title="Not included in this model" count={String(omitted.length)} tone="warning"><p class="section-note">EasyCAD cannot model these features yet. They will not be included in the STL.</p>{omitted.map((feature) => <p class="omitted" key={feature.id}>{feature.label}</p>)}</ReviewSection>}
       </section>
