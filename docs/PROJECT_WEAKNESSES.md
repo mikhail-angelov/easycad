@@ -14,6 +14,10 @@ scheduled in `TASKS.md`.
 
 **Priority:** P0
 
+**Status (2026-07-13):** Partially mitigated. Capability quality gates now compare normalized Feature Graphs,
+named parameters, and individual STL/STEP outcomes. The legacy real-provider keyword evaluator still requires
+replacement before provider quality can be claimed.
+
 The real-provider capability evaluator detects features by searching response text for keywords. Dimension accuracy
 is estimated by matching an expected dimension to the nearest number anywhere in the response. A response can
 therefore receive perfect precision, recall, or dimension error without producing the correct Feature Graph or
@@ -35,6 +39,10 @@ correctness.
 
 **Priority:** P0
 
+**Status (2026-07-13):** Partially mitigated. Resilience and strict supported-corpus targets now record explicit
+outcomes. A strict live run recorded `worker_failed` for `1.jpg` and `invalid_plan` for `2.jpg`; neither was treated
+as a successful export.
+
 The current real-provider test accepts a controlled `needs_review` outcome. This usefully proves that malformed model
 output is handled safely, but it does not prove successful image-to-STL conversion.
 
@@ -52,6 +60,9 @@ output is handled safely, but it does not prove successful image-to-STL conversi
 ## 3. The bracket fixture no longer covers its important features
 
 **Priority:** P0
+
+**Status (2026-07-13):** Resolved for the integration fixture. The Feature Graph now covers base, upright, groove,
+through-hole, and notch; removal mutations and worker measurements run in the default local suite.
 
 `projects/bracket_fixture.json` currently represents only a base box. It no longer protects the upright, hole, groove,
 and notch behavior that made the fixture useful.
@@ -120,6 +131,10 @@ option 3 is not justified by current needs.
 
 **Priority:** P0
 
+**Status (2026-07-13):** Partially mitigated. Compiler operation kinds have a semantic-evidence manifest and
+runtime checks now reject no-op modifiers. Per-operation negative fixtures still need broadening before every kind
+can be considered equally verified.
+
 Counts and dimensions are verified well for some holes and patterns, but confidence is weaker for modifiers,
 placement, shelling, text, mirror operations, countersinks, and counterbores. A model can export while a subtle feature
 is reversed, misplaced, or missing.
@@ -136,6 +151,9 @@ is reversed, misplaced, or missing.
 ## 8. Visual comparison is nondeterministic and incomplete
 
 **Priority:** P1
+
+**Status (2026-07-13):** Partially mitigated. Golden binary masks now protect calibrated bracket and asymmetric-rib
+renders, including missing-feature and wrong-projection mutations. Arbitrary uploads remain advisory by design.
 
 LLM render comparison can miss orientation, placement, and topology errors. There is no deterministic silhouette or
 projection comparison to catch obvious discrepancies before asking a model.

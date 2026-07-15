@@ -1,4 +1,4 @@
-.PHONY: run test test-unit test-smoke test-capabilities test-e2e-real test-e2e-generation-real test-e2e-features-real test-e2e-capabilities-real
+.PHONY: run test test-unit test-smoke test-capabilities update-silhouette-goldens test-e2e-real test-e2e-features-real test-e2e-capabilities-real test-e2e-specification
 
 PYTHON ?= .venv/bin/python
 LOCAL_ENV = CADQUERY_WORKER_TIMEOUT_SECONDS=120 XDG_CACHE_HOME=$(CURDIR)/.cache PYTHONDONTWRITEBYTECODE=1
@@ -18,10 +18,13 @@ test-capabilities:
 	uv --version
 	$(LOCAL_ENV) $(PYTHON) -m tests.capability_regression
 
-test-e2e-real: test-e2e-features-real test-e2e-generation-real test-e2e-capabilities-real
+update-silhouette-goldens:
+	$(LOCAL_ENV) $(PYTHON) -m tests.generate_silhouette_goldens
 
-test-e2e-generation-real:
-	$(LOCAL_ENV) $(PYTHON) -m tests.e2e_real_fixture_generation
+test-e2e-real: test-e2e-features-real test-e2e-capabilities-real test-e2e-specification
+
+test-e2e-specification:
+	$(LOCAL_ENV) $(PYTHON) -m tests.e2e_specification_generation
 
 test-e2e-features-real:
 	$(LOCAL_ENV) $(PYTHON) -m tests.e2e_real_feature_analysis

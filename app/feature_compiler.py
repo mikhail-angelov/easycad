@@ -32,9 +32,13 @@ COMPILER_OPERATION_TYPES = {
     "perforation_pattern": ("perforation_pattern",),
 }
 
+# The compiler accepts aliases for replay compatibility, but semantic evidence
+# and planner contracts always refer to these canonical kinds.
+COMPILER_OPERATION_KINDS = tuple(COMPILER_OPERATION_TYPES)
+
 
 def planner_operation_types() -> str:
-    return ", ".join(COMPILER_OPERATION_TYPES)
+    return ", ".join(COMPILER_OPERATION_KINDS)
 
 
 def compiler_operation_types() -> frozenset[str]:

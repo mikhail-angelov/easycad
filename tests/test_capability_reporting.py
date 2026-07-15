@@ -87,3 +87,23 @@ class CapabilityReportingTests(unittest.TestCase):
 
         self.assertEqual(entry["evaluation_status"], "failed")
         self.assertGreaterEqual(entry["metrics"]["graph_mismatch_count"], 2)
+
+    def test_configured_observation_and_export_rate_gates_are_enforced(self):
+        case = dict(QUALITY_CASE, evidence_gate={"minimum_observations": 1, "minimum_verified_export_rate": 1.0})
+        needs_review = quality_observation()
+        needs_review["outcome"] = "needs_review"
+
+        entry = capability_report_entry(case, [needs_review], worker_suite_passed=True)
+
+        self.assertEqual(entry["provider_evaluation"]["status"], "measured")
+        self.assertEqual(entry["evaluation_status"], "failed")
+
+    def test_unavailable_provider_evidence_is_not_a_passing_observation(self):
+        entry = capability_report_entry(
+            QUALITY_CASE,
+            [{"unavailable_reason": "missing provider credentials"}],
+            worker_suite_passed=True,
+        )
+
+        self.assertEqual(entry["provider_evaluation"]["status"], "unavailable")
+        self.assertEqual(entry["evaluation_status"], "insufficient_evidence")

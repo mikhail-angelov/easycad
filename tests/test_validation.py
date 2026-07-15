@@ -7,7 +7,7 @@ from app.main import export, load_project_json, PreviewRequest
 from app.feature_compiler import CompilerError, compile_project_feature_graph
 from app.models import FeatureGraph
 from app.validator import ValidationError, parameter_references, validate_project, validate_source
-from tests.test_ai_generation import make_plate_project
+from tests.project_helpers import make_plate_project
 
 
 ROOT = Path(__file__).resolve().parent.parent

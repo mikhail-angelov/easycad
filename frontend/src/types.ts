@@ -65,4 +65,6 @@ export interface Project {
 export interface ApiError {
   message: string
   fieldIds: string[]
+  stage?: string
+  requestId?: string
 }

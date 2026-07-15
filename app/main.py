@@ -1,12 +1,14 @@
 from __future__ import annotations
 
 import json
+import logging
 import os
 import base64
 import hashlib
 import io
 from pathlib import Path
 from typing import Dict
+from uuid import uuid4
 
 from PIL import Image
 
@@ -17,8 +19,8 @@ from fastapi.staticfiles import StaticFiles
 from .ai_generation import (
     GenerationError,
     compare_project_renders,
-    generate_project_from_image,
-    repair_project,
+    generate_draft_specification_from_image,
+    plan_specification_patch,
     validate_image_upload,
 )
 from .models import (
@@ -26,8 +28,16 @@ from .models import (
     CompareRequest,
     PreviewRequest,
     RenderArtifact,
-    RepairRequest,
-    VisualRepairRequest,
+    SpecificationEditRequest,
+    DraftSpecification,
+    SpecificationQuestion,
+)
+from .specification import (
+    SpecificationValidationError,
+    apply_clarification_patch,
+    apply_specification_edits,
+    project_from_specification,
+    validate_specification,
 )
 from .runner import RunnerError, concrete_parameters, run_project
 from .validator import ValidationError, validate_project as validate_project_model
@@ -54,6 +64,11 @@ def load_env() -> None:
 load_env()
 
 app = FastAPI(title="EasyCAD")
+logger = logging.getLogger("easycad.api")
+
+
+def _specification_error(exc: SpecificationValidationError) -> HTTPException:
+    return HTTPException(422, {"stage": "specification_validation", "message": str(exc), "detail": {"field_ids": exc.field_ids, "messages": exc.messages}})
 
 
 def load_project_json(text: str) -> CADProject:
@@ -90,7 +105,8 @@ def apply_generation_metadata(project: CADProject, result: Dict[str, object]) ->
             for view, data in render_artifacts.items()
             if isinstance(data, bytes)
         }
-    project.generation.warnings = metadata.get("warnings", [])
+    worker_warnings = metadata.get("warnings", [])
+    project.generation.warnings = list(dict.fromkeys([*project.generation.warnings, *worker_warnings]))
     project.generation.error = None
 
 
@@ -200,6 +216,11 @@ def validate_feature_measurements(project: CADProject, result: Dict[str, object]
                 errors.append(f"{operation.id}: additive feature did not add material")
             elif operation.operation == "cut" and delta >= -1e-6:
                 errors.append(f"{operation.id}: subtractive feature did not remove material")
+            elif operation.operation == "modify":
+                if feature_type in {"fillet", "chamfer", "shell"} and delta >= -1e-6:
+                    errors.append(f"{operation.id}: subtractive modifier did not remove material")
+                elif feature_type == "mirror" and delta <= 1e-6:
+                    errors.append(f"{operation.id}: mirror did not add reflected material")
             elif operation.operation == "pattern":
                 if any(token in feature_type for token in ("hole", "cut", "perforation", "pocket", "slot")):
                     if delta >= -1e-6:
@@ -277,45 +298,6 @@ def _expected_l_bracket_envelope_volume(project: CADProject) -> float | None:
     return length * width * base_height + upright * width * (height - base_height)
 
 
-async def finalize_project_with_auto_repair(
-    project: CADProject,
-    user_feedback: str = "",
-    max_repairs: int = 2,
-) -> Dict[str, object]:
-    repairs_used = 0
-    while True:
-        try:
-            validate_project_model(project)
-            project.generation.syntax_status = "success"
-            result = run_project(project, {}, fmt="stl", render_views=True)
-            project.generation.geometry_status = "success"
-            validate_generation_geometry(project, result)
-            validate_feature_measurements(project, result)
-            validate_feature_coverage(project)
-            project.generation.semantic_status = "success"
-            apply_generation_metadata(project, result)
-            return {"status": "success", "project": json.loads(project.model_dump_json())}
-        except ValidationError as exc:
-            mark_generation_error(project, "static_validation", str(exc))
-        except RunnerError as exc:
-            mark_generation_error(project, exc.stage, str(exc), exc.detail)
-
-        if repairs_used >= max_repairs:
-            return {"status": "needs_review", "project": json.loads(project.model_dump_json())}
-
-        error = project.generation.error or {}
-        repair_feedback = (
-            user_feedback.strip()
-            or f"Automatic repair for {error.get('stage', 'generation_error')}: {error.get('message', '')}"
-        )
-        try:
-            project = await repair_project(project, repair_feedback, validate_result=False)
-        except GenerationError as exc:
-            mark_generation_error(project, "repair_generation", str(exc), exc.detail)
-            return {"status": "needs_review", "project": json.loads(project.model_dump_json())}
-        repairs_used += 1
-
-
 @app.get("/api/health")
 def health() -> Dict[str, object]:
     return {
@@ -353,47 +335,142 @@ def validate_project(project: CADProject):
     return {"valid": not errors, "errors": errors, "warnings": []}
 
 
-@app.post("/api/projects/generate")
-async def generate_project(file: UploadFile = File(...), instructions: str = Form("")):
-    data = await file.read()
+@app.post("/api/specifications/analyze")
+async def analyze_specification(
+    file: UploadFile = File(...),
+    instructions: str = Form(""),
+    input_mode: str = Form("sketch"),
+    has_orthographic_views: bool = Form(False),
+    has_isometric_view: bool = Form(False),
+    has_units_and_overall_dimensions: bool = Form(False),
+    has_feature_positions: bool = Form(False),
+    has_feature_dimensions_and_directions: bool = Form(False),
+):
+    request_id = uuid4().hex[:12]
+    logger.info(
+        "specification_analyze_started request_id=%s input_mode=%s filename_present=%s",
+        request_id,
+        input_mode,
+        bool(file.filename),
+    )
     try:
-        project = await generate_project_from_image(
-            data,
-            file.filename or "",
-            file.content_type or "",
-            instructions,
-            validate_result=False,
+        input_warning = validate_input_quality_gate(
+            input_mode,
+            has_orthographic_views=has_orthographic_views,
+            has_isometric_view=has_isometric_view,
+            has_units_and_overall_dimensions=has_units_and_overall_dimensions,
+            has_feature_positions=has_feature_positions,
+            has_feature_dimensions_and_directions=has_feature_dimensions_and_directions,
         )
-        return await finalize_project_with_auto_repair(project, instructions)
-    except GenerationError as exc:
-        raise HTTPException(422, {"stage": exc.stage, "message": str(exc), "detail": exc.detail})
-
-
-@app.post("/api/projects/repair")
-async def repair_generated_project(req: RepairRequest):
+    except HTTPException as exc:
+        logger.warning("specification_analyze_rejected request_id=%s detail=%s", request_id, exc.detail)
+        raise
     try:
-        project = await repair_project(req.project, req.user_feedback, req.current_view)
+        draft = await generate_draft_specification_from_image(
+            await file.read(), file.filename or "", file.content_type or "", instructions
+        )
+    except GenerationError as exc:
+        logger.warning(
+            "specification_analyze_failed request_id=%s stage=%s detail_keys=%s",
+            request_id,
+            exc.stage,
+            sorted(exc.detail),
+        )
+        raise HTTPException(422, {"stage": exc.stage, "message": str(exc), "detail": exc.detail, "request_id": request_id})
+    if input_warning:
+        draft.questions.append(SpecificationQuestion(id="sketch_review", field_id="input_mode", prompt=input_warning, required=False))
+    logger.info("specification_analyze_succeeded request_id=%s", request_id)
+    return {"specification": draft.model_dump(mode="json"), "request_id": request_id}
+
+
+@app.post("/api/specifications/validate")
+async def validate_specification_endpoint(req: SpecificationEditRequest):
+    draft = apply_specification_edits(
+        req.specification,
+        req.dimension_values,
+        req.accepted_assumption_ids,
+        req.free_text,
+        req.accepted_feature_ids,
+    )
+    clarification_applied = False
+    if req.free_text.strip():
+        if not req.clarification_question_id:
+            raise _specification_error(SpecificationValidationError([], ["Choose the question this clarification answers"]))
+        try:
+            patch = await plan_specification_patch(draft, req.clarification_question_id, req.free_text, os.environ.get("DEEP_SEEK_KEY", ""))
+            draft = apply_clarification_patch(draft, req.clarification_question_id, patch)
+            clarification_applied = True
+        except GenerationError as exc:
+            raise HTTPException(422, {"stage": exc.stage, "message": str(exc), "detail": exc.detail})
+        except SpecificationValidationError as exc:
+            raise _specification_error(exc)
+    try:
+        values = validate_specification(draft)
+    except SpecificationValidationError as exc:
+        if clarification_applied:
+            return {
+                "valid": False,
+                "specification": draft.model_dump(mode="json"),
+                "diagnostics": {"field_ids": exc.field_ids, "messages": exc.messages},
+            }
+        raise _specification_error(exc)
+    return {"valid": True, "values": values, "specification": draft.model_dump(mode="json")}
+
+
+@app.post("/api/specifications/build")
+def build_specification(specification: DraftSpecification):
+    try:
+        project = project_from_specification(specification)
+    except SpecificationValidationError as exc:
+        raise _specification_error(exc)
+    except Exception as exc:
+        raise HTTPException(422, {"stage": "feature_graph", "message": str(exc)}) from exc
+    try:
+        result = run_project(project, {}, fmt="stl", render_views=True)
         project.generation.syntax_status = "success"
-        try:
-            result = run_project(project, {}, fmt="stl", render_views=True)
-        except RunnerError as exc:
-            mark_generation_error(project, exc.stage, str(exc), exc.detail)
-            return {"status": "needs_review", "project": json.loads(project.model_dump_json())}
         project.generation.geometry_status = "success"
-        try:
-            validate_generation_geometry(project, result)
-            validate_feature_measurements(project, result)
-            validate_feature_coverage(project)
-        except RunnerError as exc:
-            mark_generation_error(project, exc.stage, str(exc), exc.detail)
-            return {"status": "needs_review", "project": json.loads(project.model_dump_json())}
+        validate_generation_geometry(project, result)
+        validate_feature_measurements(project, result)
+        validate_feature_coverage(project)
         project.generation.semantic_status = "success"
         apply_generation_metadata(project, result)
-        return {"status": "success", "project": json.loads(project.model_dump_json())}
-    except ValidationError as exc:
-        raise HTTPException(422, {"stage": "static_validation", "message": str(exc)})
-    except GenerationError as exc:
-        raise HTTPException(422, {"stage": exc.stage, "message": str(exc), "detail": exc.detail})
+    except RunnerError as exc:
+        mark_generation_error(project, exc.stage, str(exc), exc.detail)
+        return {"status": "needs_review", "project": project.model_dump(mode="json"), "diagnostics": exc.detail}
+    return {"status": "success", "project": project.model_dump(mode="json")}
+
+
+def validate_input_quality_gate(
+    input_mode: str,
+    *,
+    has_orthographic_views: bool,
+    has_isometric_view: bool,
+    has_units_and_overall_dimensions: bool,
+    has_feature_positions: bool,
+    has_feature_dimensions_and_directions: bool,
+) -> str | None:
+    mode = input_mode.strip().lower()
+    if mode == "sketch":
+        return "Sketch/photo input: verify ambiguous geometry before exporting for print."
+    if mode != "engineering":
+        raise HTTPException(422, {"stage": "input_quality", "message": "Unknown drawing input mode"})
+    checks = {
+        "orthographic_views": has_orthographic_views,
+        "units_and_overall_dimensions": has_units_and_overall_dimensions,
+        "feature_positions": has_feature_positions,
+        "feature_dimensions_and_directions": has_feature_dimensions_and_directions,
+    }
+    missing = [name for name, present in checks.items() if not present]
+    if missing:
+        raise HTTPException(
+            422,
+            {
+                "stage": "input_quality",
+                "message": "Engineering drawing is missing required input confirmations",
+                "detail": {"missing": missing},
+            },
+        )
+    return None if has_isometric_view else "No isometric view confirmed; review ambiguous geometry before building."
 
 
 @app.post("/api/projects/compare")
@@ -416,83 +493,6 @@ async def compare_generated_project(req: CompareRequest):
     ):
         raise HTTPException(500, {"stage": "visual_comparison", "message": "Advisory comparison mutated geometry"})
     return {"status": "advisory", "project": json.loads(req.project.model_dump_json())}
-
-
-@app.post("/api/projects/repair-visual")
-async def repair_visual_issue(req: VisualRepairRequest):
-    issues = [
-        issue
-        for issue in req.project.generation.visual_comparison.issues
-        if issue.feature_id == req.feature_id and issue.confidence >= 0.8
-    ]
-    if not issues:
-        raise HTTPException(
-            422,
-            {"stage": "visual_comparison", "message": "No high-confidence visual issue matches this feature"},
-        )
-    operations_before = {operation.id: operation.model_dump() for operation in req.project.feature_graph.operations}
-    selected = next(
-        (operation for operation in req.project.feature_graph.operations if operation.id == req.feature_id),
-        None,
-    )
-    if selected is None:
-        raise HTTPException(422, {"stage": "visual_comparison", "message": "Visual issue feature is unknown"})
-    allowed_changes = {selected.id, *selected.depends_on}
-    if selected.target:
-        allowed_changes.add(selected.target)
-
-    repair_input = req.project.model_copy(deep=True)
-    issue = issues[0]
-    mark_generation_error(
-        repair_input,
-        "visual_comparison",
-        issue.description,
-        {"operation_id": selected.id, "feature_ids": [selected.id], "view": issue.view},
-    )
-    try:
-        repaired = await repair_project(
-            repair_input,
-            f"Targeted visual correction for {selected.id}: {issue.description}",
-            issue.view,
-            validate_result=False,
-        )
-    except GenerationError as exc:
-        raise HTTPException(422, {"stage": exc.stage, "message": str(exc), "detail": exc.detail})
-
-    operations_after = {operation.id: operation.model_dump() for operation in repaired.feature_graph.operations}
-    changed_unrelated = sorted(
-        operation_id
-        for operation_id, before in operations_before.items()
-        if operation_id not in allowed_changes and operations_after.get(operation_id) != before
-    )
-    if changed_unrelated:
-        raise HTTPException(
-            422,
-            {
-                "stage": "visual_comparison",
-                "message": "Visual repair changed unrelated feature operations",
-                "detail": {"feature_ids": changed_unrelated},
-            },
-        )
-    try:
-        validate_project_model(repaired)
-        repaired.generation.syntax_status = "success"
-        result = run_project(repaired, {}, fmt="stl", render_views=True)
-        repaired.generation.geometry_status = "success"
-        validate_generation_geometry(repaired, result)
-        validate_feature_measurements(repaired, result)
-        validate_feature_coverage(repaired)
-        repaired.generation.semantic_status = "success"
-        apply_generation_metadata(repaired, result)
-        api_key = os.environ.get("OPEN_ROUTER_KEY")
-        if not api_key:
-            raise GenerationError("visual_comparison", "OPEN_ROUTER_KEY is not configured")
-        repaired.generation.visual_comparison = await compare_project_renders(repaired, api_key)
-    except (ValidationError, RunnerError, GenerationError) as exc:
-        stage = getattr(exc, "stage", "static_validation")
-        detail = getattr(exc, "detail", {})
-        raise HTTPException(422, {"stage": stage, "message": str(exc), "detail": detail})
-    return {"status": "advisory", "project": json.loads(repaired.model_dump_json())}
 
 
 @app.post("/api/projects/preview")

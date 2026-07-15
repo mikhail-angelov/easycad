@@ -25,7 +25,7 @@ from .models import (
     FeatureGraph,
     FeatureOperation,
     FeatureSummary,
-    GenerationHistoryEntry,
+    DraftSpecification,
     GenerationResult,
     SourceInfo,
     VisualComparison,
@@ -94,6 +94,75 @@ def validate_image_upload(data: bytes, filename: str = "", mime_type: str = "") 
     }
 
 
+def normalize_draft_specification_payload(payload: Dict[str, Any]) -> Dict[str, Any]:
+    """Translate observed provider field variants into the narrow DraftSpecification contract."""
+    normalized = dict(payload)
+    if str(normalized.get("units", "")).lower() in {"millimeter", "millimeters", "millimetre", "millimetres"}:
+        normalized["units"] = "mm"
+
+    for dimension in normalized.get("dimensions", []):
+        if not isinstance(dimension, dict):
+            continue
+        if isinstance(dimension.get("evidence"), str):
+            dimension["evidence"] = [dimension["evidence"]]
+        if dimension.get("source") not in {"drawing", "derived", "inferred", "assumed", "manual", None}:
+            dimension["source"] = "drawing"
+
+    for feature in normalized.get("features", []):
+        if isinstance(feature, dict):
+            if isinstance(feature.get("evidence"), str):
+                feature["evidence"] = [feature["evidence"]]
+            if feature.get("placement") is None:
+                feature["placement"] = {}
+
+    assumptions = []
+    for assumption in normalized.get("assumptions", []):
+        if not isinstance(assumption, dict):
+            continue
+        item = dict(assumption)
+        description = str(item.get("description", ""))
+        item.setdefault("value", description)
+        item.setdefault("rationale", description)
+        assumptions.append(item)
+    normalized["assumptions"] = assumptions
+
+    questions = []
+    for question in normalized.get("questions", []):
+        if not isinstance(question, dict):
+            continue
+        item = dict(question)
+        related = item.get("related_features") or item.get("related_dimensions") or [item["related_feature"]] if item.get("related_feature") else item.get("related_features") or item.get("related_dimensions") or []
+        item.setdefault("field_id", related[0] if related else item.get("id", "question"))
+        item.setdefault("prompt", item.get("question", "Please provide the missing detail."))
+        questions.append(item)
+    normalized["questions"] = questions
+
+    annotations = []
+    for annotation in normalized.get("annotations", []):
+        if not isinstance(annotation, dict):
+            continue
+        item = dict(annotation)
+        item.setdefault("field_id", item.get("links_to", item.get("id", "annotation")))
+        item.setdefault("label", item.get("text", item["field_id"]))
+        annotations.append(item)
+    normalized["annotations"] = annotations
+    return normalized
+
+
+def fallback_draft_specification(payload: Dict[str, Any], analysis: Dict[str, Any], errors: List[Dict[str, str]]) -> DraftSpecification:
+    """Return a reviewable, schema-valid draft when provider JSON cannot be normalized safely."""
+    title = str(payload.get("title") or analysis.get("title") or "Untitled specification")
+    repaired = "; ".join(error["field"] for error in errors[:5]) or "provider response"
+    return DraftSpecification.model_validate(
+        {
+            "title": title,
+            "units": "mm",
+            "analysis": {"views": analysis.get("views", []), "dimensions": [], "features": analysis.get("features", []), "uncertainties": []},
+            "questions": [{"id": "provider_format_repair", "field_id": "provider_format_repair", "prompt": f"EasyCAD needs clarification because it repaired incomplete provider data: {repaired}.", "required": True}],
+        }
+    )
+
+
 async def generate_project_from_image(
     data: bytes,
     filename: str,
@@ -117,21 +186,28 @@ async def generate_project_from_image(
     return project
 
 
-async def repair_project(
-    project: CADProject,
-    user_feedback: str = "",
-    current_view: Optional[str] = None,
-    validate_result: bool = True,
-) -> CADProject:
+async def generate_draft_specification_from_image(
+    data: bytes, filename: str, mime_type: str, instructions: str = ""
+) -> DraftSpecification:
+    image_info = validate_image_upload(data, filename, mime_type)
+    openrouter_key = os.environ.get("OPEN_ROUTER_KEY")
     deepseek_key = os.environ.get("DEEP_SEEK_KEY")
+    if not openrouter_key:
+        raise GenerationError("vision_analysis", "OPEN_ROUTER_KEY is not configured")
     if not deepseek_key:
-        raise GenerationError("cad_generation", "DEEP_SEEK_KEY is not configured")
-
-    payload = await plan_repair(project, user_feedback, current_view, deepseek_key)
-    repaired = apply_repair_plan(project, payload)
-    if validate_result:
-        validate_project(repaired)
-    return repaired
+        raise GenerationError("draft_specification", "DEEP_SEEK_KEY is not configured")
+    analysis = await analyze_drawing(data, image_info["mime_type"], instructions, openrouter_key)
+    draft = await plan_draft_specification(analysis, instructions, deepseek_key)
+    image_ref, image_sha256 = store_source_image(data)
+    draft.source = SourceInfo(
+        filename=image_info.get("filename", ""),
+        mime_type=image_info.get("mime_type", ""),
+        width=image_info.get("width"),
+        height=image_info.get("height"),
+        image_ref=image_ref,
+        image_sha256=image_sha256,
+    )
+    return draft
 
 
 async def compare_project_renders(project: CADProject, api_key: str) -> VisualComparison:
@@ -247,6 +323,14 @@ async def plan_cad_project(analysis: Dict[str, Any], instructions: str, api_key:
         "parameter with type expression, then reference that parameter ID. Do not put geometry inside an implementation object. "
         "For an L-shaped body, use two box operations: a base box followed by an upright box targeting the base; do not use an L-shape profile. "
         "For example, a base operation is {\"id\":\"base_body\",\"type\":\"box\",\"operation\":\"add\",\"source_feature_ids\":[\"base_body\"],\"parameters\":{\"length\":\"overall_length\",\"width\":\"overall_width\",\"height\":\"base_height\"},\"placement\":{\"origin\":[0,0,0]},\"status\":\"implemented\"}. "
+        "For an L-shaped bracket, declare derived parameters for upright_height = overall_height - base_height and "
+        "upright_x = overall_length - upright_length. The upright must target the base and start at "
+        "[upright_x, 0, base_height]; never place it at overall_length or z=0. Every add after the root body must "
+        "target a previous body. Cuts must target the latest solid containing their feature. Do not use a tangent, "
+        "zero-thickness, or edge-only boolean to approximate a rounded end. "
+        "A rectangular top slot on an L-bracket is a pocket, not a rounded slot: target the upright, use its intended "
+        "length and width, declare top_slot_z = overall_height - slot_depth, and use [slot_center_x, slot_center_y, "
+        "top_slot_z] as its origin so its positive extrusion removes material. "
         "If this schema cannot represent a feature, set status unsupported with an assumption; never invent a new implemented type. "
         "Prefer simple extrusions, revolutions, holes, pockets, chamfers, fillets, and simple top-face text features. "
         "If the drawing shows engraved, embossed, stamped, or printed lettering, transcribe it exactly, including Cyrillic, and add parameters "
@@ -270,229 +354,108 @@ async def plan_cad_project(analysis: Dict[str, Any], instructions: str, api_key:
             {"role": "user", "content": json.dumps({"drawing_analysis": analysis}, ensure_ascii=False)},
         ],
         "temperature": 0.1,
-        "max_tokens": 5000,
-        "response_format": {"type": "json_object"},
+        "max_tokens": 20000,
+        "tools": [{"type": "function", "function": {"name": "submit_draft_specification", "description": "Return the DraftSpecification.", "parameters": DraftSpecification.model_json_schema(), "strict": True}}],
+        "tool_choice": {"type": "function", "function": {"name": "submit_draft_specification"}},
     }
     result = await _chat_json(url, api_key, payload, "cad_generation")
-    if _has_cad_plan_shape(result):
+    issues = _cad_plan_preflight_issues(result, analysis)
+    if _has_cad_plan_shape(result) and not issues:
         return result
     retry_payload = dict(payload)
+    retry_reason = (
+        "The previous JSON was not a complete CAD plan."
+        if not _has_cad_plan_shape(result)
+        else "The previous CAD plan failed deterministic geometry preflight: " + "; ".join(issues)
+    )
     retry_payload["messages"] = list(payload["messages"]) + [
         {
             "role": "user",
             "content": (
-                "The previous JSON was not a complete CAD plan. Return one JSON object with "
+                f"{retry_reason} Return one corrected JSON object with "
                 "top-level keys exactly including parameters, feature_graph, feature_summary, and assumptions. "
-                "parameters must be an array, not a single parameter object."
+                "parameters must be an array, not a single parameter object. Preserve every drawing feature and "
+                "correct the reported geometry rather than explaining it in assumptions."
             ),
         }
     ]
     result = await _chat_json(url, api_key, retry_payload, "cad_generation")
     if not _has_cad_plan_shape(result):
         raise GenerationError("cad_generation", "CAD plan did not include required parameters and Feature Graph")
+    issues = _cad_plan_preflight_issues(result, analysis)
+    if issues:
+        raise GenerationError(
+            "cad_generation",
+            "CAD plan failed deterministic preflight: " + "; ".join(issues),
+            {"preflight_issues": issues},
+        )
     return result
 
 
-async def plan_repair(
-    project: CADProject,
-    user_feedback: str,
-    current_view: Optional[str],
-    api_key: str,
-) -> Dict[str, Any]:
-    model = os.environ.get("DEEP_SEEK_MODEL", os.environ.get("DEEPSEEK_MODEL", "deepseek-chat"))
-    model = normalize_model_id(model)
+async def plan_draft_specification(analysis: Dict[str, Any], instructions: str, api_key: str) -> DraftSpecification:
+    """Convert image observations into an editable pre-CAD specification."""
+    model = normalize_model_id(os.environ.get("DEEP_SEEK_MODEL", os.environ.get("DEEPSEEK_MODEL", "deepseek-chat")))
     url = os.environ.get("DEEP_SEEK_BASE_URL", "https://api.deepseek.com/chat/completions")
     prompt = (
-        "Repair this structured CAD project. Return only one JSON object with keys: assumptions, feature_summary, "
-        "operation_updates, repaired_feature_ids. Do not return Python or CadQuery source. "
-        "Make the smallest correction needed. Preserve parameter IDs and do not remove features silently. "
-        "When error_feature_ids are present, repair only those Feature Graph operations and required dependencies. "
-        "Use only trusted compiler operation types already allowed by the supplied Feature Graph schema. Mark an unrepresentable "
-        "operation unsupported with an assumption instead of returning executable code or inventing a new operation type. "
-        "Preserve every unrelated operation ID and definition exactly. Report repaired_feature_ids in the response. "
-        "Each operation_updates item must be {id, parameters?, placement?, profile?, pattern?, status?, assumption?}. "
-        "Do not wrap modifications in a changes object. Use only existing parameter IDs or numeric literals in operation fields; "
-        "do not put arithmetic expressions in an update. "
-        "If export or boolean operations failed, update only the responsible structured operation. "
-        "Avoid tangent/zero-thickness booleans and fragile sweeps. "
-        "If the error reports a bounding-box mismatch, fix coordinate placement so overall_length, overall_width, and overall_height match the model extents. "
-        "If the error reports excessive L-bracket volume, build the part as a base block plus an upright block, not as one full-height block with a cutout. "
-        "For blocky orthographic parts, prefer box(..., centered=False) and explicit translations over mixed centered/default boxes. "
-        "If user feedback conflicts with the drawing analysis, prefer a conservative assumption and record it."
+        "Convert drawing observations into a DraftSpecification JSON. Do not return CAD code, Feature Graph, or an STL plan. "
+        "Return only JSON with title, units, dimensions, features, assumptions, questions, annotations. "
+        "Each dimension requires id, label, value or expression, unit, source, confidence, status, critical, evidence. "
+        "Each feature requires id, label, type, operation, target when known, parameters, placement, status, critical_fields, confidence, evidence. "
+        "Use status confirmed only for unambiguous observed values. Use needs_input for missing critical data, conflicted for contradictions, "
+        "and assumed only with an assumption describing the proposal. Every missing size, position, target, cut direction, or depth needed "
+        "for a printable feature must become a required question. Never silently invent a dimension. "
+        "Annotations use normalized x and y coordinates from 0 to 1 and link to a dimension, feature, or question. "
     )
-    repair_input = {
-        "drawing_analysis": project.analysis.model_dump(),
-        "parameters": {key: value.model_dump() for key, value in project.parameters.items()},
-        "feature_summary": [item.model_dump() for item in project.feature_summary],
-        "feature_graph": project.feature_graph.model_dump(),
-        "feature_coverage": project.feature_coverage.model_dump(),
-        "assumptions": project.assumptions,
-        "error": project.generation.error,
-        "error_feature_ids": _repair_error_feature_ids(project),
-        "user_feedback": user_feedback,
-        "current_view": current_view,
-    }
+    if instructions.strip():
+        prompt += f"\nUser instructions: {instructions.strip()}"
     payload = {
         "model": model,
         "messages": [
             {"role": "system", "content": prompt},
-            {"role": "user", "content": json.dumps(repair_input, ensure_ascii=False)},
+            {"role": "user", "content": json.dumps({"drawing_analysis": analysis}, ensure_ascii=False)},
         ],
         "temperature": 0.1,
         "max_tokens": 5000,
         "response_format": {"type": "json_object"},
     }
-    return await _chat_json(url, api_key, payload, "cad_generation")
-
-
-def _repair_error_feature_ids(project: CADProject) -> List[str]:
-    error = project.generation.error or {}
-    detail = error.get("detail") if isinstance(error.get("detail"), dict) else {}
-    candidates = [error.get("operation_id"), detail.get("operation_id")]
-    candidates.extend(detail.get("feature_ids", []) if isinstance(detail.get("feature_ids"), list) else [])
-    return list(
-        dict.fromkeys(
-            feature_id
-            for value in candidates
-            if (feature_id := _parameter_id(str(value or "")))
-        )
-    )
-
-
-def apply_repair_plan(project: CADProject, plan: Dict[str, Any]) -> CADProject:
-    operation_updates = plan.get("operation_updates", [])
-    if not isinstance(operation_updates, list):
-        raise GenerationError("cad_generation", "Repair operation_updates must be an array")
-    if not operation_updates:
-        raise GenerationError("cad_generation", "Repair did not include Feature Graph operation updates")
-
-    repaired = project.model_copy(deep=True)
-    repaired.generation_history.append(
-        GenerationHistoryEntry(
-            attempt=repaired.cad.generation_attempt,
-            status=repaired.generation.status,
-            cad_source=repaired.cad.source,
-            error=repaired.generation.error,
-            feature_graph=repaired.feature_graph.model_dump(),
-            feature_coverage=repaired.feature_coverage.model_dump(),
-            repair_feature_ids=[
-                feature_id
-                for value in plan.get("repaired_feature_ids", [])
-                if (feature_id := _parameter_id(str(value)))
-            ],
-            render_artifacts={
-                key: value.model_dump() for key, value in repaired.generation.render_artifacts.items()
-            },
-            visual_comparison=repaired.generation.visual_comparison.model_dump(),
-        )
-    )
-    repaired.cad.generation_attempt += 1
-    _apply_feature_operation_updates(repaired, operation_updates, plan.get("repaired_feature_ids", []))
+    result = normalize_draft_specification_payload(await _chat_json(url, api_key, payload, "draft_specification"))
     try:
-        repaired = compile_project_feature_graph(repaired)
-    except CompilerError as exc:
-        raise GenerationError("cad_generation", f"Updated Feature Graph cannot compile: {exc}") from exc
-    repaired.feature_coverage = _build_feature_coverage(repaired.analysis.features, repaired.feature_graph)
-    if "assumptions" in plan:
-        repaired.assumptions = [str(item) for item in plan.get("assumptions") or [] if str(item).strip()]
-    if "feature_summary" in plan or "features" in plan:
-        repaired.feature_summary = _normalize_features(plan.get("feature_summary", plan.get("features", [])))
-    repaired.generation = GenerationResult(status="needs_review", warnings=[])
-    repaired.updated_at = datetime.utcnow().isoformat() + "Z"
-    return repaired
+        canonical_analysis = {"views": analysis.get("views", []), "dimensions": [], "features": analysis.get("features", []), "uncertainties": []}
+        return DraftSpecification.model_validate({"analysis": canonical_analysis, **result})
+    except PydanticValidationError as exc:
+        errors = [{"field": ".".join(str(part) for part in error["loc"]), "message": error["msg"]} for error in exc.errors()[:8]]
+        logger.warning("draft_specification_validation_failed errors=%s", errors)
+        return fallback_draft_specification(result, analysis, errors)
 
 
-def _apply_feature_operation_updates(
-    project: CADProject,
-    updates: List[Any],
-    repaired_feature_ids: Any,
-) -> None:
-    declared_ids = {
-        _parameter_id(str(value))
-        for value in repaired_feature_ids
-        if _parameter_id(str(value))
-    } if isinstance(repaired_feature_ids, list) else set()
-    operations = {operation.id: operation for operation in project.feature_graph.operations}
-    for raw_update in updates:
-        if not isinstance(raw_update, dict):
-            raise GenerationError("cad_generation", "Feature operation update must be an object")
-        operation_id = _parameter_id(str(raw_update.get("id") or ""))
-        if not operation_id or operation_id not in operations:
-            raise GenerationError("cad_generation", f"Repair references unknown feature operation '{operation_id}'")
-        if declared_ids and operation_id not in declared_ids:
-            raise GenerationError(
-                "cad_generation",
-                f"Operation update '{operation_id}' is not declared in repaired_feature_ids",
-            )
-        changes = raw_update.get("changes")
-        if changes is not None and not isinstance(changes, dict):
-            raise GenerationError("cad_generation", "Repair operation changes must be an object")
-        update = dict(changes or raw_update)
-        update["id"] = operation_id
-        existing = operations[operation_id].model_dump()
-        for field in {"type", "operation", "target", "depends_on", "source_feature_ids"}:
-            if field in update and update[field] != existing[field]:
-                raise GenerationError(
-                    "cad_generation",
-                    f"Repair cannot change operation {field} for '{operation_id}'",
-                )
-        merged = existing
-        merged.update(update)
-        merged["id"] = operation_id
-        merged = _normalize_operation_update(merged)
-        try:
-            operations[operation_id] = FeatureOperation.model_validate(merged)
-        except PydanticValidationError as exc:
-            raise GenerationError(
-                "cad_generation",
-                f"Invalid repair for feature operation '{operation_id}': {exc.errors()[0]['msg']}",
-            ) from exc
-    unsupported_ids = {
-        operation.id for operation in operations.values() if operation.status in {"unsupported", "unresolved"}
+async def plan_specification_patch(
+    specification: DraftSpecification, question_id: str, free_text: str, api_key: str
+) -> Dict[str, Any]:
+    """Request a narrow patch only when user free text needs interpretation."""
+    if not free_text.strip():
+        return {"dimension_values": {}, "feature_updates": {}}
+    model = normalize_model_id(os.environ.get("DEEP_SEEK_MODEL", os.environ.get("DEEPSEEK_MODEL", "deepseek-chat")))
+    url = os.environ.get("DEEP_SEEK_BASE_URL", "https://api.deepseek.com/chat/completions")
+    payload = {
+        "model": model,
+        "messages": [
+            {
+                "role": "system",
+                "content": (
+                    "Interpret the user's clarification for the named unresolved question in this DraftSpecification. Return only JSON with "
+                    "dimension_values, feature_updates, resolved_question, and optional unresolved_question. Update only the linked field "
+                    "or existing unresolved fields needed to answer it. feature_updates may contain only parameters, placement, or target. "
+                    "All returned values are proposals for user review, not confirmations. Do not create CAD code, Feature Graph operations, "
+                    "new IDs, or unrelated changes. If the clarification is insufficient, return unresolved_question with a clearer prompt."
+                ),
+            },
+            {"role": "user", "content": json.dumps({"specification": specification.model_dump(), "question_id": question_id, "clarification": free_text}, ensure_ascii=False)},
+        ],
+        "temperature": 0.0,
+        "max_tokens": 2000,
+        "response_format": {"type": "json_object"},
     }
-    for item in project.feature_graph.operations:
-        operation = operations[item.id]
-        if operation.target in unsupported_ids and operation.status == "implemented":
-            payload = operation.model_dump()
-            payload.update(
-                {
-                    "status": "unsupported",
-                    "capability_status": "unsupported",
-                    "implementation": None,
-                    "assumption": "Target operation is unsupported by the trusted compiler.",
-                }
-            )
-            operations[item.id] = FeatureOperation.model_validate(payload)
-            unsupported_ids.add(item.id)
-    project.feature_graph = FeatureGraph(operations=[operations[item.id] for item in project.feature_graph.operations])
-
-
-def _normalize_operation_update(update: Dict[str, Any]) -> Dict[str, Any]:
-    normalized = dict(update)
-    placement = normalized.get("placement")
-    if isinstance(placement, dict):
-        allowed_placement = {
-            key: value
-            for key, value in placement.items()
-            if key in {"reference", "plane", "origin", "axis", "direction", "rotation_deg", "offsets"}
-        }
-        normalized["placement"] = allowed_placement or None
-    parameters = normalized.get("parameters") if isinstance(normalized.get("parameters"), dict) else {}
-    unsafe_expression = any(
-        isinstance(value, str) and _parameter_id(value) != value for value in parameters.values()
-    )
-    origin = normalized.get("placement", {}).get("origin", []) if isinstance(normalized.get("placement"), dict) else []
-    unsafe_expression = unsafe_expression or any(
-        isinstance(value, str) and _parameter_id(value) != value for value in origin
-    )
-    if unsafe_expression:
-        normalized["status"] = "unsupported"
-        normalized["capability_status"] = "unsupported"
-        normalized["assumption"] = "Repair contains an expression not represented by declared parameters."
-        normalized["implementation"] = None
-    elif normalized.get("status") == "implemented" and not normalized.get("implementation"):
-        normalized["implementation"] = normalized.get("id")
-    return normalized
+    return await _chat_json(url, api_key, payload, "specification_patch")
 
 
 def project_from_plan(
@@ -650,6 +613,101 @@ def _has_cad_plan_shape(payload: Dict[str, Any]) -> bool:
         isinstance(payload.get("parameters"), (list, dict))
         and isinstance(payload.get("feature_graph"), (list, dict))
     )
+
+
+def _cad_plan_preflight_issues(plan: Dict[str, Any], analysis: Dict[str, Any]) -> List[str]:
+    """Reject planner output that is JSON-shaped but cannot describe a connected solid."""
+    if not _has_cad_plan_shape(plan):
+        return ["missing parameters or feature_graph"]
+    graph = plan.get("feature_graph")
+    operations = graph.get("operations") if isinstance(graph, dict) else graph
+    if not isinstance(operations, list) or not operations:
+        return ["feature_graph has no operations"]
+
+    parameter_ids = {
+        str(item.get("id"))
+        for item in plan.get("parameters", [])
+        if isinstance(item, dict) and str(item.get("id") or "").strip()
+    }
+    issues: List[str] = []
+    seen_ids = set()
+    add_operations: List[Dict[str, Any]] = []
+    trusted_types = compiler_operation_types()
+    for index, operation in enumerate(operations):
+        if not isinstance(operation, dict):
+            issues.append(f"operation {index + 1} is not an object")
+            continue
+        operation_id = str(operation.get("id") or f"operation {index + 1}")
+        operation_type = canonical_operation_type(str(operation.get("type") or ""))
+        if operation.get("status", "implemented") == "implemented" and operation_type not in trusted_types:
+            issues.append(f"{operation_id} uses unsupported operation type {operation_type}")
+        target = operation.get("target")
+        if target and str(target) not in seen_ids:
+            issues.append(f"{operation_id} targets a missing or later operation {target}")
+        if operation.get("operation") == "add":
+            add_operations.append(operation)
+            if len(add_operations) > 1 and not target:
+                issues.append(f"{operation_id} is an added body without a target")
+        placement = operation.get("placement")
+        if isinstance(placement, dict) and "origin" in placement:
+            origin = placement["origin"]
+            if not isinstance(origin, list) or len(origin) != 3:
+                issues.append(f"{operation_id} placement.origin must have exactly three values")
+            else:
+                for value in origin:
+                    if isinstance(value, str) and value not in parameter_ids:
+                        issues.append(f"{operation_id} placement uses undeclared or inline expression {value}")
+                        break
+        seen_ids.add(operation_id)
+
+    shape_text = " ".join(
+        str(analysis.get(key) or "") for key in ("title", "overall_shape", "construction_strategy")
+    ).lower()
+    if "l-shaped" in shape_text or "l shaped" in shape_text:
+        _l_bracket_preflight_issues(add_operations, operations, issues)
+    return issues
+
+
+def _l_bracket_preflight_issues(
+    add_operations: List[Dict[str, Any]], operations: List[Dict[str, Any]], issues: List[str]
+) -> None:
+    boxes = [
+        operation
+        for operation in add_operations
+        if canonical_operation_type(str(operation.get("type") or "")) == "box"
+        and operation.get("status", "implemented") == "implemented"
+    ]
+    if len(boxes) < 2:
+        issues.append("L-shaped bracket requires a base box and an upright box")
+        return
+    base, upright = boxes[0], boxes[1]
+    upright_id = str(upright.get("id") or "upright")
+    if upright.get("target") != base.get("id"):
+        issues.append(f"{upright_id} must target base body {base.get('id')}")
+    placement = upright.get("placement") or {}
+    origin = placement.get("origin") if isinstance(placement, dict) else None
+    if not isinstance(origin, list) or len(origin) != 3:
+        return
+    if origin[0] in {"overall_length", "total_length"}:
+        issues.append(f"{upright_id} starts at the end of the base instead of inside it")
+    if origin[2] == 0:
+        issues.append(f"{upright_id} starts at z=0 instead of on top of the base")
+    height = (upright.get("parameters") or {}).get("height")
+    if height in {"overall_height", "total_height"}:
+        issues.append(f"{upright_id} height must exclude base thickness")
+    for operation in operations:
+        operation_id = str(operation.get("id") or "").lower()
+        feature_ids = " ".join(str(value).lower() for value in operation.get("source_feature_ids", []))
+        top_feature_name = f"{operation_id} {feature_ids}"
+        if "top" not in top_feature_name or not any(term in top_feature_name for term in ("slot", "groove")):
+            continue
+        if canonical_operation_type(str(operation.get("type") or "")) != "pocket":
+            issues.append(f"{operation.get('id')} top cut must use pocket")
+        if operation.get("target") != upright.get("id"):
+            issues.append(f"{operation.get('id')} top cut must target {upright.get('id')}")
+        top_origin = (operation.get("placement") or {}).get("origin")
+        if isinstance(top_origin, list) and len(top_origin) == 3 and top_origin[2] in {"overall_height", "total_height"}:
+            issues.append(f"{operation.get('id')} top cut must start below the top surface")
 
 
 def _normalize_features(raw: Any) -> List[FeatureSummary]:
@@ -1243,7 +1301,9 @@ async def _chat_json(url: str, api_key: str, payload: Dict[str, Any], stage: str
 
         try:
             response_payload = response.json()
-            content = response_payload["choices"][0]["message"]["content"]
+            message = response_payload["choices"][0]["message"]
+            tool_calls = message.get("tool_calls", [])
+            content = tool_calls[0]["function"]["arguments"] if tool_calls else message["content"]
         except (KeyError, IndexError, TypeError, json.JSONDecodeError) as exc:
             _log_model_response(
                 stage,

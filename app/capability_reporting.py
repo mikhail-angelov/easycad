@@ -29,7 +29,13 @@ def capability_report_entry(
     observations = list(observations)
     outcomes = summarize_capability_observations(observations)
     required_observations = len(case.get("variants", [case["source_drawing"]]))
+    gate = case.get("evidence_gate") or {}
+    minimum_observations = int(gate.get("minimum_observations", required_observations))
+    minimum_verified_export_rate = float(gate.get("minimum_verified_export_rate", 1.0))
     observed_count = sum(outcomes.values())
+    unavailable_reasons = sorted(
+        {str(observation["unavailable_reason"]) for observation in observations if observation.get("unavailable_reason")}
+    )
     quality_observations = [
         observation
         for observation in observations
@@ -42,9 +48,11 @@ def capability_report_entry(
     # promoted into quality evidence merely because they contain model prose.
     provider_status = (
         "measured"
-        if observed_count >= required_observations and len(quality_observations) == required_observations
+        if observed_count >= minimum_observations and len(quality_observations) >= minimum_observations
         else "insufficient_evidence"
     )
+    if unavailable_reasons and not observed_count:
+        provider_status = "unavailable"
     evaluation_status = "insufficient_evidence"
     metrics = None
     if provider_status == "measured":
@@ -89,13 +97,17 @@ def capability_report_entry(
             metrics["passes_supported_gate"]
             and not metrics["graph_mismatch_count"]
             and not metrics["missing_parameter_ids"]
-            and outcomes["verified_export"] == required_observations
+            and outcomes["verified_export"] / observed_count >= minimum_verified_export_rate
         )
         evaluation_status = "passed" if metrics["passes_supported_gate"] else "failed"
 
     return {
         "status": case["status"],
         "fixture_count": required_observations,
+        "evidence_gate": {
+            "minimum_observations": minimum_observations,
+            "minimum_verified_export_rate": minimum_verified_export_rate,
+        },
         "outcomes": outcomes,
         "worker_evaluation": {
             "status": "passed" if worker_suite_passed else "failed",
@@ -105,6 +117,7 @@ def capability_report_entry(
         "provider_evaluation": {
             "status": provider_status,
             "observation_count": observed_count,
+            "unavailable_reasons": unavailable_reasons,
             "metrics": metrics,
         },
         "evaluation_status": evaluation_status,

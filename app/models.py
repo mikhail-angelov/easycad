@@ -15,6 +15,7 @@ FeatureOperationKind = Literal["add", "cut", "intersect", "modify", "pattern"]
 FeatureCoverageStatus = Literal["planned", "implemented", "approximated", "unresolved", "unsupported"]
 CapabilityStatus = Literal["supported", "experimental", "unsupported"]
 FeaturePatternKind = Literal["linear", "polar", "mirror", "path"]
+SpecificationStatus = Literal["confirmed", "needs_input", "assumed", "conflicted"]
 
 
 class CADParameter(BaseModel):
@@ -71,6 +72,91 @@ class DrawingAnalysis(BaseModel):
     dimensions: List[Dict[str, Any]] = Field(default_factory=list)
     features: List[Dict[str, Any]] = Field(default_factory=list)
     uncertainties: List[Dict[str, Any]] = Field(default_factory=list)
+
+
+class SpecificationDimension(BaseModel):
+    id: str = Field(pattern=r"^[a-z][a-z0-9_]*$")
+    label: str
+    value: Optional[ParameterValue] = None
+    expression: Optional[str] = None
+    unit: str = "mm"
+    source: ParameterSource = "inferred"
+    confidence: float = Field(default=0.5, ge=0, le=1)
+    status: SpecificationStatus = "needs_input"
+    critical: bool = True
+    min: Optional[float] = None
+    max: Optional[float] = None
+    alternatives: List[ParameterValue] = Field(default_factory=list)
+    evidence: List[str] = Field(default_factory=list)
+
+
+class SpecificationFeature(BaseModel):
+    id: str = Field(pattern=r"^[a-z][a-z0-9_]*$")
+    label: str
+    type: str
+    operation: FeatureOperationKind
+    target: Optional[str] = None
+    parameters: Dict[str, FeatureValue] = Field(default_factory=dict)
+    placement: Dict[str, FeatureValue | List[FeatureValue]] = Field(default_factory=dict)
+    status: SpecificationStatus = "needs_input"
+    critical_fields: List[str] = Field(default_factory=list)
+    confidence: float = Field(default=0.5, ge=0, le=1)
+    evidence: List[str] = Field(default_factory=list)
+    alternatives: Dict[str, List[FeatureValue]] = Field(default_factory=dict)
+
+
+class SpecificationAssumption(BaseModel):
+    id: str = Field(pattern=r"^[a-z][a-z0-9_]*$")
+    value: ParameterValue
+    rationale: str
+    affected_ids: List[str] = Field(default_factory=list)
+    status: SpecificationStatus = "assumed"
+
+
+class SpecificationQuestion(BaseModel):
+    id: str = Field(pattern=r"^[a-z][a-z0-9_]*$")
+    field_id: str
+    prompt: str
+    alternatives: List[ParameterValue] = Field(default_factory=list)
+    required: bool = True
+
+
+class SpecificationAnnotation(BaseModel):
+    id: str = Field(pattern=r"^[a-z][a-z0-9_]*$")
+    field_id: str
+    x: float = Field(ge=0, le=1)
+    y: float = Field(ge=0, le=1)
+    label: str
+
+
+class DraftSpecification(BaseModel):
+    id: str = Field(default_factory=lambda: str(uuid4()))
+    title: str = "Untitled specification"
+    units: str = "mm"
+    source: SourceInfo = Field(default_factory=SourceInfo)
+    analysis: DrawingAnalysis = Field(default_factory=DrawingAnalysis)
+    dimensions: List[SpecificationDimension] = Field(default_factory=list)
+    features: List[SpecificationFeature] = Field(default_factory=list)
+    assumptions: List[SpecificationAssumption] = Field(default_factory=list)
+    questions: List[SpecificationQuestion] = Field(default_factory=list)
+    annotations: List[SpecificationAnnotation] = Field(default_factory=list)
+    free_text: str = ""
+
+    @model_validator(mode="after")
+    def stable_ids_are_unique(self) -> "DraftSpecification":
+        ids = [item.id for item in self.dimensions] + [item.id for item in self.features]
+        if len(ids) != len(set(ids)):
+            raise ValueError("dimension and feature IDs must be unique")
+        return self
+
+
+class SpecificationEditRequest(BaseModel):
+    specification: DraftSpecification
+    dimension_values: Dict[str, ParameterValue] = Field(default_factory=dict)
+    accepted_feature_ids: List[str] = Field(default_factory=list)
+    accepted_assumption_ids: List[str] = Field(default_factory=list)
+    free_text: str = ""
+    clarification_question_id: Optional[str] = None
 
 
 class FeatureProfile(BaseModel):
@@ -282,19 +368,6 @@ class GenerationResult(BaseModel):
     error: Optional[Dict[str, Any]] = None
 
 
-class GenerationHistoryEntry(BaseModel):
-    attempt: int
-    status: str
-    cad_source: str
-    error: Optional[Dict[str, Any]] = None
-    feature_graph: Dict[str, Any] = Field(default_factory=dict)
-    feature_coverage: Dict[str, Any] = Field(default_factory=dict)
-    repair_feature_ids: List[str] = Field(default_factory=list)
-    render_artifacts: Dict[str, Dict[str, Any]] = Field(default_factory=dict)
-    visual_comparison: Dict[str, Any] = Field(default_factory=dict)
-    created_at: str = Field(default_factory=lambda: datetime.utcnow().isoformat() + "Z")
-
-
 class CADProject(BaseModel):
     version: int = 1
     id: str = Field(default_factory=lambda: str(uuid4()))
@@ -309,7 +382,6 @@ class CADProject(BaseModel):
     assumptions: List[str] = Field(default_factory=list)
     cad: CADSource
     generation: GenerationResult = Field(default_factory=GenerationResult)
-    generation_history: List[GenerationHistoryEntry] = Field(default_factory=list)
     created_at: str = Field(default_factory=lambda: datetime.utcnow().isoformat() + "Z")
     updated_at: str = Field(default_factory=lambda: datetime.utcnow().isoformat() + "Z")
 
@@ -319,16 +391,5 @@ class PreviewRequest(BaseModel):
     parameters: Dict[str, ParameterValue] = Field(default_factory=dict)
 
 
-class RepairRequest(BaseModel):
-    project: CADProject
-    user_feedback: str = ""
-    current_view: Optional[str] = None
-
-
 class CompareRequest(BaseModel):
     project: CADProject
-
-
-class VisualRepairRequest(BaseModel):
-    project: CADProject
-    feature_id: str

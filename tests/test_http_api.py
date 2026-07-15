@@ -8,8 +8,9 @@ from fastapi.testclient import TestClient
 
 import app.ai_generation as ai
 import app.main as main
-from app.models import FeatureOperation, VisualComparison
-from tests.test_ai_generation import make_plate_project, plate_analysis, plate_plan
+from app.models import FeatureOperation, SpecificationQuestion, VisualComparison
+from tests.project_helpers import make_plate_project
+from tests.test_specification import complete_specification
 
 
 ROOT = Path(__file__).resolve().parent.parent
@@ -20,23 +21,96 @@ class HTTPAPITests(unittest.TestCase):
     def setUpClass(cls):
         cls.client = TestClient(main.app)
 
-    def test_generate_ignores_provider_executable_fields_and_runs_trusted_pipeline(self):
-        plan = plate_plan()
-        plan["code"] = "import os\nresult = os.system('bad')"
-        plan["source"] = "raise RuntimeError('bad')"
-        with patch.object(ai, "analyze_drawing", AsyncMock(return_value=plate_analysis())), patch.object(
-            ai, "plan_cad_project", AsyncMock(return_value=plan)
-        ), patch.dict(main.os.environ, {"OPEN_ROUTER_KEY": "x", "DEEP_SEEK_KEY": "x"}):
+    def test_engineering_input_quality_gate_blocks_before_llm(self):
+        with patch.object(main, "generate_draft_specification_from_image", AsyncMock()) as analyze:
             response = self.client.post(
-                "/api/projects/generate",
+                "/api/specifications/analyze",
                 files={"file": ("plate.png", (ROOT / "fixtures" / "feature_polar_perforation.png").read_bytes(), "image/png")},
+                data={"input_mode": "engineering"},
             )
 
+        self.assertEqual(response.status_code, 422, response.text)
+        self.assertEqual(response.json()["detail"]["stage"], "input_quality")
+        self.assertIn("orthographic_views", response.json()["detail"]["detail"]["missing"])
+        analyze.assert_not_awaited()
+
+    def test_engineering_gate_does_not_require_isometric_view(self):
+        warning = main.validate_input_quality_gate(
+            "engineering",
+            has_orthographic_views=True,
+            has_isometric_view=False,
+            has_units_and_overall_dimensions=True,
+            has_feature_positions=True,
+            has_feature_dimensions_and_directions=True,
+        )
+        self.assertIn("isometric", warning)
+
+    def test_analysis_failure_returns_stage_and_request_id(self):
+        with patch.object(
+            main,
+            "generate_draft_specification_from_image",
+            AsyncMock(side_effect=ai.GenerationError("vision_analysis", "Provider request failed", {"status_code": 429})),
+        ):
+            response = self.client.post(
+                "/api/specifications/analyze",
+                files={"file": ("plate.png", (ROOT / "fixtures" / "feature_polar_perforation.png").read_bytes(), "image/png")},
+                data={"input_mode": "sketch"},
+            )
+
+        self.assertEqual(response.status_code, 422, response.text)
+        detail = response.json()["detail"]
+        self.assertEqual(detail["stage"], "vision_analysis")
+        self.assertEqual(detail["detail"], {"status_code": 429})
+        self.assertRegex(detail["request_id"], r"^[0-9a-f]{12}$")
+
+    def test_specification_validation_applies_structured_edits_without_llm(self):
+        specification = complete_specification()
+        specification.dimensions[0].status = "needs_input"
+        with patch.object(main, "plan_specification_patch", AsyncMock()) as patcher:
+            response = self.client.post(
+                "/api/specifications/validate",
+                json={
+                    "specification": specification.model_dump(mode="json"),
+                    "dimension_values": {"length": 40},
+                },
+            )
         self.assertEqual(response.status_code, 200, response.text)
-        project = response.json()["project"]
-        self.assertEqual(project["cad"]["source_kind"], "compiled")
-        self.assertIn("# feature:base", project["cad"]["source"])
-        self.assertNotIn("import os", project["cad"]["source"])
+        patcher.assert_not_awaited()
+        self.assertTrue(response.json()["valid"])
+
+    def test_free_text_clarification_returns_a_reviewable_patch(self):
+        specification = complete_specification()
+        specification.dimensions[1].status = "needs_input"
+        specification.questions = [SpecificationQuestion(id="width_question", field_id="width", prompt="Enter width")]
+        with patch.object(
+            main,
+            "plan_specification_patch",
+            AsyncMock(return_value={"dimension_values": {"width": 32}, "resolved_question": True}),
+        ) as patcher:
+            response = self.client.post(
+                "/api/specifications/validate",
+                json={
+                    "specification": specification.model_dump(mode="json"),
+                    "free_text": "The width is 32 mm.",
+                    "clarification_question_id": "width_question",
+                },
+            )
+        self.assertEqual(response.status_code, 200, response.text)
+        self.assertFalse(response.json()["valid"])
+        self.assertEqual(response.json()["specification"]["dimensions"][1]["status"], "assumed")
+        self.assertEqual(response.json()["diagnostics"]["field_ids"], ["width"])
+        patcher.assert_awaited_once()
+
+    def test_confirmed_specification_builds_without_repair(self):
+        response = self.client.post("/api/specifications/build", json=complete_specification().model_dump(mode="json"))
+        self.assertEqual(response.status_code, 200, response.text)
+        self.assertEqual(response.json()["status"], "success")
+        self.assertEqual(response.json()["project"]["cad"]["source_kind"], "compiled")
+
+    def test_legacy_repair_endpoints_are_removed(self):
+        project = make_plate_project().model_dump(mode="json")
+        self.assertEqual(self.client.post("/api/projects/repair", json={"project": project}).status_code, 405)
+        self.assertEqual(self.client.post("/api/projects/repair-visual", json={"project": project, "feature_id": "base"}).status_code, 405)
 
     def test_preview_and_stl_step_json_exports(self):
         project = make_plate_project()
@@ -74,33 +148,6 @@ class HTTPAPITests(unittest.TestCase):
 
         self.assertEqual(response.status_code, 200, response.text)
         self.assertGreater(len(response.content), 100)
-
-    def test_repair_route_recompiles_operation_updates(self):
-        project = make_plate_project()
-        repaired = ai.apply_repair_plan(
-            project,
-            {
-                "operation_updates": [
-                    {
-                        "id": "base",
-                        "parameters": {
-                            "length": "plate_width",
-                            "width": "plate_length",
-                            "height": "plate_thickness",
-                        },
-                    }
-                ],
-                "repaired_feature_ids": ["base"],
-            },
-        )
-        with patch.object(main, "repair_project", AsyncMock(return_value=repaired)):
-            response = self.client.post(
-                "/api/projects/repair",
-                json={"project": project.model_dump(mode="json"), "user_feedback": "swap dimensions"},
-            )
-
-        self.assertEqual(response.status_code, 200, response.text)
-        self.assertEqual(response.json()["project"]["cad"]["source_kind"], "compiled")
 
     def test_compare_is_advisory(self):
         project = make_plate_project()

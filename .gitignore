@@ -6,3 +6,4 @@ logs/
 .venv/
 artifacts/
 __pycache__
+node_modules

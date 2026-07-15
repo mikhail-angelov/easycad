@@ -7,6 +7,7 @@ import app.main as main
 from PIL import Image
 from app.feature_compiler import (
     COMPILER_OPERATION_TYPES,
+    COMPILER_OPERATION_KINDS,
     CompilerError,
     canonical_operation_type,
     compiler_operation_types,
@@ -97,6 +98,7 @@ class FeatureCompilerTests(unittest.TestCase):
         self.assertLess(result["volume_mm3"], 60 * 40 * 10 + 20 * 12 * 10)
 
     def test_compiles_cylinder_from_planner_catalog(self):
+        self.assertEqual(COMPILER_OPERATION_KINDS, tuple(COMPILER_OPERATION_TYPES))
         self.assertIn("cylinder", planner_operation_types())
         self.assertEqual(canonical_operation_type("rectangular_body"), "box")
         self.assertEqual(canonical_operation_type("counterbore_hole"), "counterbore")
@@ -249,6 +251,10 @@ class FeatureCompilerTests(unittest.TestCase):
         self.assertAlmostEqual(result["bounding_box"]["y"], 45.0, places=5)
         self.assertAlmostEqual(result["bounding_box"]["z"], 8.0, places=5)
         self.assertLess(result["volume_mm3"], 70 * 45 * 8 - 500)
+        measurements = result["feature_measurements"]
+        self.assertLess(measurements["counterbore"]["volume_delta_mm3"], 0)
+        self.assertGreater(measurements["counterbore"]["cylindrical_faces_delta"], 0)
+        self.assertLess(measurements["countersink"]["volume_delta_mm3"], 0)
 
     def test_compiles_ribs_and_gussets_on_a_host_body(self):
         project = self.project(
@@ -336,6 +342,8 @@ class FeatureCompilerTests(unittest.TestCase):
         shell_result = run_project(shell_project, {}, fmt="stl")
         self.assertEqual(shell_result["status"], "success")
         self.assertLess(shell_result["volume_mm3"], 50 * 35 * 20 / 2)
+        self.assertLess(shell_result["feature_measurements"]["open_shell"]["volume_delta_mm3"], 0)
+        self.assertLess(shell_result["feature_measurements"]["rim_chamfer"]["volume_delta_mm3"], 0)
 
         mirrored_project = self.project(
             [
@@ -366,6 +374,8 @@ class FeatureCompilerTests(unittest.TestCase):
         mirrored_result = run_project(mirrored_project, {}, fmt="step")
         self.assertEqual(mirrored_result["status"], "success")
         self.assertAlmostEqual(mirrored_result["bounding_box"]["x"], 40.0)
+        self.assertLess(mirrored_result["feature_measurements"]["edge_fillet"]["volume_delta_mm3"], 0)
+        self.assertGreater(mirrored_result["feature_measurements"]["mirrored"]["volume_delta_mm3"], 0)
 
         text_project = self.project(
             [
@@ -398,6 +408,7 @@ class FeatureCompilerTests(unittest.TestCase):
         text_result = run_project(text_project, {}, fmt="stl")
         self.assertEqual(text_result["status"], "success")
         self.assertLess(text_result["volume_mm3"], 50 * 30 * 8)
+        self.assertLess(text_result["feature_measurements"]["label"]["volume_delta_mm3"], 0)
 
     def test_compiles_linear_and_polar_patterns(self):
         project = self.project(

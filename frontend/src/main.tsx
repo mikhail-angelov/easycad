@@ -5,10 +5,12 @@ import type { ApiError, Dimension, DraftSpecification, Project } from './types'
 import './styles.css'
 
 function errorFrom(response: unknown): ApiError {
-  const detail = (response as { detail?: { message?: string; detail?: { field_ids?: string[]; messages?: string[] } } })?.detail
+  const detail = (response as { detail?: { message?: string; stage?: string; request_id?: string; detail?: { field_ids?: string[]; messages?: string[] } } })?.detail
   return {
     message: detail?.detail?.messages?.join('; ') || detail?.message || 'Something went wrong. Please try again.',
     fieldIds: detail?.detail?.field_ids || [],
+    stage: detail?.stage,
+    requestId: detail?.request_id,
   }
 }
 
@@ -43,7 +45,7 @@ function UploadScreen() {
     try {
       const form = new FormData()
       form.append('file', file)
-      form.append('input_mode', 'engineering')
+      form.append('input_mode', 'sketch')
       const result = await requestJson<{ specification: DraftSpecification }>('/api/specifications/analyze', { method: 'POST', body: form })
       setSpecification(result.specification)
     } catch (error) {
@@ -103,7 +105,7 @@ function ReviewWorkspace() {
   const state = useAppStore()
   const spec = state.specification!
   const blockers = spec.dimensions.filter((item) => item.status !== 'confirmed').length
-    + spec.features.filter((item) => item.status === 'conflicted').length
+    + spec.features.filter((item) => item.status !== 'confirmed' && item.status !== 'unsupported').length
     + spec.assumptions.filter((item) => item.status === 'assumed' && !state.acceptedAssumptionIds.includes(item.id)).length
   const omitted = spec.features.filter((item) => item.status === 'unsupported')
   const pending = state.requestState !== 'idle'
@@ -112,12 +114,16 @@ function ReviewWorkspace() {
     state.setRequestState('validating')
     state.setError(null)
     try {
-      const result = await requestJson<{ specification: DraftSpecification }>('/api/specifications/validate', {
+      const result = await requestJson<{ valid: boolean; specification: DraftSpecification; diagnostics?: { field_ids: string[]; messages: string[] } }>('/api/specifications/validate', {
         method: 'POST', headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ specification: buildableSpecification(spec), dimension_values: state.draftValues, accepted_assumption_ids: state.acceptedAssumptionIds, free_text: state.freeText }),
+        body: JSON.stringify({ specification: buildableSpecification(spec), dimension_values: state.draftValues, accepted_feature_ids: state.acceptedFeatureIds, accepted_assumption_ids: state.acceptedAssumptionIds, free_text: state.freeText, clarification_question_id: state.clarificationQuestionId }),
       })
       state.setSpecification(restoreOmittedFeatures(result.specification, spec))
-      state.setValidationPassed(true)
+      state.setValidationPassed(result.valid)
+      if (!result.valid) {
+        const diagnostics = result.diagnostics || { field_ids: [], messages: ['Review the proposed clarification before building.'] }
+        state.setError({ message: diagnostics.messages.join('; '), fieldIds: diagnostics.field_ids })
+      }
     } catch (error) {
       const apiError = error as ApiError
       state.setError(apiError)
@@ -156,19 +162,35 @@ function ReviewWorkspace() {
           {spec.dimensions.map((dimension, index) => <DimensionRow key={dimension.id} dimension={dimension} index={index} />)}
         </ReviewSection>
         {spec.questions.length > 0 && <ReviewSection title="Questions" count={String(spec.questions.length)}>
-          {spec.questions.map((question) => <div class="question" id={`item-${question.field_id}`} key={question.id}><strong>{question.prompt}</strong><div class="choices">{question.alternatives.map((alternative) => <button type="button" key={String(alternative)} onClick={() => state.setDraftValue(question.field_id, alternative)}>{String(alternative)} {typeof alternative === 'number' ? 'mm' : ''}</button>)}</div></div>)}
+          {spec.questions.map((question) => <QuestionRow key={question.id} question={question} />)}
+        </ReviewSection>}
+        {spec.features.some((feature) => feature.status === 'assumed') && <ReviewSection title="Proposed feature details">
+          {spec.features.filter((feature) => feature.status === 'assumed').map((feature) => <label class="assumption" key={feature.id}><input type="checkbox" checked={state.acceptedFeatureIds.includes(feature.id)} onChange={() => state.toggleFeature(feature.id)} /> <span><strong>Use this proposed detail</strong><br />{feature.label}</span></label>)}
         </ReviewSection>}
         {spec.assumptions.length > 0 && <ReviewSection title="Proposed decisions" count={String(spec.assumptions.length)}>
           {spec.assumptions.map((assumption) => <label class="assumption" key={assumption.id}><input type="checkbox" checked={state.acceptedAssumptionIds.includes(assumption.id)} onChange={() => state.toggleAssumption(assumption.id)} /> <span><strong>Use this proposal</strong><br />{assumption.rationale}</span></label>)}
         </ReviewSection>}
         {omitted.length > 0 && <ReviewSection title="Not included in this model" count={String(omitted.length)} tone="warning"><p class="section-note">EasyCAD cannot model these features yet. They will not be included in the STL.</p>{omitted.map((feature) => <p class="omitted" key={feature.id}>{feature.label}</p>)}</ReviewSection>}
-        <ReviewSection title="Clarify in your own words"><label class="sr-only" for="clarification">Clarification</label><textarea id="clarification" value={state.freeText} placeholder="Describe a missing detail, for example: “the hole is centered on the plate.”" onInput={(event) => state.setFreeText(event.currentTarget.value)} /></ReviewSection>
       </section>
     </div>
-    {state.error && <div class="notice" role="alert"><strong>{state.error.fieldIds.length ? 'Please review the highlighted items.' : 'Build issue'}</strong><span>{state.error.message}</span></div>}
+    {state.error && <div class="notice" role="alert"><strong>{state.error.fieldIds.length ? 'Please review the highlighted items.' : 'Build issue'}</strong><span>{state.error.message}{state.error.stage ? ` (stage: ${state.error.stage})` : ''}{state.error.requestId ? ` · reference ${state.error.requestId}` : ''}</span></div>}
     <ActionBar blockers={blockers} pending={pending} validated={state.validationPassed} onValidate={validate} onBuild={build} />
     {state.project && <Preview project={state.project} />}
   </main>
+}
+
+function QuestionRow({ question }: { question: DraftSpecification['questions'][number] }) {
+  const state = useAppStore()
+  const specification = state.specification!
+  const isActive = state.clarificationQuestionId === question.id
+  const answerAlternative = (alternative: number | string) => {
+    if (specification.dimensions.some((dimension) => dimension.id === question.field_id)) state.setDraftValue(question.field_id, alternative)
+    else {
+      state.setClarificationQuestionId(question.id)
+      state.setFreeText(`The answer is: ${String(alternative)}.`)
+    }
+  }
+  return <div class="question" id={`item-${question.field_id}`}><strong>{question.prompt}</strong><div class="choices">{(question.alternatives || []).map((alternative) => <button type="button" key={String(alternative)} onClick={() => answerAlternative(alternative)}>{String(alternative)} {typeof alternative === 'number' ? 'mm' : ''}</button>)}</div><label class="question-clarification">Add a clarification<textarea value={isActive ? state.freeText : ''} placeholder="Describe this detail, for example: “the hole is centered on the plate.”" onFocus={() => state.setClarificationQuestionId(question.id)} onInput={(event) => { state.setClarificationQuestionId(question.id); state.setFreeText(event.currentTarget.value) }} /></label></div>
 }
 
 function ReviewSection({ title, count, tone, children }: { title: string; count?: string; tone?: string; children: preact.ComponentChildren }) {
@@ -202,7 +224,7 @@ function Preview({ project }: { project: Project }) {
 function App() {
   const specification = useAppStore((state) => state.specification)
   const error = useAppStore((state) => state.error)
-  return <>{specification ? <ReviewWorkspace /> : <UploadScreen />}{!specification && error && <div class="upload-error" role="alert">{error.message}</div>}</>
+  return <>{specification ? <ReviewWorkspace /> : <UploadScreen />}{!specification && error && <div class="upload-error" role="alert">{error.message}{error.stage ? ` (stage: ${error.stage})` : ''}{error.requestId ? ` · reference ${error.requestId}` : ''}</div>}</>
 }
 
 render(<App />, document.getElementById('app')!)

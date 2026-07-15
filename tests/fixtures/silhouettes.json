@@ -1,0 +1,4 @@
+{
+  "bracket_fixture": {"project": "projects/bracket_fixture.json", "view": "front", "width": 512, "height": 512, "max_symmetric_difference": 0.01},
+  "asymmetric_rib": {"capability": "ribs", "view": "isometric", "width": 512, "height": 512, "max_symmetric_difference": 0.01}
+}

@@ -34,9 +34,9 @@ Acceptance: removing, retargeting, or changing dimensions of any protected brack
 
 ## Milestone 3 — Split real-provider outcomes
 
-- [ ] Introduce `contract_ok`, `needs_review`, `verified_export`, `invalid_plan`, `worker_failed`, and `semantic_failed` counters.
-- [ ] Split the current real-provider test into resilience and supported-corpus success suites.
-- [ ] Require semantically verified STL and STEP for each `verified_export` case.
+- [~] Introduce `contract_ok`, `needs_review`, `verified_export`, `invalid_plan`, `worker_failed`, and `semantic_failed` counters.
+- [~] Split the current real-provider test into resilience and supported-corpus success suites.
+- [~] Require semantically verified STL and STEP for each `verified_export` case.
 - [ ] Add configurable per-capability minimum observation and verified-export-rate gates.
 - [ ] Report missing keys, outages, and malformed output as unavailable/failed evidence rather than passing quality evidence.
 - [ ] Keep sanitized recordings and replay them in the network-free suite.
@@ -45,10 +45,10 @@ Acceptance: a run consisting only of `needs_review` can pass resilience checks b
 
 ## Milestone 4 — Close semantic operation coverage
 
-- [ ] Enumerate compiler-supported operation kinds from one authoritative manifest.
-- [ ] Create semantic evidence manifest entries for positive fixture, negative fixture, measurements, and invariant.
-- [ ] Add coverage lint that fails for a supported kind without paired semantic evidence.
-- [ ] Implement or verify invariants for counterbores, countersinks, shells, mirrors, fillets, chamfers, and planar text.
+- [x] Enumerate compiler-supported operation kinds from one authoritative manifest.
+- [x] Create semantic evidence manifest entries for positive fixture, negative fixture, measurements, and invariant.
+- [x] Add coverage lint that fails for a supported kind without paired semantic evidence.
+- [x] Implement or verify invariants for counterbores, countersinks, shells, mirrors, fillets, chamfers, and planar text.
 - [ ] Downgrade operations lacking reliable deterministic evidence to `experimental` and require `needs_review`.
 - [ ] Add positive and targeted negative tests for every listed operation.
 
@@ -56,18 +56,18 @@ Acceptance: adding a compiler-supported operation without paired evidence fails 
 
 ## Milestone 5 — Add calibrated silhouette regression checks
 
-- [ ] Define fixture-only camera/projection metadata and expected render-mask artifacts.
-- [ ] Implement deterministic mask, contour-bound, occupied-area, and symmetric-difference comparisons.
-- [ ] Add positive silhouette fixtures for the bracket and one asymmetric capability case.
-- [ ] Add negative renders with a missing feature and wrong orientation or placement.
-- [ ] Document why arbitrary-upload comparison remains advisory.
+- [x] Define fixture-only camera/projection metadata and expected render-mask artifacts.
+- [x] Implement deterministic mask, contour-bound, occupied-area, and symmetric-difference comparisons.
+- [x] Add positive silhouette fixtures for the bracket and one asymmetric capability case.
+- [x] Add negative renders with a missing feature and wrong orientation or placement.
+- [x] Document why arbitrary-upload comparison remains advisory.
 
 Acceptance: known-good renders pass; each negative render exceeds its threshold; uncalibrated uploads are not rejected by silhouette checks.
 
 ## Milestone 6 — Evidence review and release gate
 
-- [ ] Run the complete local deterministic suite through `uv` without Docker or network access.
-- [ ] Run the real-provider supported corpus, sanitize recordings, and archive the machine-readable result.
+- [x] Run the complete local deterministic suite through `uv` without Docker or network access.
+- [~] Run the real-provider supported corpus, sanitize recordings, and archive the machine-readable result.
 - [ ] Verify every supported capability has positive, negative, and observed evidence.
 - [ ] Update `docs/PROJECT_WEAKNESSES.md` with resolved items and residual limitations.
 
