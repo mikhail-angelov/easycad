@@ -184,6 +184,14 @@ class FeatureCompilerTests(unittest.TestCase):
                     "placement": {"origin": [10, 10, "cut_start"]},
                 },
                 {
+                    "id": "through_hole",
+                    "type": "through_hole",
+                    "operation": "cut",
+                    "target": "plate",
+                    "parameters": {"diameter": "hole_diameter", "depth": "cut_depth"},
+                    "placement": {"origin": [20, 10, "cut_start"]},
+                },
+                {
                     "id": "counterbore",
                     "type": "counterbore",
                     "operation": "cut",
@@ -194,7 +202,7 @@ class FeatureCompilerTests(unittest.TestCase):
                         "bore_diameter": "bore_diameter",
                         "bore_depth": "bore_depth",
                     },
-                    "placement": {"origin": [30, 10, "cut_start"]},
+                    "placement": {"origin": [35, 10, "cut_start"]},
                 },
                 {
                     "id": "countersink",
@@ -207,7 +215,7 @@ class FeatureCompilerTests(unittest.TestCase):
                         "sink_diameter": "sink_diameter",
                         "sink_depth": "sink_depth",
                     },
-                    "placement": {"origin": [50, 10, "cut_start"]},
+                    "placement": {"origin": [55, 10, "cut_start"]},
                 },
                 {
                     "id": "slot",

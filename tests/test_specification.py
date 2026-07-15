@@ -6,7 +6,7 @@ import json
 from unittest.mock import AsyncMock, patch
 
 import app.ai_generation as ai
-from app.feature_compiler import draft_specification_operation_types
+from app.feature_compiler import OPERATION_CONTRACTS, draft_specification_operation_types
 from app.models import DraftSpecification, SpecificationAssumption, SpecificationDimension, SpecificationFeature
 from pydantic import ValidationError as PydanticValidationError
 from app.specification import (
@@ -58,6 +58,69 @@ class SpecificationTests(unittest.TestCase):
         placement_schema = DraftSpecification.model_json_schema()["$defs"]["FeaturePlacement"]
         self.assertFalse(placement_schema["additionalProperties"])
         self.assertNotIn("offset", placement_schema["properties"])
+
+    def test_draft_tool_schema_has_a_strict_variant_for_every_compiler_contract(self):
+        schema = ai.submit_draft_specification_tool_schema()["properties"]["specification"]
+        variants = schema["$defs"]["SpecificationFeature"]["oneOf"]
+        by_type = {variant["properties"]["type"]["const"]: variant for variant in variants}
+        self.assertEqual(set(by_type), set(OPERATION_CONTRACTS))
+        for feature_type, contract in OPERATION_CONTRACTS.items():
+            with self.subTest(feature_type=feature_type):
+                variant = by_type[feature_type]
+                self.assertFalse(variant["additionalProperties"])
+                self.assertEqual(variant["properties"]["operation"]["enum"], list(contract.allowed_operations))
+                parameters = variant["properties"]["parameters"]
+                self.assertFalse(parameters["additionalProperties"])
+                self.assertEqual(parameters["required"], list(contract.required_parameters))
+                self.assertEqual(set(parameters["properties"]), set(contract.parameter_names))
+                self.assertEqual("profile" in variant["required"], contract.requires_profile)
+                self.assertEqual("pattern" in variant["required"], contract.requires_pattern)
+
+    def test_contract_validation_rejects_missing_profile_and_unknown_parameter(self):
+        specification = complete_specification()
+        specification.features.append(
+            SpecificationFeature(
+                id="raised_logo",
+                label="Raised logo",
+                type="extrude",
+                operation="add",
+                target="base",
+                parameters={"distance": 2, "depth_mm": 2},
+                status="confirmed",
+            )
+        )
+        with self.assertRaisesRegex(SpecificationValidationError, "unsupported parameter"):
+            validate_specification(specification)
+
+        specification.features[-1].parameters = {"distance": 2}
+        with self.assertRaisesRegex(SpecificationValidationError, "requires a profile"):
+            validate_specification(specification)
+
+    def test_profile_and_pattern_are_preserved_in_the_trusted_graph(self):
+        specification = DraftSpecification(
+            dimensions=[
+                SpecificationDimension(id="length", label="Length", value=40, status="confirmed"),
+                SpecificationDimension(id="width", label="Width", value=30, status="confirmed"),
+                SpecificationDimension(id="height", label="Height", value=5, status="confirmed"),
+                SpecificationDimension(id="hole_diameter", label="Hole diameter", value=4, status="confirmed"),
+                SpecificationDimension(id="hole_depth", label="Hole depth", value=8, status="confirmed"),
+                SpecificationDimension(id="count", label="Count", value=3, status="confirmed"),
+                SpecificationDimension(id="pitch", label="Pitch", value=10, status="confirmed"),
+            ],
+            features=[
+                SpecificationFeature(id="base", label="Base", type="box", operation="add", parameters={"length": "length", "width": "width", "height": "height"}, status="confirmed"),
+                SpecificationFeature(
+                    id="holes", label="Holes", type="hole_pattern", operation="pattern", target="base",
+                    parameters={"depth": "hole_depth"}, profile={"type": "circle", "dimensions": {"diameter": "hole_diameter"}},
+                    pattern={"type": "linear", "count": "count", "pitch": "pitch", "axis": "X"},
+                    placement={"origin": [5, 15, -1]}, status="confirmed",
+                ),
+            ],
+        )
+        project = project_from_specification(specification)
+        holes = project.feature_graph.operations[1]
+        self.assertEqual(holes.profile.type, "circle")
+        self.assertEqual(holes.pattern.type, "linear")
 
     def test_missing_critical_dimension_blocks_build(self):
         specification = complete_specification()

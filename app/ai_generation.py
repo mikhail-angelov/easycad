@@ -32,9 +32,11 @@ from .models import (
 )
 from .feature_compiler import (
     CompilerError,
+    OPERATION_CONTRACTS,
     canonical_operation_type,
     compile_project_feature_graph,
     compiler_operation_types,
+    draft_operation_contract_descriptions,
     draft_specification_operation_types,
     planner_operation_types,
 )
@@ -427,11 +429,15 @@ async def plan_draft_specification(
         "Convert drawing observations into a DraftSpecification JSON. Do not return CAD code, Feature Graph, or an STL plan. "
         "Return only JSON with title, units, dimensions, features, assumptions, questions, annotations. "
         "Each dimension requires id, label, value or expression, unit, source, confidence, status, critical, evidence. "
-        "Each feature requires id, label, type, operation, target when known, parameters, placement, status, critical_fields, confidence, evidence. "
+        "Each feature requires id, label, type, operation, target, parameters, placement, status, critical_fields, confidence, evidence. "
         f"Feature type must be exactly one of these draft-compatible compiler types: {draft_specification_operation_types()}. "
         "The vision-analysis terms body and groove are observations, not valid feature types: choose a supported type that represents them, "
         "such as box or cylinder, or mark the feature unsupported when no trusted type can represent it. "
-        "Use only compiler parameter contracts: box needs length, width, height; cylinder needs radius, height; "
+        "Use only these compiler contracts (the tool schema enforces them):\n"
+        + draft_operation_contract_descriptions()
+        + "\n"
+        "Every string used in parameters, profile dimensions, pattern numeric fields, or origin coordinates must be the ID of a declared dimension; "
+        "put literal text such as engraving content in a declared text dimension and reference its ID. "
         "hole/through_hole need diameter, depth; counterbore needs diameter, depth, bore_diameter, bore_depth; "
         "A drawing label that says a hole is through/сквозное is a confirmed instruction to cut through its target thickness; do not ask about it again. "
         "countersink needs diameter, depth, sink_diameter, sink_depth; slot/pocket need length, width, depth; "
@@ -466,6 +472,11 @@ async def plan_draft_specification(
             "and do not ask a new question about any of its proposed geometry. Do not return a question that is answered by a direct value "
             "or an accepted proposal. "
             "Only create a new question when the user inputs still leave a necessary modelling fact unresolved."
+        )
+        prompt += (
+            " A clarification with key build_repair is a deterministic build diagnostic supplied to the user: it overrides "
+            "any earlier accepted feature geometry named in that clarification. Correct the complete replacement graph accordingly "
+            "and do not repeat the failed placement."
         )
     if instructions.strip():
         prompt += f"\nUser instructions: {instructions.strip()}"
@@ -505,8 +516,99 @@ async def plan_draft_specification(
 def draft_specification_tool_schema() -> Dict[str, Any]:
     """Return the provider schema for a complete, buildable draft response."""
     schema = DraftSpecification.model_json_schema()
+    schema["properties"] = {
+        key: schema["properties"][key]
+        for key in ("title", "units", "dimensions", "features", "assumptions", "questions", "annotations")
+    }
     schema["properties"]["features"]["minItems"] = 1
+    schema["$defs"]["SpecificationFeature"] = _draft_feature_schema()
     return schema
+
+
+def _draft_feature_schema() -> Dict[str, Any]:
+    """Discriminated feature schema generated from the compiler operation registry."""
+    value_schema = {"anyOf": [{"type": "string"}, {"type": "number"}, {"type": "integer"}, {"type": "boolean"}]}
+    common = {
+        "id": {"type": "string", "pattern": "^[a-z][a-z0-9_]*$"},
+        "label": {"type": "string"},
+        "target": {"anyOf": [{"type": "string"}, {"type": "null"}]},
+        "placement": {"$ref": "#/$defs/FeaturePlacement"},
+        "status": {"enum": ["confirmed", "needs_input", "assumed", "conflicted"]},
+        "critical_fields": {"type": "array", "items": {"type": "string"}},
+        "confidence": {"type": "number", "minimum": 0, "maximum": 1},
+        "evidence": {"type": "array", "items": {"type": "string"}},
+        "alternatives": {"type": "object", "additionalProperties": {"type": "array", "items": value_schema}},
+    }
+    variants = []
+    for feature_type, contract in OPERATION_CONTRACTS.items():
+        properties = {
+            **common,
+            "type": {"const": feature_type},
+            "operation": {"enum": list(contract.allowed_operations)},
+            "parameters": _parameter_schema(contract.required_parameters, contract.optional_parameters, value_schema),
+        }
+        required = ["id", "label", "type", "operation", "target", "parameters", "placement", "status", "critical_fields", "confidence", "evidence", "alternatives"]
+        if contract.requires_profile:
+            properties["profile"] = _profile_schema(contract.profile_types, value_schema)
+            required.append("profile")
+        if contract.requires_pattern:
+            properties["pattern"] = _pattern_schema(contract.pattern_types, value_schema)
+            required.append("pattern")
+        variants.append({"type": "object", "additionalProperties": False, "properties": properties, "required": required})
+    return {"oneOf": variants}
+
+
+def _parameter_schema(required: tuple[str, ...], optional: tuple[str, ...], value_schema: Dict[str, Any]) -> Dict[str, Any]:
+    return {
+        "type": "object",
+        "additionalProperties": False,
+        "properties": {name: value_schema for name in required + optional},
+        "required": list(required),
+    }
+
+
+def _profile_schema(profile_types: tuple[str, ...], value_schema: Dict[str, Any]) -> Dict[str, Any]:
+    dimensions = {"rectangle": ("width", "height"), "circle": ("diameter",), "slot": ("length", "width"), "polyline": ()}
+    variants = []
+    for profile_type in profile_types:
+        dimension_names = dimensions[profile_type]
+        points = {"type": "array", "items": {"type": "array", "items": value_schema, "minItems": 2, "maxItems": 2}}
+        if profile_type == "polyline":
+            points["minItems"] = 3
+        variants.append(
+            {
+                "type": "object",
+                "additionalProperties": False,
+                "properties": {
+                    "type": {"const": profile_type},
+                    "dimensions": {
+                        "type": "object",
+                        "additionalProperties": False,
+                        "properties": {name: value_schema for name in dimension_names},
+                        "required": list(dimension_names),
+                    },
+                    "points": points,
+                },
+                "required": ["type", "dimensions", "points"],
+            }
+        )
+    return {"oneOf": variants}
+
+
+def _pattern_schema(pattern_types: tuple[str, ...], value_schema: Dict[str, Any]) -> Dict[str, Any]:
+    variants = []
+    for pattern_type in pattern_types:
+        required = ("count", "pitch", "axis") if pattern_type == "linear" else ("count", "angle_deg", "axis")
+        optional = ("start_margin", "end_margin") if pattern_type == "linear" else ("start_margin", "end_margin")
+        variants.append(
+            {
+                "type": "object",
+                "additionalProperties": False,
+                "properties": {"type": {"const": pattern_type}, **{name: value_schema for name in required + optional}},
+                "required": ["type", *required],
+            }
+        )
+    return {"oneOf": variants}
 
 
 def submit_draft_specification_tool_schema() -> Dict[str, Any]:

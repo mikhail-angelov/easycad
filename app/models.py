@@ -109,6 +109,48 @@ class FeaturePlacement(BaseModel):
         return value
 
 
+class FeatureProfile(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    type: str = Field(min_length=1)
+    dimensions: Dict[str, FeatureValue] = Field(default_factory=dict)
+    points: List[List[FeatureValue]] = Field(default_factory=list)
+
+    @field_validator("points")
+    @classmethod
+    def profile_points_are_two_dimensional(cls, value: List[List[FeatureValue]]) -> List[List[FeatureValue]]:
+        if any(len(point) != 2 for point in value):
+            raise ValueError("feature profile points must contain exactly two coordinates")
+        return value
+
+
+class FeaturePattern(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    type: FeaturePatternKind
+    count: Optional[FeatureValue] = None
+    pitch: Optional[FeatureValue] = None
+    angle_deg: Optional[FeatureValue] = None
+    axis: Optional[str] = None
+    path: Optional[str] = None
+    start_margin: Optional[FeatureValue] = None
+    end_margin: Optional[FeatureValue] = None
+
+    @model_validator(mode="after")
+    def required_pattern_fields(self) -> "FeaturePattern":
+        if self.type in {"linear", "polar", "path"} and self.count is None:
+            raise ValueError(f"{self.type} pattern requires count")
+        if self.type == "linear" and (self.pitch is None or not self.axis):
+            raise ValueError("linear pattern requires pitch and axis")
+        if self.type == "polar" and (self.angle_deg is None or not self.axis):
+            raise ValueError("polar pattern requires angle_deg and axis")
+        if self.type == "path" and not self.path:
+            raise ValueError("path pattern requires path")
+        if self.type == "mirror" and not self.axis:
+            raise ValueError("mirror pattern requires axis")
+        return self
+
+
 class SpecificationFeature(BaseModel):
     id: str = Field(pattern=r"^[a-z][a-z0-9_]*$")
     label: str
@@ -116,7 +158,9 @@ class SpecificationFeature(BaseModel):
     operation: FeatureOperationKind
     target: Optional[str] = None
     parameters: Dict[str, FeatureValue] = Field(default_factory=dict)
+    profile: Optional[FeatureProfile] = None
     placement: FeaturePlacement = Field(default_factory=FeaturePlacement)
+    pattern: Optional[FeaturePattern] = None
     status: SpecificationStatus = "needs_input"
     critical_fields: List[str] = Field(default_factory=list)
     confidence: float = Field(default=0.5, ge=0, le=1)
@@ -176,48 +220,6 @@ class SpecificationEditRequest(BaseModel):
     accepted_feature_ids: List[str] = Field(default_factory=list)
     accepted_assumption_ids: List[str] = Field(default_factory=list)
     clarifications: Dict[str, str] = Field(default_factory=dict)
-
-
-class FeatureProfile(BaseModel):
-    model_config = ConfigDict(extra="forbid")
-
-    type: str = Field(min_length=1)
-    dimensions: Dict[str, FeatureValue] = Field(default_factory=dict)
-    points: List[List[FeatureValue]] = Field(default_factory=list)
-
-    @field_validator("points")
-    @classmethod
-    def profile_points_are_two_dimensional(cls, value: List[List[FeatureValue]]) -> List[List[FeatureValue]]:
-        if any(len(point) != 2 for point in value):
-            raise ValueError("feature profile points must contain exactly two coordinates")
-        return value
-
-
-class FeaturePattern(BaseModel):
-    model_config = ConfigDict(extra="forbid")
-
-    type: FeaturePatternKind
-    count: Optional[FeatureValue] = None
-    pitch: Optional[FeatureValue] = None
-    angle_deg: Optional[FeatureValue] = None
-    axis: Optional[str] = None
-    path: Optional[str] = None
-    start_margin: Optional[FeatureValue] = None
-    end_margin: Optional[FeatureValue] = None
-
-    @model_validator(mode="after")
-    def required_pattern_fields(self) -> "FeaturePattern":
-        if self.type in {"linear", "polar", "path"} and self.count is None:
-            raise ValueError(f"{self.type} pattern requires count")
-        if self.type == "linear" and (self.pitch is None or not self.axis):
-            raise ValueError("linear pattern requires pitch and axis")
-        if self.type == "polar" and (self.angle_deg is None or not self.axis):
-            raise ValueError("polar pattern requires angle_deg and axis")
-        if self.type == "path" and not self.path:
-            raise ValueError("path pattern requires path")
-        if self.type == "mirror" and not self.axis:
-            raise ValueError("mirror pattern requires axis")
-        return self
 
 
 class FeatureEvidence(BaseModel):

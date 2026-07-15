@@ -9,7 +9,7 @@ from typing import Dict, List
 from pydantic import ValidationError as PydanticValidationError
 
 from .expressions import ExpressionError, evaluate_expression
-from .feature_compiler import compile_project_feature_graph, compiler_operation_types
+from .feature_compiler import compile_project_feature_graph, feature_contract_issues
 from .models import (
     CADParameter,
     CADProject,
@@ -135,9 +135,9 @@ def validate_specification(specification: DraftSpecification) -> Dict[str, float
         if feature.status in {"needs_input", "conflicted", "assumed"}:
             field_ids.append(feature.id)
             messages.append(f"{feature.id} requires input")
-        if feature.type not in compiler_operation_types():
+        for issue in feature_contract_issues(feature):
             field_ids.append(feature.id)
-            messages.append(f"{feature.id} uses unsupported operation type {feature.type}")
+            messages.append(f"{feature.id} {issue}")
         try:
             placement = FeaturePlacement.model_validate(feature.placement).model_dump(exclude_none=True)
         except PydanticValidationError:
@@ -159,6 +159,10 @@ def validate_specification(specification: DraftSpecification) -> Dict[str, float
             if field not in feature.parameters and field not in placement:
                 field_ids.append(feature.id)
                 messages.append(f"{feature.id} is missing {field}")
+        for parameter_id in _feature_parameter_references(feature):
+            if parameter_id not in values:
+                field_ids.append(feature.id)
+                messages.append(f"{feature.id} references unknown or unresolved dimension '{parameter_id}'")
         known_features.add(feature.id)
     if not known_features:
         field_ids.append("features")
@@ -166,6 +170,38 @@ def validate_specification(specification: DraftSpecification) -> Dict[str, float
     if messages:
         raise SpecificationValidationError(list(dict.fromkeys(field_ids)), list(dict.fromkeys(messages)))
     return values
+
+
+def _feature_parameter_references(feature: SpecificationFeature) -> List[str]:
+    """Strings in executable geometry are dimension IDs, never free-form CAD expressions."""
+    references: List[str] = []
+
+    def add(value: object) -> None:
+        if isinstance(value, str):
+            references.append(value)
+
+    for value in feature.parameters.values():
+        add(value)
+    if feature.profile:
+        for value in feature.profile.dimensions.values():
+            add(value)
+        for point in feature.profile.points:
+            for value in point:
+                add(value)
+    if feature.pattern:
+        for value in (
+            feature.pattern.count,
+            feature.pattern.pitch,
+            feature.pattern.angle_deg,
+            feature.pattern.start_margin,
+            feature.pattern.end_margin,
+        ):
+            add(value)
+    placement = FeaturePlacement.model_validate(feature.placement)
+    if placement.origin:
+        for value in placement.origin:
+            add(value)
+    return references
 
 
 def project_from_specification(specification: DraftSpecification) -> CADProject:
@@ -199,7 +235,9 @@ def project_from_specification(specification: DraftSpecification) -> CADProject:
                 operation=feature.operation,
                 target=feature.target,
                 parameters=feature.parameters,
+                profile=feature.profile,
                 placement=placement,
+                pattern=feature.pattern,
                 source_feature_ids=[feature.id],
                 confidence=feature.confidence,
                 status="implemented",
