@@ -113,7 +113,7 @@ function ReviewWorkspace() {
     state.setRequestState('validating')
     state.setError(null)
     try {
-      const result = await requestJson<{ valid: boolean; specification: DraftSpecification; diagnostics?: { field_ids: string[]; messages: string[] } }>('/api/specifications/validate', {
+      const result = await requestJson<{ valid: boolean; specification: DraftSpecification; diagnostics?: { field_ids: string[]; messages: string[]; hints?: string[] } }>('/api/specifications/validate', {
         method: 'POST', headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ specification: spec, dimension_values: state.draftValues, accepted_feature_ids: state.acceptedFeatureIds, accepted_assumption_ids: state.acceptedAssumptionIds, clarifications: state.clarifications }),
       })
@@ -121,7 +121,7 @@ function ReviewWorkspace() {
       state.setValidationPassed(result.valid)
       if (!result.valid) {
         const diagnostics = result.diagnostics || { field_ids: [], messages: ['Review the proposed clarification before building.'] }
-        state.setError({ message: diagnostics.messages.join('; '), fieldIds: diagnostics.field_ids })
+        state.setError({ message: diagnostics.messages.join('; '), fieldIds: diagnostics.field_ids, hints: diagnostics.hints })
       }
     } catch (error) {
       const apiError = error as ApiError
@@ -175,12 +175,16 @@ function ReviewWorkspace() {
         {Object.values(state.clarifications).some((text) => text.trim()) && <ReviewSection title="Your clarifications">
           {Object.entries(state.clarifications).filter(([, text]) => text.trim()).map(([questionId, text]) => <p class="omitted" key={questionId}><strong>{questionId}:</strong> {text}</p>)}
         </ReviewSection>}
+        {state.error?.fieldIds.length && state.error.stage !== 'semantic_validation' && <ReviewSection title="Fix the highlighted detail" tone="warning"><p class="section-note">{state.error.hints?.join(' ')}</p>{state.error.fieldIds.map((fieldId) => <label class="question-clarification" key={fieldId}>Describe the intended value for <code>{fieldId}</code><textarea value={state.clarifications[`validation_repair:${fieldId}`] || ''} placeholder="For example: “place its center at X=30, Y=30, Z=20 mm.”" onInput={(event) => state.setClarification(`validation_repair:${fieldId}`, event.currentTarget.value)} /></label>)}<p class="section-note">Validate the specification to send this correction to DeepSeek and rebuild the complete draft.</p></ReviewSection>}
         {state.error?.stage === 'semantic_validation' && <ReviewSection title="Fix the build issue" tone="warning"><p class="section-note">{state.error.hints?.join(' ')}</p><label class="question-clarification">Describe the intended correction<textarea value={state.clarifications.build_repair || ''} placeholder="For example: “the groove runs along Y, starts at Y=0, and its center is on the top surface at Z=56.”" onInput={(event) => state.setClarification('build_repair', event.currentTarget.value)} /></label><p class="section-note">Then validate the specification to replan it with DeepSeek.</p></ReviewSection>}
         {spec.features.some((feature) => feature.status === 'assumed') && <ReviewSection title="Proposed feature details">
           {spec.features.filter((feature) => feature.status === 'assumed').map((feature) => <label class="assumption" key={feature.id}><input type="checkbox" checked={state.acceptedFeatureIds.includes(feature.id)} onChange={() => state.toggleFeature(feature.id)} /> <span><strong>Use this proposed detail</strong><br />{feature.label}</span></label>)}
         </ReviewSection>}
         {spec.assumptions.filter((assumption) => assumption.status === 'assumed').length > 0 && <ReviewSection title="Proposed decisions" count={String(spec.assumptions.filter((assumption) => assumption.status === 'assumed').length)}>
           {spec.assumptions.filter((assumption) => assumption.status === 'assumed').map((assumption) => <label class="assumption" key={assumption.id}><input type="checkbox" checked={state.acceptedAssumptionIds.includes(assumption.id)} onChange={() => state.toggleAssumption(assumption.id)} /> <span><strong>Use this proposal</strong><br />{assumption.rationale}</span></label>)}
+        </ReviewSection>}
+        {spec.assumptions.filter((assumption) => assumption.status === 'confirmed').length > 0 && <ReviewSection title="Confirmed decisions" count={String(spec.assumptions.filter((assumption) => assumption.status === 'confirmed').length)}>
+          {spec.assumptions.filter((assumption) => assumption.status === 'confirmed').map((assumption) => <p class="confirmed-decision" key={assumption.id}><strong>Confirmed</strong>{assumption.rationale}</p>)}
         </ReviewSection>}
         {omitted.length > 0 && <ReviewSection title="Not included in this model" count={String(omitted.length)} tone="warning"><p class="section-note">EasyCAD cannot model these features yet. They will not be included in the STL.</p>{omitted.map((feature) => <p class="omitted" key={feature.id}>{feature.label}</p>)}</ReviewSection>}
       </section>

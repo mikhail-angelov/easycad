@@ -141,6 +141,25 @@ class HTTPAPITests(unittest.TestCase):
         hints = main.build_repair_hints({"mismatches": ["top_groove: subtractive feature did not remove material"]})
         self.assertIn("cut plane, origin, and depth", hints[0])
 
+    def test_specification_repair_hint_explains_missing_feature_origin(self):
+        hints = main.specification_repair_hints(
+            ["vertical_cylinder_boss"],
+            ["vertical_cylinder_boss is missing placement.origin"],
+        )
+        self.assertIn("vertical_cylinder_boss", hints[0])
+        self.assertIn("X, Y, Z", hints[0])
+
+    def test_validation_returns_origin_repair_prompt_for_a_feature(self):
+        specification = complete_specification()
+        specification.features[0].id = "vertical_cylinder_boss"
+        specification.features[0].critical_fields.append("placement.origin")
+        response = self.client.post("/api/specifications/validate", json={"specification": specification.model_dump(mode="json")})
+        self.assertEqual(response.status_code, 200, response.text)
+        payload = response.json()
+        self.assertFalse(payload["valid"])
+        self.assertIn("vertical_cylinder_boss", payload["diagnostics"]["field_ids"])
+        self.assertIn("X, Y, Z", payload["diagnostics"]["hints"][0])
+
     def test_legacy_repair_endpoints_are_removed(self):
         project = make_plate_project().model_dump(mode="json")
         self.assertEqual(self.client.post("/api/projects/repair", json={"project": project}).status_code, 405)

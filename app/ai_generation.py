@@ -481,7 +481,8 @@ async def plan_draft_specification(
             "An accepted feature is an authoritative approval of its proposed critical fields: do not downgrade it to needs_input or assumed, "
             "and do not ask a new question about any of its proposed geometry. Do not return a question that is answered by a direct value "
             "or an accepted proposal. "
-            "Only create a new question when the user inputs still leave a necessary modelling fact unresolved."
+            "Return every previous question that is still unresolved, preserving its ID and prompt. Remove a previous question only when a direct "
+            "user value, clarification, or accepted proposal actually answers it. Only create a new question when the user inputs still leave a necessary modelling fact unresolved."
         )
         prompt += (
             " A clarification with key build_repair is a deterministic build diagnostic supplied to the user: it overrides "

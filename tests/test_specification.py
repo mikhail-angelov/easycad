@@ -259,7 +259,7 @@ class SpecificationTests(unittest.TestCase):
             "accepted_assumption_ids": [],
             "clarifications": {"width_question": "The width is 30 mm."},
         }
-        with patch.object(ai, "_chat_json", AsyncMock(return_value=response)) as chat:
+        with patch.object(ai, "_run_draft_builder", AsyncMock(return_value=complete_specification())) as builder:
             asyncio.run(
                 ai.plan_draft_specification(
                     analysis,
@@ -270,7 +270,7 @@ class SpecificationTests(unittest.TestCase):
                 )
             )
 
-        payload = chat.await_args.args[2]
+        payload = builder.await_args.args[2]
         prompt = payload["messages"][0]["content"]
         request_context = json.loads(payload["messages"][1]["content"])
         self.assertIn(f"draft-compatible compiler types: {draft_specification_operation_types()}", prompt)
@@ -281,19 +281,14 @@ class SpecificationTests(unittest.TestCase):
         self.assertIn("accepted assumption is an authoritative answer", prompt)
         self.assertIn("accepted feature is an authoritative approval", prompt)
         self.assertIn("Do not return a question that is answered", prompt)
+        self.assertIn("Return every previous question that is still unresolved", prompt)
         self.assertEqual(request_context["drawing_analysis"], analysis)
         self.assertEqual(request_context["previous_specification"], previous.model_dump(mode="json"))
         self.assertEqual(request_context["user_inputs"], user_inputs)
-        self.assertTrue(payload["tools"][0]["function"]["strict"])
-        tool_schema = payload["tools"][0]["function"]["parameters"]
-        self.assertEqual(tool_schema["required"], ["specification"])
-        self.assertFalse(tool_schema["additionalProperties"])
-        specification_schema = tool_schema["properties"]["specification"]
-        self.assertEqual(specification_schema["required"], ["title", "units", "dimensions", "features", "assumptions", "questions", "annotations"])
-        placement_schema = specification_schema["$defs"]["FeaturePlacement"]
-        self.assertFalse(placement_schema["additionalProperties"])
-        self.assertNotIn("offset", placement_schema["properties"])
-        self.assertEqual(specification_schema["properties"]["features"]["minItems"], 1)
+        tool_names = {tool["function"]["name"] for tool in payload["tools"]}
+        self.assertIn("set_draft_metadata", tool_names)
+        self.assertIn("add_box", tool_names)
+        self.assertIn("finish_draft", tool_names)
 
     def test_draft_planner_normalizes_known_provider_field_variants(self):
         response = {

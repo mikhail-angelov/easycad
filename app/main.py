@@ -407,7 +407,15 @@ async def validate_specification_endpoint(req: SpecificationEditRequest):
     try:
         values = validate_specification(draft)
     except SpecificationValidationError as exc:
-        return {"valid": False, "specification": draft.model_dump(mode="json"), "diagnostics": {"field_ids": exc.field_ids, "messages": exc.messages}}
+        return {
+            "valid": False,
+            "specification": draft.model_dump(mode="json"),
+            "diagnostics": {
+                "field_ids": exc.field_ids,
+                "messages": exc.messages,
+                "hints": specification_repair_hints(exc.field_ids, exc.messages),
+            },
+        }
     return {"valid": True, "values": values, "specification": draft.model_dump(mode="json")}
 
 
@@ -442,6 +450,23 @@ def build_repair_hints(detail: Dict[str, object]) -> list[str]:
             hints.append("Confirm the cut plane, origin, and depth so the cutting solid intersects its target.")
         elif "expected" in text and "got" in text:
             hints.append(f"Expected geometry: {text}.")
+    return hints or ["Describe the intended feature position, direction, and dimensions so the planner can revise it."]
+
+
+def specification_repair_hints(field_ids: list[str], messages: list[str] | None = None) -> list[str]:
+    """Turn deterministic draft validation failures into a user-answerable prompt."""
+    hints = []
+    for field_id, message in zip(field_ids, messages or [], strict=False):
+        if field_id.endswith("placement.origin") or "missing placement.origin" in message:
+            feature_id = field_id.removesuffix(".placement.origin")
+            hints.append(
+                f"Specify the origin of {feature_id} as X, Y, Z in mm (or named dimensions), "
+                "for example: ‘place its center at X=30, Y=30, Z=20’."
+            )
+        elif field_id.endswith("placement.plane") or "missing placement.plane" in message:
+            hints.append("Specify the sketch plane: XY, XZ, or YZ.")
+        elif field_id.endswith("target") or "requires a target" in message:
+            hints.append("Specify which existing solid this feature adds to, cuts, or modifies.")
     return hints or ["Describe the intended feature position, direction, and dimensions so the planner can revise it."]
 
 
