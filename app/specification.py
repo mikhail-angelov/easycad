@@ -147,6 +147,9 @@ def validate_specification(specification: DraftSpecification) -> Dict[str, float
         if feature.operation in {"cut", "intersect", "modify", "pattern"} and not feature.target:
             field_ids.append(feature.id)
             messages.append(f"{feature.id} requires a target")
+        if feature.operation == "add" and known_features and not feature.target:
+            field_ids.append(feature.id)
+            messages.append(f"{feature.id} must target the existing body")
         if feature.target and feature.target not in known_features:
             field_ids.append(feature.id)
             messages.append(f"{feature.id} targets an unknown or later feature")

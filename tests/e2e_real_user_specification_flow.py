@@ -48,6 +48,10 @@ class RealUserSpecificationFlowE2E(unittest.TestCase):
                 "specification": initial,
                 "accepted_feature_ids": [item["id"] for item in initial["features"]],
                 "accepted_assumption_ids": [item["id"] for item in initial["assumptions"]],
+                "clarifications": {
+                    question["id"]: _user_answer(question["prompt"])
+                    for question in initial["questions"]
+                },
             },
         )
         self.assertEqual(validation.status_code, 200, validation.text)
@@ -89,6 +93,15 @@ class RealUserSpecificationFlowE2E(unittest.TestCase):
 
 def _write_json(name: str, value: object) -> None:
     (OUT / name).write_text(json.dumps(value, ensure_ascii=False, indent=2, sort_keys=True), encoding="utf-8")
+
+
+def _user_answer(prompt: str) -> str:
+    lower = prompt.lower()
+    if "groove" in lower:
+        return "Confirm the R12 groove is centered, lies on the top surface, and runs through the full 60 mm Y extent."
+    if "hole" in lower or "concentric" in lower:
+        return "Confirm the Ø24 hole is concentric with the R30 arc and cuts through the 20 mm base only."
+    return "Confirm the proposed geometry shown in the drawing."
 
 
 if __name__ == "__main__":

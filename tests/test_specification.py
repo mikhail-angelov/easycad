@@ -92,6 +92,12 @@ class SpecificationTests(unittest.TestCase):
         with self.assertRaisesRegex(SpecificationValidationError, "unsupported operation"):
             validate_specification(specification)
 
+    def test_second_additive_feature_requires_existing_body_target(self):
+        specification = complete_specification()
+        specification.features.append(SpecificationFeature(id="extra", label="Extra", type="box", operation="add", status="confirmed"))
+        with self.assertRaisesRegex(SpecificationValidationError, "must target the existing body"):
+            validate_specification(specification)
+
     def test_conflict_and_cyclic_expression_block_build(self):
         specification = complete_specification()
         specification.dimensions[0].status = "conflicted"

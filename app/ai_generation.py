@@ -443,6 +443,8 @@ async def plan_draft_specification(
         "For a rectangular base with a semi-circular end, use a box of straight_length by width and a cylinder centered at "
         "[straight_length, width/2, 0]; do not put the circular center at Y=0. "
         "For an upright on that base, its height is overall_height minus base_thickness and its origin Z is base_thickness. "
+        "For this coordinate convention, keep an upright's width within the base Y span: when width is the drawing's overall width, its Y origin is 0; its 28mm depth is the X length, not a Y offset. "
+        "Build one connected solid: the first feature is the only root; every additive feature after the first MUST set target to the existing root body, and every cut MUST target that same connected body. "
         "Feature placement may contain only reference, plane, origin, axis, direction, rotation_deg, and offsets. "
         "Use origin as exactly three numeric values or dimension IDs for translation, never expressions; never use offset, center, position, depth, or centered_on_width. "
         "Use status confirmed only for unambiguous observed values. Use needs_input for missing critical data, conflicted for contradictions, "
@@ -484,6 +486,11 @@ async def plan_draft_specification(
     }
     arguments = await _chat_json(url, api_key, payload, "draft_specification")
     result_payload = arguments.get("specification") if "specification" in arguments else arguments if "features" in arguments else None
+    if isinstance(result_payload, str):
+        try:
+            result_payload = json.loads(result_payload)
+        except json.JSONDecodeError:
+            result_payload = None
     if not isinstance(result_payload, dict):
         raise GenerationError("draft_specification", "Provider returned invalid tool arguments", {"expected": "specification object"})
     result = normalize_draft_specification_payload(result_payload)
