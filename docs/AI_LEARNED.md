@@ -234,3 +234,29 @@ Provider responses naturally return full dimensions and feature records, not the
 
 - Tried a constrained patch contract; rejected because providers returned new dimensions and complete feature updates that did not fit the patch schema.
 - Tried one planner request per question; rejected because related answers must be interpreted together.
+
+## 2026-07-15 — Strict placement schema for the draft planner
+
+### Goal
+
+Prevent a DeepSeek draft response from reaching Build with unsupported placement keys.
+
+### Golden path
+
+1. Model `SpecificationFeature.placement` as the strict `FeaturePlacement` model, rather than a generic dictionary.
+2. Send `DraftSpecification.model_json_schema()` through a strict function call and force that function choice.
+3. Keep the one-time vision analysis authoritative when validating the planner response: merge the response first, then set `analysis` from the original vision result.
+4. Run `.venv/bin/python -m unittest tests.e2e_structured_output_comparison.StructuredOutputComparisonE2E.test_1_deepseek_strict_tool_writes_result` with network access.
+
+### Verification
+
+On 2026-07-15, DeepSeek returned HTTP 200 and the real-provider E2E test passed. The raw tool arguments used only permitted placement fields (`origin` and `offsets`); the test rejects `offset`.
+
+### Failure pattern avoided
+
+DeepSeek previously produced `placement.offset`, which passed review but failed the CAD FeaturePlacement validation at Build. A real strict-tool response also returned its own `analysis` object in a different shape; merging it after the vision result caused DraftSpecification validation to fail.
+
+### Ruled-out approaches
+
+- Tried only validating placement at Build; rejected because users discover the provider-format failure too late.
+- Tried merging the planner result over the original vision analysis; rejected because model-produced analysis is not the authoritative one-time vision result.
