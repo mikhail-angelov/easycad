@@ -39,6 +39,24 @@ def complete_specification() -> DraftSpecification:
 
 
 class SpecificationTests(unittest.TestCase):
+    def test_tool_call_log_summary_shows_name_and_compact_arguments(self):
+        summary = ai._response_log_summary(
+            "",
+            {
+                "choices": [
+                    {
+                        "message": {
+                            "tool_calls": [
+                                {"function": {"name": "add_dimension", "arguments": '{"id":"width","value":60,"unit":"mm"}'}},
+                                {"function": {"name": "finish_draft", "arguments": "{}"}},
+                            ]
+                        }
+                    }
+                ]
+            },
+        )
+        self.assertEqual(summary, "tools=[add_dimension(id='width', value=60, unit='mm'); finish_draft()]")
+
     def test_complete_specification_resolves_values(self):
         values = validate_specification(complete_specification())
         self.assertEqual(values["length"], 40)
@@ -75,6 +93,8 @@ class SpecificationTests(unittest.TestCase):
                 self.assertEqual(set(parameters["properties"]), set(contract.parameter_names))
                 self.assertEqual("profile" in variant["required"], contract.requires_profile)
                 self.assertEqual("pattern" in variant["required"], contract.requires_pattern)
+                if contract.requires_profile:
+                    self.assertIn("REQUIRED", variant["properties"]["profile"]["description"])
 
     def test_contract_validation_rejects_missing_profile_and_unknown_parameter(self):
         specification = complete_specification()
@@ -95,6 +115,23 @@ class SpecificationTests(unittest.TestCase):
         specification.features[-1].parameters = {"distance": 2}
         with self.assertRaisesRegex(SpecificationValidationError, "requires a profile"):
             validate_specification(specification)
+
+    def test_profile_critical_field_is_satisfied_by_structured_profile(self):
+        specification = complete_specification()
+        specification.features.append(
+            SpecificationFeature(
+                id="hex_head",
+                label="Hex head",
+                type="extrude",
+                operation="add",
+                target="base",
+                parameters={"distance": 12},
+                profile={"type": "polyline", "dimensions": {}, "points": [[1, 0], [0, 1], [-1, 0]]},
+                critical_fields=["parameters.distance", "profile.points"],
+                status="confirmed",
+            )
+        )
+        validate_specification(specification)
 
     def test_profile_and_pattern_are_preserved_in_the_trusted_graph(self):
         specification = DraftSpecification(

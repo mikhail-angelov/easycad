@@ -154,7 +154,19 @@ def validate_specification(specification: DraftSpecification) -> Dict[str, float
             field_ids.append(feature.id)
             messages.append(f"{feature.id} targets an unknown or later feature")
         for field in feature.critical_fields:
+            if field.startswith("parameters.") and field.removeprefix("parameters.") in feature.parameters:
+                continue
+            if field == "profile.points" and feature.profile is not None and feature.profile.points:
+                continue
+            if field.startswith("profile.dimensions.") and feature.profile is not None and field.removeprefix("profile.dimensions.") in feature.profile.dimensions:
+                continue
             if field in {"placement", "position"} and placement:
+                continue
+            if field == "profile" and feature.profile is not None:
+                continue
+            if field == "pattern" and feature.pattern is not None:
+                continue
+            if field == "target" and feature.target:
                 continue
             if field not in feature.parameters and field not in placement:
                 field_ids.append(feature.id)

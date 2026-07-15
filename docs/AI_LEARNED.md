@@ -310,3 +310,29 @@ A valid JSON draft can still omit CadQuery-required profile/pattern data or use 
 ### Ruled-out approaches
 
 - Duplicating a separate LLM-only operation catalogue; rejected because it can diverge from the compiler.
+
+## 2026-07-15 — Stateful DeepSeek draft-builder E2E
+
+### Goal
+
+Generate a reviewable specification through operation-specific tools, accept user proposals, and export a real STL for both a bracket and an M16 bolt.
+
+### Golden path
+
+1. Run `.venv/bin/python -m unittest -v tests.e2e_real_user_specification_flow` for `fixtures/3.png`.
+2. Run `EASYCAD_USER_FLOW_IMAGE=fixtures/2.jpg .venv/bin/python -m unittest -v tests.e2e_real_user_specification_flow` for the bolt.
+3. The DeepSeek loop must add dimensions before features, reject inline geometry expressions in feature tools, and use `finish_draft` after the draft is structurally complete.
+4. Let review resolve assumptions/questions; do not require a fully confirmed draft at `finish_draft`.
+
+### Verification
+
+On 2026-07-15, both provider-backed flows passed: `artifacts/real-user-flow-3/model.stl` (47,584 bytes) and `artifacts/real-user-flow-2/model.stl` (71,284 bytes).
+
+### Failure pattern avoided
+
+DeepSeek may use dotted `critical_fields` such as `parameters.distance` and `profile.points`; validation must recognize those structured paths. A modifier's `target` names the feature, while `placement.reference` is a CadQuery edge selector and must not repeat a feature ID.
+
+### Ruled-out approaches
+
+- Tried requiring `validate_specification` at `finish_draft`; failed because legitimate assumed values and questions are intentionally unresolved before user review.
+- Tried allowing inline values such as `overall_width/2` in feature coordinates; failed because executable feature fields accept only numbers or declared dimension IDs.

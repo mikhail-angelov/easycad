@@ -42,25 +42,7 @@ class RealUserSpecificationFlowE2E(unittest.TestCase):
         initial = analysis.json()["specification"]
         _write_json("initial_draft.json", initial)
 
-        validation = client.post(
-            "/api/specifications/validate",
-            json={
-                "specification": initial,
-                "accepted_feature_ids": [item["id"] for item in initial["features"]],
-                "accepted_assumption_ids": [item["id"] for item in initial["assumptions"]],
-                "dimension_values": {
-                    item["id"]: _user_dimension_value(item)
-                    for item in initial["dimensions"]
-                    if item["status"] in {"needs_input", "conflicted"}
-                },
-                "clarifications": {
-                    question["id"]: _user_answer(question["prompt"])
-                    for question in initial["questions"]
-                },
-            },
-        )
-        self.assertEqual(validation.status_code, 200, validation.text)
-        validation_payload = validation.json()
+        validation_payload = _resolve_user_review(client, initial)
         _write_json("validation.json", validation_payload)
         replanned = validation_payload["specification"]
         _write_json("replanned_specification.json", replanned)
@@ -95,13 +77,7 @@ class RealUserSpecificationFlowE2E(unittest.TestCase):
 
 def _build_with_one_user_geometry_correction(client: TestClient, specification: dict) -> dict:
     current = specification
-    correction = (
-        "Correct the rounded base end and the through-hole placement. The R30 arc and Ø24 hole center are at "
-        "X=base_straight_length and Y=30 mm (overall_width / 2), never Y=0 or Y=overall_width. "
-        "Keep the finished overall Y width exactly 60 mm. Correct the top groove too: it is a cylinder on plane XZ, "
-        "with radius 12, height overall_width=60, and origin [14, 0, overall_height=56], so it runs along Y and "
-        "removes the upper semicircle of the upright."
-    )
+    correction = _build_repair_instruction(specification)
     for attempt in range(3):
         build = client.post("/api/specifications/build", json=current)
         unittest.TestCase().assertEqual(build.status_code, 200, build.text)
@@ -128,12 +104,57 @@ def _build_with_one_user_geometry_correction(client: TestClient, specification: 
     return result
 
 
+def _build_repair_instruction(specification: dict) -> str:
+    if "bolt" in specification.get("title", "").lower():
+        return (
+            "Correct the complete bolt geometry. The root hex_head is an extrude on XY with a required polyline profile of "
+            "six numeric [x,y] points and distance=head_thickness=12. The shank is an additive cylinder targeting hex_head, "
+            "plane XY, radius=8, height=total_length minus head_thickness (38), origin [0,0,12]. "
+            "There is no thread primitive: retain a smooth shank and record the thread approximation only as an assumption. "
+            "Do not create unsupported groove, text, or revolve thread features. Any chamfer must target the existing root and "
+            "use positive distance. For chamfer, target is the feature ID; never put a feature ID in placement.reference. "
+            "Omit placement.reference unless you supply a real CadQuery edge selector such as >Z."
+        )
+    return (
+        "Correct the rounded base end and the through-hole placement. The R30 arc and Ø24 hole center are at "
+        "X=base_straight_length and Y=30 mm (overall_width / 2), never Y=0 or Y=overall_width. "
+        "Keep the finished overall Y width exactly 60 mm. Correct the top groove too: it is a cylinder on plane XZ, "
+        "with radius 12, height overall_width=60, and origin [14, overall_width=60, overall_height=56], so it runs along Y and "
+        "removes the upper semicircle of the upright."
+    )
+
+
+def _resolve_user_review(client: TestClient, specification: dict) -> dict:
+    current = specification
+    for _ in range(4):
+        validation = client.post(
+            "/api/specifications/validate",
+            json={
+                "specification": current,
+                "accepted_feature_ids": [item["id"] for item in current["features"]],
+                "accepted_assumption_ids": [item["id"] for item in current["assumptions"]],
+                "dimension_values": {item["id"]: _user_dimension_value(item) for item in current["dimensions"] if item["status"] in {"needs_input", "conflicted", "assumed"}},
+                "clarifications": {question["id"]: _user_answer(question["prompt"]) for question in current["questions"]},
+            },
+        )
+        unittest.TestCase().assertEqual(validation.status_code, 200, validation.text)
+        payload = validation.json()
+        if payload["valid"]:
+            return payload
+        current = payload["specification"]
+    return payload
+
+
 def _write_json(name: str, value: object) -> None:
     (OUT / name).write_text(json.dumps(value, ensure_ascii=False, indent=2, sort_keys=True), encoding="utf-8")
 
 
 def _user_answer(prompt: str) -> str:
     lower = prompt.lower()
+    if "thread" in lower:
+        return "Confirm an M16 thread: use the standard coarse pitch 2 mm, but represent it as a smooth shank because threads are not yet supported."
+    if "hex" in lower or "head" in lower:
+        return "Confirm the hex head is 12 mm thick and 27 mm across flats."
     if "groove" in lower:
         return "Confirm the R12 groove is centered, lies on the top surface, and runs through the full 60 mm Y extent."
     if "hole" in lower or "concentric" in lower:
@@ -142,11 +163,25 @@ def _user_answer(prompt: str) -> str:
 
 
 def _user_dimension_value(dimension: dict) -> float:
+    if isinstance(dimension.get("value"), (int, float)):
+        return float(dimension["value"])
     alternatives = [value for value in dimension.get("alternatives", []) if isinstance(value, (int, float))]
     if alternatives:
         return float(alternatives[0])
     if "chamfer" in dimension.get("label", "").lower():
         return 22.5
+    if "thread pitch" in dimension.get("label", "").lower():
+        return 2.0
+    if "washer" in dimension.get("label", "").lower():
+        return 2.0
+    if "corner radius" in dimension.get("label", "").lower():
+        return 1.0
+    if "distance" in dimension.get("label", "").lower():
+        return 1.5
+    if "total length" in dimension.get("label", "").lower():
+        return 50.0 if "bolt" in dimension["id"].lower() else 78.0
+    if "upright height" in dimension.get("label", "").lower():
+        return 36.0
     raise AssertionError(f"The user-flow fixture needs an explicit value for {dimension['id']}")
 
 

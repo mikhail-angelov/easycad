@@ -43,6 +43,7 @@ from .feature_compiler import (
 from .expressions import ExpressionError, evaluate_expression
 from .source_images import get_source_image, store_source_image
 from .validator import validate_project
+from .draft_builder import DraftBuilder
 
 
 MAX_UPLOAD_BYTES = 20 * 1024 * 1024
@@ -426,8 +427,10 @@ async def plan_draft_specification(
     model = normalize_model_id(os.environ.get("DEEP_SEEK_MODEL", os.environ.get("DEEPSEEK_MODEL", "deepseek-chat")))
     url = os.environ.get("DEEP_SEEK_BASE_URL", "https://api.deepseek.com/chat/completions")
     prompt = (
-        "Convert drawing observations into a DraftSpecification JSON. Do not return CAD code, Feature Graph, or an STL plan. "
-        "Return only JSON with title, units, dimensions, features, assumptions, questions, annotations. "
+        "Build a DraftSpecification by calling the supplied tools until finish_draft. Do not return CAD code, Feature Graph, or JSON prose. "
+        "You operate a server-owned builder: call set_draft_metadata exactly once; add each dimension exactly once; add each feature once with its matching add_<type> tool; then add assumptions, questions, annotations, and call finish_draft exactly once. "
+        "After a tool result with ok=true, that item is stored: never call that tool for the same ID again. After ok=false, correct and retry only that item. "
+        "When all intended items have ok=true results, call finish_draft immediately. Never omit finish_draft and never continue after it. "
         "Each dimension requires id, label, value or expression, unit, source, confidence, status, critical, evidence. "
         "Each feature requires id, label, type, operation, target, parameters, placement, status, critical_fields, confidence, evidence. "
         f"Feature type must be exactly one of these draft-compatible compiler types: {draft_specification_operation_types()}. "
@@ -443,8 +446,13 @@ async def plan_draft_specification(
         "countersink needs diameter, depth, sink_diameter, sink_depth; slot/pocket need length, width, depth; "
         "rib needs length, thickness, height; fillet needs radius; chamfer needs distance; shell needs thickness. "
         "For a semi-circular groove, use a cylinder with operation cut: place the cylinder center on the material surface so only its semicircle intersects. "
+        "For a hex-head bolt, use extrude with a required polyline profile containing six numeric two-dimensional points and distance=head_thickness; "
+        "never omit the profile and never use strings such as '-radius' or '0' as point coordinates. Add the shank as a cylinder targeting the head. "
+        "The current catalogue has no thread primitive: represent a threaded section as the same smooth shank cylinder and state that approximation; do not emit text, groove, or an unsupported thread feature. "
+        "Use chamfer modifiers with a positive distance for bolt chamfers, not a revolve cut. "
         "Cylinder extrusion direction is determined only by plane: XY extrudes Z, XZ extrudes Y, and YZ extrudes X; axis and direction are descriptive only. "
-        "Therefore a groove running along Y must use plane XZ, with its origin at the top surface. "
+        "Therefore a groove running along Y must use plane XZ. CadQuery extrudes XZ in negative Y, so a groove spanning "
+        "a body from Y=0 to Y=overall_width must start at origin Y=overall_width, with its origin Z at the top surface. "
         "Coordinate convention: an XY box has length along X, width along Y, and height along Z. "
         "For a rectangular base with a semi-circular end, use a box of straight_length by width and a cylinder centered at "
         "[straight_length, width/2, 0]; do not put the circular center at Y=0. "
@@ -452,6 +460,8 @@ async def plan_draft_specification(
         "For this coordinate convention, keep an upright's width within the base Y span: when width is the drawing's overall width, its Y origin is 0; its 28mm depth is the X length, not a Y offset. "
         "Build one connected solid: the first feature is the only root; every additive feature after the first MUST set target to the existing root body, and every cut MUST target that same connected body. "
         "Feature placement may contain only reference, plane, origin, axis, direction, rotation_deg, and offsets. "
+        "For fillet and chamfer, target is the feature ID; placement.reference is optional CadQuery edge-selector text such as '>Z', "
+        "never a feature ID. Omit reference when the selected edges are not known. "
         "Use origin as exactly three numeric values or dimension IDs for translation, never expressions; never use offset, center, position, depth, or centered_on_width. "
         "Use status confirmed only for unambiguous observed values. Use needs_input for missing critical data, conflicted for contradictions, "
         "and assumed only with an assumption describing the proposal. Every missing size, position, target, cut direction, or depth needed "
@@ -492,25 +502,10 @@ async def plan_draft_specification(
         ],
         "temperature": 0.1,
         "max_tokens": 5000,
-        "tools": [{"type": "function", "function": {"name": "submit_draft_specification", "description": "Return the complete DraftSpecification in the required specification object.", "parameters": submit_draft_specification_tool_schema(), "strict": True}}],
-        "tool_choice": {"type": "function", "function": {"name": "submit_draft_specification"}},
+        "tools": draft_builder_tools(),
+        "tool_choice": "required",
     }
-    arguments = await _chat_json(url, api_key, payload, "draft_specification")
-    result_payload = arguments.get("specification") if "specification" in arguments else arguments if "features" in arguments else None
-    if isinstance(result_payload, str):
-        try:
-            result_payload = json.loads(result_payload)
-        except json.JSONDecodeError:
-            result_payload = None
-    if not isinstance(result_payload, dict):
-        raise GenerationError("draft_specification", "Provider returned invalid tool arguments", {"expected": "specification object"})
-    result = normalize_draft_specification_payload(result_payload)
-    try:
-        return DraftSpecification.model_validate({**result, "analysis": analysis})
-    except PydanticValidationError as exc:
-        errors = [{"field": ".".join(str(part) for part in error["loc"]), "message": error["msg"]} for error in exc.errors()[:8]]
-        logger.warning("draft_specification_validation_failed errors=%s", errors)
-        return fallback_draft_specification(result, analysis, errors)
+    return await _run_draft_builder(url, api_key, payload, analysis)
 
 
 def draft_specification_tool_schema() -> Dict[str, Any]:
@@ -549,7 +544,13 @@ def _draft_feature_schema() -> Dict[str, Any]:
         }
         required = ["id", "label", "type", "operation", "target", "parameters", "placement", "status", "critical_fields", "confidence", "evidence", "alternatives"]
         if contract.requires_profile:
-            properties["profile"] = _profile_schema(contract.profile_types, value_schema)
+            properties["profile"] = {
+                **_profile_schema(contract.profile_types, value_schema),
+                "description": (
+                    f"REQUIRED for {feature_type}. Supply one complete profile; allowed types: "
+                    f"{', '.join(contract.profile_types)}. An extrude without this field is invalid."
+                ),
+            }
             required.append("profile")
         if contract.requires_pattern:
             properties["pattern"] = _pattern_schema(contract.pattern_types, value_schema)
@@ -609,6 +610,92 @@ def _pattern_schema(pattern_types: tuple[str, ...], value_schema: Dict[str, Any]
             }
         )
     return {"oneOf": variants}
+
+
+def draft_builder_tools() -> List[Dict[str, Any]]:
+    schema = DraftSpecification.model_json_schema()["$defs"]
+    feature_variants = _draft_feature_schema()["oneOf"]
+    # Each function schema is sent independently.  Keep the shared definitions
+    # alongside it so the provider can resolve FeaturePlacement references.
+    def with_definitions(parameters: Dict[str, Any]) -> Dict[str, Any]:
+        return {**parameters, "$defs": schema}
+
+    tools = [
+        {"type": "function", "function": {"name": "set_draft_metadata", "parameters": {"type": "object", "additionalProperties": False, "required": ["title", "units"], "properties": {"title": {"type": "string"}, "units": {"const": "mm"}}}}},
+        {"type": "function", "function": {"name": "add_dimension", "parameters": with_definitions(schema["SpecificationDimension"])}},
+        {"type": "function", "function": {"name": "add_assumption", "parameters": {"type": "object", "additionalProperties": False, "required": ["id", "value", "rationale", "affected_ids", "status"], "properties": {"id": {"type": "string"}, "value": {"anyOf": [{"type": "number"}, {"type": "string"}]}, "rationale": {"type": "string"}, "affected_ids": {"type": "array", "items": {"type": "string"}}, "status": {"enum": ["assumed", "confirmed"]}}}}},
+        {"type": "function", "function": {"name": "add_question", "parameters": with_definitions(schema["SpecificationQuestion"])}},
+        {"type": "function", "function": {"name": "add_annotation", "parameters": with_definitions(schema["SpecificationAnnotation"])}},
+        {"type": "function", "function": {"name": "finish_draft", "parameters": {"type": "object", "additionalProperties": False, "properties": {}}}},
+    ]
+    for variant in feature_variants:
+        feature_type = variant["properties"]["type"]["const"]
+        tools.append({"type": "function", "function": {"name": f"add_{feature_type}", "description": f"Add exactly one {feature_type} feature.", "parameters": with_definitions(variant)}})
+    return tools
+
+
+async def _run_draft_builder(url: str, api_key: str, payload: Dict[str, Any], analysis: Dict[str, Any]) -> DraftSpecification:
+    builder = DraftBuilder(analysis)
+    messages = list(payload["messages"])
+    headers = {
+        "Authorization": f"Bearer {api_key}",
+        "Content-Type": "application/json",
+        "HTTP-Referer": "https://easycad.local",
+        "X-Title": "EasyCAD",
+    }
+    last_results: List[Dict[str, Any]] = []
+    for _ in range(48):
+        try:
+            async with httpx.AsyncClient(timeout=120) as client:
+                response = await client.post(url, headers=headers, json={**payload, "messages": messages})
+        except httpx.HTTPError as exc:
+            detail = {"exception_type": type(exc).__name__, "exception_message": str(exc)}
+            logger.exception("LLM request failed stage=draft_specification detail=%s", detail)
+            raise GenerationError("draft_specification", "Provider request failed", detail) from exc
+        if response.status_code >= 400:
+            detail = {"status_code": response.status_code, "response": response.text[:4000]}
+            logger.error("LLM request failed stage=draft_specification detail=%s", detail)
+            raise GenerationError("draft_specification", f"Provider returned HTTP {response.status_code}", detail)
+        try:
+            response_payload = response.json()
+            message = response_payload["choices"][0]["message"]
+        except (KeyError, IndexError, ValueError, TypeError) as exc:
+            detail = {"response": response.text[:4000], "exception_type": type(exc).__name__}
+            logger.exception("LLM response was malformed stage=draft_specification detail=%s", detail)
+            raise GenerationError("draft_specification", "Provider returned a malformed tool response", detail) from exc
+        calls = message.get("tool_calls", [])
+        _log_model_response("draft_specification", {**payload, "messages": messages}, 1, response.status_code, message.get("content", ""), response_payload)
+        if not calls:
+            raise GenerationError("draft_specification", "Planner stopped before finish_draft")
+        messages.append(message)
+        for call in calls:
+            name = call["function"]["name"]
+            raw_arguments = call["function"].get("arguments", "{}")
+            try:
+                args = _parse_json_object(raw_arguments, "draft_specification")
+            except GenerationError as exc:
+                messages.append({"role": "tool", "tool_call_id": call["id"], "content": json.dumps({"ok": False, "message": str(exc)})})
+                continue
+            if name == "finish_draft":
+                if not builder.draft.title:
+                    result = {"ok": False, "field": "title", "message": "set_draft_metadata must be called before finish_draft"}
+                elif not builder.draft.features:
+                    result = {"ok": False, "field": "features", "message": "draft must contain at least one feature before finish_draft"}
+                else:
+                    # Questions and assumed values are intentional at this point:
+                    # the subsequent UI review, not the planner, resolves them.
+                    return builder.finish()
+            elif name == "set_draft_metadata": result = builder.set_metadata(**args)
+            elif name == "add_dimension": result = builder.add_dimension(args)
+            elif name == "add_assumption": result = builder.add_assumption(args)
+            elif name == "add_question": result = builder.add_question(args)
+            elif name == "add_annotation": result = builder.add_annotation(args)
+            elif name.startswith("add_"): result = builder.add_feature(args)
+            else: result = {"ok": False, "message": "unknown tool"}
+            last_results.append({"tool": name, **result})
+            last_results = last_results[-8:]
+            messages.append({"role": "tool", "tool_call_id": call["id"], "content": json.dumps(result)})
+    raise GenerationError("draft_specification", "Planner exceeded tool-call limit", {"last_tool_results": last_results})
 
 
 def submit_draft_specification_tool_schema() -> Dict[str, Any]:
@@ -1429,13 +1516,62 @@ def _log_model_response(
         logger.warning("Failed to write LLM response log: %s", exc)
 
     logger.warning(
-        "LLM response stage=%s model=%s attempt=%s status=%s content=%s",
+        "LLM response stage=%s model=%s attempt=%s status=%s %s",
         stage,
         request_payload.get("model"),
         attempt,
         status_code,
-        content,
+        _response_log_summary(content, response_payload),
     )
+
+
+def _response_log_summary(content: Any, response_payload: Any) -> str:
+    """Make tool-call-only responses useful in the console without dumping provider JSON."""
+    tool_calls = _response_tool_calls(response_payload)
+    if tool_calls:
+        previews = [_tool_call_log_preview(call) for call in tool_calls]
+        return "tools=[" + "; ".join(previews) + "]"
+    return f"content={content}"
+
+
+def _response_tool_calls(response_payload: Any) -> List[Dict[str, Any]]:
+    if not isinstance(response_payload, dict):
+        return []
+    try:
+        calls = response_payload["choices"][0]["message"].get("tool_calls", [])
+    except (KeyError, IndexError, TypeError):
+        return []
+    return [call for call in calls if isinstance(call, dict)] if isinstance(calls, list) else []
+
+
+def _tool_call_log_preview(call: Dict[str, Any]) -> str:
+    function = call.get("function")
+    if not isinstance(function, dict):
+        return "unknown()"
+    name = str(function.get("name") or "unknown")
+    raw_arguments = function.get("arguments", "{}")
+    try:
+        arguments = json.loads(raw_arguments) if isinstance(raw_arguments, str) else raw_arguments
+    except json.JSONDecodeError:
+        return f"{name}(arguments=<invalid JSON>)"
+    if not isinstance(arguments, dict) or not arguments:
+        return f"{name}()"
+    preferred = ("id", "title", "type", "operation", "target", "value", "expression", "unit")
+    keys = [key for key in preferred if key in arguments]
+    keys.extend(key for key in arguments if key not in keys)
+    pairs = [f"{key}={_compact_log_value(arguments[key])}" for key in keys[:3]]
+    return f"{name}({', '.join(pairs)})"
+
+
+def _compact_log_value(value: Any) -> str:
+    if isinstance(value, str):
+        compact = value.replace("\n", " ")
+        return repr(compact[:80] + "…" if len(compact) > 80 else compact)
+    if isinstance(value, list):
+        return f"list[{len(value)}]"
+    if isinstance(value, dict):
+        return f"object[{len(value)}]"
+    return repr(value)
 
 
 async def _chat_json(url: str, api_key: str, payload: Dict[str, Any], stage: str) -> Dict[str, Any]:
@@ -1458,7 +1594,9 @@ async def _chat_json(url: str, api_key: str, payload: Dict[str, Any], stage: str
             async with httpx.AsyncClient(timeout=120) as client:
                 response = await client.post(url, headers=headers, json=request_payload)
         except httpx.HTTPError as exc:
-            raise GenerationError(stage, "Provider request failed") from exc
+            detail = {"exception_type": type(exc).__name__, "exception_message": str(exc)}
+            logger.exception("LLM provider transport failure stage=%s detail=%s", stage, detail)
+            raise GenerationError(stage, "Provider request failed", detail) from exc
 
         if response.status_code >= 400:
             _log_model_response(
