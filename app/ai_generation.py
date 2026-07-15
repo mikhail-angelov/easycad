@@ -35,6 +35,7 @@ from .feature_compiler import (
     canonical_operation_type,
     compile_project_feature_graph,
     compiler_operation_types,
+    draft_specification_operation_types,
     planner_operation_types,
 )
 from .expressions import ExpressionError, evaluate_expression
@@ -96,7 +97,8 @@ def validate_image_upload(data: bytes, filename: str = "", mime_type: str = "") 
 
 def normalize_draft_specification_payload(payload: Dict[str, Any]) -> Dict[str, Any]:
     """Translate observed provider field variants into the narrow DraftSpecification contract."""
-    normalized = dict(payload)
+    wrapped_parameters = payload.get("parameters")
+    normalized = dict(wrapped_parameters) if isinstance(wrapped_parameters, dict) and "features" in wrapped_parameters else dict(payload)
     if str(normalized.get("units", "")).lower() in {"millimeter", "millimeters", "millimetre", "millimetres"}:
         normalized["units"] = "mm"
 
@@ -420,11 +422,22 @@ async def plan_draft_specification(
         "Return only JSON with title, units, dimensions, features, assumptions, questions, annotations. "
         "Each dimension requires id, label, value or expression, unit, source, confidence, status, critical, evidence. "
         "Each feature requires id, label, type, operation, target when known, parameters, placement, status, critical_fields, confidence, evidence. "
-        f"Feature type must be exactly one of these trusted compiler types: {planner_operation_types()}. "
+        f"Feature type must be exactly one of these draft-compatible compiler types: {draft_specification_operation_types()}. "
         "The vision-analysis terms body and groove are observations, not valid feature types: choose a supported type that represents them, "
-        "such as box or extrude, or mark the feature unsupported when no trusted type can represent it. "
+        "such as box or cylinder, or mark the feature unsupported when no trusted type can represent it. "
+        "Use only compiler parameter contracts: box needs length, width, height; cylinder needs radius, height; "
+        "hole/through_hole need diameter, depth; counterbore needs diameter, depth, bore_diameter, bore_depth; "
+        "countersink needs diameter, depth, sink_diameter, sink_depth; slot/pocket need length, width, depth; "
+        "rib needs length, thickness, height; fillet needs radius; chamfer needs distance; shell needs thickness. "
+        "For a semi-circular groove, use a cylinder with operation cut: place the cylinder center on the material surface so only its semicircle intersects. "
+        "Cylinder extrusion direction is determined only by plane: XY extrudes Z, XZ extrudes Y, and YZ extrudes X; axis and direction are descriptive only. "
+        "Therefore a groove running along Y must use plane XZ, with its origin at the top surface. "
+        "Coordinate convention: an XY box has length along X, width along Y, and height along Z. "
+        "For a rectangular base with a semi-circular end, use a box of straight_length by width and a cylinder centered at "
+        "[straight_length, width/2, 0]; do not put the circular center at Y=0. "
+        "For an upright on that base, its height is overall_height minus base_thickness and its origin Z is base_thickness. "
         "Feature placement may contain only reference, plane, origin, axis, direction, rotation_deg, and offsets. "
-        "Use origin as exactly three numeric values or dimension IDs for translation; never use offset, center, position, depth, or centered_on_width. "
+        "Use origin as exactly three numeric values or dimension IDs for translation, never expressions; never use offset, center, position, depth, or centered_on_width. "
         "Use status confirmed only for unambiguous observed values. Use needs_input for missing critical data, conflicted for contradictions, "
         "and assumed only with an assumption describing the proposal. Every missing size, position, target, cut direction, or depth needed "
         "for a printable feature must become a required question. Never silently invent a dimension. "
@@ -433,11 +446,16 @@ async def plan_draft_specification(
     if previous_specification is not None:
         prompt += (
             "Return a complete replacement DraftSpecification, not a patch. The previous specification is reference context only; "
-            "use the drawing analysis and user inputs to resolve it again. Keep IDs for the same dimensions, features, and questions "
-            "when possible so the review UI remains connected. Treat user inputs as the latest clarification. "
+            "use the drawing analysis and user inputs to resolve it again. Return every previous dimension, feature, and assumption: "
+            "never delete an existing item or return an empty graph. Keep their IDs and proposed geometry unless user input changes them, "
+            "so the review UI remains connected. Treat user inputs as the latest clarification. "
             "User input contract: dimension_values are direct user-entered facts and must be returned as confirmed; "
             "accepted_assumption_ids and accepted_feature_ids are explicit user approvals and their matching items must be returned "
-            "with status confirmed. Do not return a question that is answered by a direct value or an accepted proposal. "
+            "with status confirmed. An accepted assumption is an authoritative answer for every feature and dimension in its affected_ids; "
+            "apply it to the corresponding placement or parameter fields and keep those features confirmed. "
+            "An accepted feature is an authoritative approval of its proposed critical fields: do not downgrade it to needs_input or assumed, "
+            "and do not ask a new question about any of its proposed geometry. Do not return a question that is answered by a direct value "
+            "or an accepted proposal. "
             "Only create a new question when the user inputs still leave a necessary modelling fact unresolved."
         )
     if instructions.strip():
@@ -454,7 +472,7 @@ async def plan_draft_specification(
         ],
         "temperature": 0.1,
         "max_tokens": 5000,
-        "tools": [{"type": "function", "function": {"name": "submit_draft_specification", "description": "Return the DraftSpecification.", "parameters": DraftSpecification.model_json_schema(), "strict": True}}],
+        "tools": [{"type": "function", "function": {"name": "submit_draft_specification", "description": "Return the DraftSpecification.", "parameters": draft_specification_tool_schema(), "strict": True}}],
         "tool_choice": {"type": "function", "function": {"name": "submit_draft_specification"}},
     }
     result = normalize_draft_specification_payload(await _chat_json(url, api_key, payload, "draft_specification"))
@@ -464,6 +482,13 @@ async def plan_draft_specification(
         errors = [{"field": ".".join(str(part) for part in error["loc"]), "message": error["msg"]} for error in exc.errors()[:8]]
         logger.warning("draft_specification_validation_failed errors=%s", errors)
         return fallback_draft_specification(result, analysis, errors)
+
+
+def draft_specification_tool_schema() -> Dict[str, Any]:
+    """Return the provider schema for a complete, buildable draft response."""
+    schema = DraftSpecification.model_json_schema()
+    schema["properties"]["features"]["minItems"] = 1
+    return schema
 
 
 def project_from_plan(

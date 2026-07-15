@@ -157,6 +157,9 @@ def validate_specification(specification: DraftSpecification) -> Dict[str, float
                 field_ids.append(feature.id)
                 messages.append(f"{feature.id} is missing {field}")
         known_features.add(feature.id)
+    if not known_features:
+        field_ids.append("features")
+        messages.append("specification must include at least one supported feature")
     if messages:
         raise SpecificationValidationError(list(dict.fromkeys(field_ids)), list(dict.fromkeys(messages)))
     return values

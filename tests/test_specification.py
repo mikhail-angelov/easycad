@@ -6,7 +6,7 @@ import json
 from unittest.mock import AsyncMock, patch
 
 import app.ai_generation as ai
-from app.feature_compiler import planner_operation_types
+from app.feature_compiler import draft_specification_operation_types
 from app.models import DraftSpecification, SpecificationAssumption, SpecificationDimension, SpecificationFeature
 from pydantic import ValidationError as PydanticValidationError
 from app.specification import (
@@ -65,6 +65,10 @@ class SpecificationTests(unittest.TestCase):
         with self.assertRaisesRegex(SpecificationValidationError, "length requires input"):
             validate_specification(specification)
 
+    def test_empty_feature_graph_blocks_build(self):
+        with self.assertRaisesRegex(SpecificationValidationError, "at least one supported feature"):
+            validate_specification(DraftSpecification())
+
     def test_assumption_requires_explicit_acceptance(self):
         specification = complete_specification()
         specification.assumptions = [SpecificationAssumption(id="wall_guess", value=3, rationale="not shown")]
@@ -114,8 +118,10 @@ class SpecificationTests(unittest.TestCase):
         self.assertEqual(draft.questions[0].field_id, "width")
         prompt = chat.await_args.args[2]["messages"][0]["content"]
         self.assertIn("Do not return CAD code", prompt)
-        self.assertIn("trusted compiler types", prompt)
+        self.assertIn("draft-compatible compiler types", prompt)
         self.assertIn("body and groove are observations", prompt)
+        self.assertIn("a groove running along Y must use plane XZ", prompt)
+        self.assertIn("an XY box has length along X, width along Y, and height along Z", prompt)
         self.assertIn("never use offset, center, position, depth, or centered_on_width", prompt)
 
     def test_draft_planner_preserves_the_complete_vision_analysis_for_replanning(self):
@@ -160,10 +166,13 @@ class SpecificationTests(unittest.TestCase):
         payload = chat.await_args.args[2]
         prompt = payload["messages"][0]["content"]
         request_context = json.loads(payload["messages"][1]["content"])
-        self.assertIn(f"trusted compiler types: {planner_operation_types()}", prompt)
+        self.assertIn(f"draft-compatible compiler types: {draft_specification_operation_types()}", prompt)
         self.assertIn("body and groove are observations, not valid feature types", prompt)
         self.assertIn("Return a complete replacement DraftSpecification, not a patch", prompt)
+        self.assertIn("never delete an existing item or return an empty graph", prompt)
         self.assertIn("accepted_assumption_ids and accepted_feature_ids are explicit user approvals", prompt)
+        self.assertIn("accepted assumption is an authoritative answer", prompt)
+        self.assertIn("accepted feature is an authoritative approval", prompt)
         self.assertIn("Do not return a question that is answered", prompt)
         self.assertEqual(request_context["drawing_analysis"], analysis)
         self.assertEqual(request_context["previous_specification"], previous.model_dump(mode="json"))
@@ -172,6 +181,7 @@ class SpecificationTests(unittest.TestCase):
         placement_schema = payload["tools"][0]["function"]["parameters"]["$defs"]["FeaturePlacement"]
         self.assertFalse(placement_schema["additionalProperties"])
         self.assertNotIn("offset", placement_schema["properties"])
+        self.assertEqual(payload["tools"][0]["function"]["parameters"]["properties"]["features"]["minItems"], 1)
 
     def test_draft_planner_normalizes_known_provider_field_variants(self):
         response = {
@@ -227,6 +237,18 @@ class SpecificationTests(unittest.TestCase):
         self.assertEqual(draft.dimensions[0].source, "drawing")
         self.assertEqual(draft.questions[0].field_id, "main_body")
         self.assertEqual(draft.annotations[0].label, "Outer length 80mm")
+
+    def test_draft_normalizes_deepseek_parameters_wrapper(self):
+        payload = {
+            "parameters": {
+                "title": "Plate",
+                "dimensions": [],
+                "features": [{"id": "base", "label": "Base", "type": "box", "operation": "add"}],
+                "assumptions": [], "questions": [], "annotations": [],
+            }
+        }
+        draft = DraftSpecification.model_validate(ai.normalize_draft_specification_payload(payload))
+        self.assertEqual(draft.features[0].id, "base")
 
     def test_confirmed_specification_compiles_to_trusted_feature_graph(self):
         project = project_from_specification(complete_specification())

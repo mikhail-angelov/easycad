@@ -36,9 +36,21 @@ COMPILER_OPERATION_TYPES = {
 # and planner contracts always refer to these canonical kinds.
 COMPILER_OPERATION_KINDS = tuple(COMPILER_OPERATION_TYPES)
 
+# DraftSpecification has scalar parameters and placement but no profile or
+# pattern field. Only advertise operations whose whole compiler contract it
+# can express; trusted projects retain the full compiler catalogue.
+DRAFT_SPECIFICATION_OPERATION_KINDS = (
+    "box", "cylinder", "hole", "through_hole", "counterbore", "countersink",
+    "slot", "pocket", "rib", "fillet", "chamfer", "shell", "mirror",
+)
+
 
 def planner_operation_types() -> str:
     return ", ".join(COMPILER_OPERATION_KINDS)
+
+
+def draft_specification_operation_types() -> str:
+    return ", ".join(DRAFT_SPECIFICATION_OPERATION_KINDS)
 
 
 def compiler_operation_types() -> frozenset[str]:
