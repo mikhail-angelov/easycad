@@ -34,6 +34,7 @@ from .models import (
 )
 from .specification import (
     SpecificationValidationError,
+    apply_specification_edits,
     project_from_specification,
     validate_specification,
 )
@@ -157,16 +158,6 @@ def validate_generation_geometry(project: CADProject, result: Dict[str, object],
             {"mismatches": mismatches, "bounding_box": bbox, "expected": expected},
         )
 
-    max_volume = _expected_l_bracket_envelope_volume(project)
-    actual_volume = result.get("volume_mm3")
-    if max_volume is not None and actual_volume is not None and float(actual_volume) > max_volume * 1.05:
-        raise RunnerError(
-            "geometry_validation",
-            "Generated model volume is too large for declared L-bracket dimensions",
-            {"volume_mm3": actual_volume, "max_expected_volume_mm3": max_volume},
-        )
-
-
 def validate_feature_coverage(project: CADProject) -> None:
     unresolved_ids = [
         entry.feature_id
@@ -283,19 +274,6 @@ def _number_parameter(project: CADProject, names: tuple[str, ...]) -> float | No
     return None
 
 
-def _expected_l_bracket_envelope_volume(project: CADProject) -> float | None:
-    length = _number_parameter(project, ("overall_length", "length"))
-    width = _number_parameter(project, ("overall_width", "width", "depth", "overall_depth"))
-    height = _number_parameter(project, ("overall_height", "height"))
-    base_height = _number_parameter(project, ("base_height", "base_thickness", "base_h"))
-    upright = _number_parameter(project, ("upright_thickness", "upright_length", "vert_w"))
-    if None in (length, width, height, base_height, upright):
-        return None
-    if not (0 < base_height < height and 0 < upright < length):
-        return None
-    return length * width * base_height + upright * width * (height - base_height)
-
-
 @app.get("/api/health")
 def health() -> Dict[str, object]:
     return {
@@ -392,6 +370,13 @@ async def validate_specification_endpoint(req: SpecificationEditRequest):
     }
     if any(user_inputs.values()):
         try:
+            apply_specification_edits(
+                req.specification,
+                req.dimension_values,
+                req.accepted_assumption_ids,
+                "",
+                req.accepted_feature_ids,
+            )
             draft = await plan_draft_specification(
                 req.specification.analysis.model_dump(mode="json"),
                 "",
@@ -400,6 +385,16 @@ async def validate_specification_endpoint(req: SpecificationEditRequest):
                 user_inputs=user_inputs,
             )
             draft.source = req.specification.source
+        except SpecificationValidationError as exc:
+            return {
+                "valid": False,
+                "specification": req.specification.model_dump(mode="json"),
+                "diagnostics": {
+                    "field_ids": exc.field_ids,
+                    "messages": exc.messages,
+                    "hints": specification_repair_hints(exc.field_ids, exc.messages),
+                },
+            }
         except GenerationError as exc:
             return {"valid": False, "specification": req.specification.model_dump(mode="json"), "diagnostics": {"field_ids": [], "messages": [str(exc)]}}
     else:

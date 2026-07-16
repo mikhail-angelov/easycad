@@ -12,15 +12,27 @@ from .models import (
     DrawingAnalysis, DraftSpecification, SpecificationAnnotation, SpecificationAssumption,
     SpecificationDimension, SpecificationFeature, SpecificationQuestion,
 )
+from .specification import review_reference_issues
 
 
 @dataclass
 class DraftBuilder:
     analysis: dict[str, Any]
     draft: DraftSpecification = field(default_factory=DraftSpecification)
+    metadata_set: bool = False
 
-    def set_metadata(self, title: str, units: str) -> dict[str, Any]:
+    def set_metadata(self, payload: dict[str, Any]) -> dict[str, Any]:
+        if self.metadata_set:
+            return {"ok": False, "field": "metadata", "message": "set_draft_metadata may only be called once"}
+        if set(payload) != {"title", "units"}:
+            return {"ok": False, "field": "metadata", "message": "set_draft_metadata requires only title and units"}
+        title, units = payload["title"], payload["units"]
+        if not isinstance(title, str) or not title.strip():
+            return {"ok": False, "field": "title", "message": "title must be a non-empty string"}
+        if units != "mm":
+            return {"ok": False, "field": "units", "message": "units must be mm"}
         self.draft.title, self.draft.units = title, units
+        self.metadata_set = True
         return {"ok": True}
 
     def add_dimension(self, payload: dict[str, Any]) -> dict[str, Any]:
@@ -28,7 +40,7 @@ class DraftBuilder:
             dimension = SpecificationDimension.model_validate(payload)
         except ValidationError as exc:
             return {"ok": False, "error": exc.errors()[0]}
-        if any(item.id == dimension.id for item in self.draft.dimensions):
+        if any(item.id == dimension.id for item in self.draft.dimensions + self.draft.features):
             return {"ok": False, "field": "id", "message": f"duplicate dimension id '{dimension.id}'"}
         self.draft.dimensions.append(dimension)
         return {"ok": True, "dimension_id": dimension.id}
@@ -38,7 +50,7 @@ class DraftBuilder:
             feature = SpecificationFeature.model_validate(payload)
         except ValidationError as exc:
             return {"ok": False, "error": exc.errors()[0]}
-        if any(item.id == feature.id for item in self.draft.features):
+        if any(item.id == feature.id for item in self.draft.features + self.draft.dimensions):
             return {"ok": False, "field": "id", "message": f"duplicate feature id '{feature.id}'"}
         issues = feature_contract_issues(feature)  # same contract as Build
         if issues:
@@ -94,8 +106,13 @@ class DraftBuilder:
         return {"ok": True, "id": item.id}
 
     def finish(self) -> DraftSpecification:
+        if not self.metadata_set:
+            raise ValueError("set_draft_metadata must be called before finish_draft")
         self.draft.analysis = DrawingAnalysis.model_validate(self.analysis)
         return self.draft
+
+    def reference_issues(self) -> list[str]:
+        return review_reference_issues(self.draft)
 
 
 def _feature_dimension_references(feature: SpecificationFeature) -> list[str]:

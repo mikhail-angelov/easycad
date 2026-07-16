@@ -22,8 +22,10 @@ class RealUserSpecificationFlowE2E(unittest.TestCase):
     @classmethod
     def setUpClass(cls) -> None:
         load_env()
-        if not os.environ.get("OPEN_ROUTER_KEY") or not os.environ.get("DEEP_SEEK_KEY"):
-            raise unittest.SkipTest("Missing OPEN_ROUTER_KEY or DEEP_SEEK_KEY")
+        if not os.environ.get("OPEN_ROUTER_KEY"):
+            raise unittest.SkipTest("Missing OPEN_ROUTER_KEY")
+        if not os.environ.get("OPEN_ROUTER_PLANNER_MODEL") and not os.environ.get("DEEP_SEEK_KEY"):
+            raise unittest.SkipTest("Missing DEEP_SEEK_KEY for the default planner")
 
     def test_accepting_all_proposals_builds_and_exports_stl(self):
         OUT.mkdir(parents=True, exist_ok=True)
@@ -122,10 +124,10 @@ def _build_repair_instruction(specification: dict) -> str:
         )
     return (
         "Correct the rounded base end and the through-hole placement. The R30 arc and Ø24 hole center are at "
-        "X=base_straight_length and Y=30 mm (overall_width / 2), never Y=0 or Y=overall_width. "
-        "Keep the finished overall Y width exactly 60 mm. Correct the top groove too: it is a cylinder on plane XZ, "
-        "with radius 12, height overall_width=60, and origin [14, overall_width=60, overall_height=56], so it runs along Y and "
-        "removes the upper semicircle of the upright."
+        "X=base_length_to_center and Y=30 mm (overall_width / 2), never Y=0 or Y=overall_width. "
+        "Keep the finished overall Y width exactly 60 mm. Correct the top groove too: it is a cylinder on plane YZ, "
+        "with radius 12, height upright_thickness=28, and origin [0, 30, overall_height=56], so it runs along X and "
+        "removes the upper semicircle from the upright end face."
     )
 
 
@@ -178,7 +180,7 @@ def _user_dimension_value(dimension: dict) -> float:
     if alternatives:
         return float(alternatives[0])
     if "chamfer" in dimension.get("label", "").lower():
-        return 22.5
+        return 1.5
     if "thread pitch" in dimension.get("label", "").lower():
         return 2.0
     if "washer" in dimension.get("label", "").lower():
@@ -218,10 +220,15 @@ def _assert_bracket_top_groove_geometry(specification: dict) -> None:
     """Fixture 3's R12 cut is on the upright end face and runs through its 28 mm depth."""
     values = validate_specification(DraftSpecification.model_validate(specification))
     groove = next(item for item in specification["features"] if item["id"] == "top_groove")
-    unittest.TestCase().assertEqual(groove["type"], "cylinder")
     unittest.TestCase().assertEqual(groove["operation"], "cut")
     unittest.TestCase().assertEqual(groove["placement"]["plane"], "YZ")
-    unittest.TestCase().assertEqual(_coordinate_value(groove["parameters"]["height"], values), 28)
+    if groove["type"] == "cylinder":
+        depth = groove["parameters"]["height"]
+    else:
+        unittest.TestCase().assertEqual(groove["type"], "extrude")
+        unittest.TestCase().assertEqual(groove["profile"]["type"], "circle")
+        depth = groove["parameters"]["distance"]
+    unittest.TestCase().assertEqual(_coordinate_value(depth, values), 28)
     origin = groove["placement"]["origin"]
     unittest.TestCase().assertEqual(_coordinate_value(origin[0], values), 0)
     unittest.TestCase().assertEqual(_coordinate_value(origin[1], values), 30)

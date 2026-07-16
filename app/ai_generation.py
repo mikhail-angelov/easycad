@@ -91,7 +91,7 @@ async def generate_draft_specification_from_image(
     deepseek_key = os.environ.get("DEEP_SEEK_KEY")
     if not openrouter_key:
         raise GenerationError("vision_analysis", "OPEN_ROUTER_KEY is not configured")
-    if not deepseek_key:
+    if not deepseek_key and not os.environ.get("OPEN_ROUTER_PLANNER_MODEL"):
         raise GenerationError("draft_specification", "DEEP_SEEK_KEY is not configured")
     analysis = await analyze_drawing(data, image_info["mime_type"], instructions, openrouter_key)
     draft = await plan_draft_specification(analysis, instructions, deepseek_key)
@@ -204,10 +204,19 @@ async def plan_draft_specification(
     user_inputs: Dict[str, Any] | None = None,
 ) -> DraftSpecification:
     """Convert image observations into an editable pre-CAD specification."""
-    model = normalize_model_id(os.environ.get("DEEP_SEEK_MODEL", os.environ.get("DEEPSEEK_MODEL", "deepseek-chat")))
-    url = os.environ.get("DEEP_SEEK_BASE_URL", "https://api.deepseek.com/chat/completions")
+    openrouter_planner_model = os.environ.get("OPEN_ROUTER_PLANNER_MODEL", "").strip()
+    if openrouter_planner_model:
+        model = normalize_model_id(openrouter_planner_model)
+        url = OPENROUTER_URL
+        api_key = os.environ.get("OPEN_ROUTER_KEY", "")
+        if not api_key:
+            raise GenerationError("draft_specification", "OPEN_ROUTER_KEY is not configured")
+    else:
+        model = normalize_model_id(os.environ.get("DEEP_SEEK_MODEL", os.environ.get("DEEPSEEK_MODEL", "deepseek-chat")))
+        url = os.environ.get("DEEP_SEEK_BASE_URL", "https://api.deepseek.com/chat/completions")
     prompt = (
         "Build a DraftSpecification by calling the supplied tools until finish_draft. Do not return CAD code, Feature Graph, or JSON prose. "
+        "Start with set_draft_metadata immediately. Do not spend a response explaining or reasoning about the drawing before making a tool call. "
         "You operate a server-owned builder: call set_draft_metadata exactly once; add each dimension exactly once; add each feature once with its matching add_<type> tool; then add assumptions, questions, annotations, and call finish_draft exactly once. "
         "After a tool result with ok=true, that item is stored: never call that tool for the same ID again. After ok=false, correct and retry only that item. "
         "When all intended items have ok=true results, call finish_draft immediately. Never omit finish_draft and never continue after it. "
@@ -274,11 +283,70 @@ async def plan_draft_specification(
             }, ensure_ascii=False)},
         ],
         "temperature": 0.1,
-        "max_tokens": 5000,
+        "max_tokens": 20000 if openrouter_planner_model else 5000,
         "tools": draft_builder_tools(),
         "tool_choice": "required",
     }
-    return await _run_draft_builder(url, api_key, payload, analysis)
+    builder_kwargs = {
+        "required_dimension_ids": {item.id for item in previous_specification.dimensions} if previous_specification else set(),
+        "required_feature_ids": {item.id for item in previous_specification.features} if previous_specification else set(),
+        "required_assumption_ids": {item.id for item in previous_specification.assumptions} if previous_specification else set(),
+        **_confirmed_replan_snapshots(previous_specification, user_inputs or {}),
+    }
+    try:
+        return await _run_draft_builder(url, api_key, payload, analysis, **builder_kwargs)
+    except GenerationError as exc:
+        if exc.stage != "draft_specification" or "tool-call limit" not in str(exc):
+            raise
+        logger.warning("Restarting draft planner after provider tool-call loop")
+        return await _run_draft_builder(url, api_key, payload, analysis, **builder_kwargs)
+
+
+def _confirmed_replan_snapshots(
+    previous_specification: DraftSpecification | None, user_inputs: Dict[str, Any]
+) -> Dict[str, Dict[str, Dict[str, Any]]]:
+    if previous_specification is None:
+        return {
+            "preserved_dimensions": {},
+            "preserved_features": {},
+            "preserved_assumptions": {},
+        }
+    questions = {item.id: item.field_id for item in previous_specification.questions}
+    clarified_fields = {
+        questions[question_id]
+        for question_id, text in user_inputs.get("clarifications", {}).items()
+        if text and question_id in questions
+    }
+
+    def superseded(item_id: str) -> bool:
+        return any(field_id == item_id or field_id.startswith(f"{item_id}.") for field_id in clarified_fields)
+
+    dimensions = {}
+    direct_values = user_inputs.get("dimension_values", {})
+    for item in previous_specification.dimensions:
+        if item.status != "confirmed" or superseded(item.id):
+            continue
+        payload = item.model_dump(mode="json")
+        if item.id in direct_values:
+            payload.update({"value": direct_values[item.id], "expression": None, "status": "confirmed", "source": "manual"})
+        dimensions[item.id] = payload
+    accepted_features = set(user_inputs.get("accepted_feature_ids", []))
+    features = {
+        item.id: {**item.model_dump(mode="json"), "status": "confirmed" if item.id in accepted_features else item.status}
+        for item in previous_specification.features
+        if (item.status == "confirmed" or item.id in accepted_features) and not superseded(item.id)
+    }
+    accepted_assumptions = set(user_inputs.get("accepted_assumption_ids", []))
+    assumptions = {
+        item.id: {**item.model_dump(mode="json"), "status": "confirmed" if item.id in accepted_assumptions else item.status}
+        for item in previous_specification.assumptions
+        if (item.status == "confirmed" or item.id in accepted_assumptions) and not superseded(item.id)
+    }
+    return {
+        "preserved_dimensions": dimensions,
+        "preserved_features": features,
+        "preserved_assumptions": assumptions,
+    }
 
 
 def draft_specification_tool_schema() -> Dict[str, Any]:
@@ -407,7 +475,19 @@ def draft_builder_tools() -> List[Dict[str, Any]]:
     return tools
 
 
-async def _run_draft_builder(url: str, api_key: str, payload: Dict[str, Any], analysis: Dict[str, Any]) -> DraftSpecification:
+async def _run_draft_builder(
+    url: str,
+    api_key: str,
+    payload: Dict[str, Any],
+    analysis: Dict[str, Any],
+    *,
+    required_dimension_ids: set[str] | None = None,
+    required_feature_ids: set[str] | None = None,
+    required_assumption_ids: set[str] | None = None,
+    preserved_dimensions: Dict[str, Dict[str, Any]] | None = None,
+    preserved_features: Dict[str, Dict[str, Any]] | None = None,
+    preserved_assumptions: Dict[str, Dict[str, Any]] | None = None,
+) -> DraftSpecification:
     builder = DraftBuilder(analysis)
     messages = list(payload["messages"])
     headers = {
@@ -450,15 +530,50 @@ async def _run_draft_builder(url: str, api_key: str, payload: Dict[str, Any], an
                 messages.append({"role": "tool", "tool_call_id": call["id"], "content": json.dumps({"ok": False, "message": str(exc)})})
                 continue
             if name == "finish_draft":
-                if not builder.draft.title:
+                if not builder.metadata_set:
                     result = {"ok": False, "field": "title", "message": "set_draft_metadata must be called before finish_draft"}
                 elif not builder.draft.features:
                     result = {"ok": False, "field": "features", "message": "draft must contain at least one feature before finish_draft"}
                 else:
-                    # Questions and assumed values are intentional at this point:
-                    # the subsequent UI review, not the planner, resolves them.
-                    return builder.finish()
-            elif name == "set_draft_metadata": result = builder.set_metadata(**args)
+                    missing_dimensions = sorted((required_dimension_ids or set()) - {item.id for item in builder.draft.dimensions})
+                    missing_features = sorted((required_feature_ids or set()) - {item.id for item in builder.draft.features})
+                    missing_assumptions = sorted((required_assumption_ids or set()) - {item.id for item in builder.draft.assumptions})
+                    if missing_dimensions or missing_features or missing_assumptions:
+                        result = {
+                            "ok": False,
+                            "field": "complete_replan",
+                            "message": (
+                                "Complete replacement draft is missing previously reviewed IDs. Add them before finish_draft: "
+                                f"dimensions={missing_dimensions}; features={missing_features}; assumptions={missing_assumptions}."
+                            ),
+                        }
+                    else:
+                        preserved_items = (
+                            ("dimension", preserved_dimensions or {}, {item.id: item.model_dump(mode="json") for item in builder.draft.dimensions}),
+                            ("feature", preserved_features or {}, {item.id: item.model_dump(mode="json") for item in builder.draft.features}),
+                            ("assumption", preserved_assumptions or {}, {item.id: item.model_dump(mode="json") for item in builder.draft.assumptions}),
+                        )
+                        changed = [
+                            f"{kind}:{item_id}"
+                            for kind, expected, actual in preserved_items
+                            for item_id, payload in expected.items()
+                            if actual.get(item_id) != payload
+                        ]
+                        reference_issues = builder.reference_issues()
+                        if changed or reference_issues:
+                            result = {
+                                "ok": False,
+                                "field": "complete_replan",
+                                "message": "; ".join([
+                                    *([f"Confirmed items changed without a clarification: {', '.join(changed)}"] if changed else []),
+                                    *reference_issues,
+                                ]),
+                            }
+                        else:
+                            # Questions and assumed values are intentional at this point:
+                            # the subsequent UI review, not the planner, resolves them.
+                            return builder.finish()
+            elif name == "set_draft_metadata": result = builder.set_metadata(args)
             elif name == "add_dimension": result = builder.add_dimension(args)
             elif name == "add_assumption": result = builder.add_assumption(args)
             elif name == "add_question": result = builder.add_question(args)

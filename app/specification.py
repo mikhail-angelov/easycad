@@ -53,10 +53,18 @@ def apply_specification_edits(
         dimension.status = "confirmed"
         dimension.source = "manual"
     accepted = set(accepted_assumption_ids)
+    unknown_assumptions = accepted - {item.id for item in updated.assumptions}
+    if unknown_assumptions:
+        unknown_id = sorted(unknown_assumptions)[0]
+        raise SpecificationValidationError([unknown_id], [f"Unknown assumption '{unknown_id}'"])
     for assumption in updated.assumptions:
         if assumption.id in accepted:
             assumption.status = "confirmed"
     accepted_features = set(accepted_feature_ids or [])
+    unknown_features = accepted_features - {item.id for item in updated.features}
+    if unknown_features:
+        unknown_id = sorted(unknown_features)[0]
+        raise SpecificationValidationError([unknown_id], [f"Unknown feature '{unknown_id}'"])
     for feature in updated.features:
         if feature.id in accepted_features:
             feature.status = "confirmed"
@@ -64,10 +72,42 @@ def apply_specification_edits(
     return updated
 
 
+def review_reference_issues(specification: DraftSpecification) -> list[str]:
+    dimension_ids = {item.id for item in specification.dimensions}
+    feature_ids = {item.id for item in specification.features}
+    question_ids = {item.id for item in specification.questions}
+    issues = []
+    for question in specification.questions:
+        if question.field_id not in dimension_ids | feature_ids:
+            issues.append(f"{question.id} references unknown review item '{question.field_id}'")
+    valid_annotation_ids = dimension_ids | feature_ids | question_ids
+    for annotation in specification.annotations:
+        for field_id in [annotation.field_id, *annotation.field_ids]:
+            if field_id not in valid_annotation_ids:
+                issues.append(f"{annotation.id} references unknown review item '{field_id}'")
+    return issues
+
+
 def validate_specification(specification: DraftSpecification) -> Dict[str, float]:
     field_ids: List[str] = []
     messages: List[str] = []
     values: Dict[str, float] = {}
+    text_value_ids = set()
+    signed_text_distance_ids = {
+        feature.parameters["distance"]
+        for feature in specification.features
+        if feature.type == "text" and feature.operation == "cut" and isinstance(feature.parameters.get("distance"), str)
+    }
+    positive_value_ids = {
+        parameter_id
+        for feature in specification.features
+        for parameter_id in _feature_parameter_references(feature)
+        if not (
+            feature.type == "text"
+            and feature.operation == "cut"
+            and parameter_id == feature.parameters.get("distance")
+        )
+    }
     pending = {}
     for dimension in specification.dimensions:
         if dimension.critical and dimension.status in {"needs_input", "conflicted"}:
@@ -86,9 +126,11 @@ def validate_specification(specification: DraftSpecification) -> Dict[str, float
             messages.append(f"{dimension.id} has no value")
             continue
         if isinstance(dimension.value, str):
+            text_value_ids.add(dimension.id)
             continue
         value = float(dimension.value)
-        if not math.isfinite(value) or value <= 0:
+        allows_signed_value = dimension.id in signed_text_distance_ids - positive_value_ids
+        if not math.isfinite(value) or value == 0 or (value < 0 and not allows_signed_value):
             field_ids.append(dimension.id)
             messages.append(f"{dimension.id} must be positive")
             continue
@@ -129,9 +171,6 @@ def validate_specification(specification: DraftSpecification) -> Dict[str, float
             messages.append(f"{assumption.id} must be accepted or replaced")
     known_features = set()
     for feature in specification.features:
-        if feature.status == "unsupported":
-            known_features.add(feature.id)
-            continue
         if feature.status in {"needs_input", "conflicted", "assumed"}:
             field_ids.append(feature.id)
             messages.append(f"{feature.id} requires input")
@@ -172,10 +211,22 @@ def validate_specification(specification: DraftSpecification) -> Dict[str, float
                 field_ids.append(feature.id)
                 messages.append(f"{feature.id} is missing {field}")
         for parameter_id in _feature_parameter_references(feature):
+            if parameter_id in values:
+                continue
+            if feature.type == "text" and parameter_id == feature.parameters.get("content") and parameter_id in text_value_ids:
+                continue
+            if parameter_id in text_value_ids:
+                field_ids.append(feature.id)
+                messages.append(f"{feature.id} uses text dimension '{parameter_id}' where a numeric value is required")
+                continue
             if parameter_id not in values:
                 field_ids.append(feature.id)
                 messages.append(f"{feature.id} references unknown or unresolved dimension '{parameter_id}'")
         known_features.add(feature.id)
+    for issue in review_reference_issues(specification):
+        item_id = issue.split(" references", 1)[0]
+        field_ids.append(item_id)
+        messages.append(issue)
     if not known_features:
         field_ids.append("features")
         messages.append("specification must include at least one supported feature")
@@ -254,7 +305,7 @@ def project_from_specification(specification: DraftSpecification) -> CADProject:
                 confidence=feature.confidence,
                 status="implemented",
                 implementation=feature.id,
-                capability_status="supported",
+                capability_status="experimental",
             )
         )
         summaries.append(FeatureSummary(id=feature.id, name=feature.label, type=feature.type, description=feature.label))

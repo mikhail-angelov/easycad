@@ -17,6 +17,12 @@ Geometry interpretation rules:
 * For a circular or semi-circular cut that opens onto a material face, place
   its circle centre on that face and extrude it through the required thickness.
   The cut depth is the span along the extrusion axis, not the circle radius.
+* When the drawing states that circular features are concentric, give them the
+  same complete placement origin. A radius is a size, never a coordinate; use
+  the dimension locating the shared centre on each in-plane axis.
+* Never reuse a locating dimension from one coordinate axis for another axis.
+  When a centre is symmetric across a known span, declare and use that span's
+  derived midpoint dimension for the transverse coordinate.
 * If the drawing does not establish the profile face or extrusion span, return
   needs_input or an assumed proposal with a question. Do not silently choose
   an axis or placement.

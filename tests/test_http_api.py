@@ -100,6 +100,21 @@ class HTTPAPITests(unittest.TestCase):
         self.assertEqual(planner.await_args.args[0], specification.analysis.model_dump(mode="json"))
         self.assertEqual(planner.await_args.kwargs["user_inputs"]["clarifications"], {"width_question": "The width is 32 mm."})
 
+    def test_unknown_structured_acceptance_is_rejected_before_replan(self):
+        specification = complete_specification()
+        with patch.object(main, "plan_draft_specification", AsyncMock()) as planner:
+            response = self.client.post(
+                "/api/specifications/validate",
+                json={
+                    "specification": specification.model_dump(mode="json"),
+                    "accepted_feature_ids": ["missing"],
+                },
+            )
+        self.assertEqual(response.status_code, 200, response.text)
+        self.assertFalse(response.json()["valid"])
+        self.assertIn("Unknown feature 'missing'", response.json()["diagnostics"]["messages"])
+        planner.assert_not_awaited()
+
     def test_multiple_question_clarifications_are_sent_in_one_complete_replan(self):
         specification = complete_specification()
         specification.dimensions[0].status = "needs_input"

@@ -4,7 +4,7 @@ import json
 from dataclasses import dataclass
 from typing import Dict, Iterable, Set
 
-from .models import CADProject, FeatureGraph, FeatureOperation, FeatureValue
+from .models import CADProject, FeatureGraph, FeatureOperation, FeatureValue, SpecificationFeature
 from .validator import ValidationError, validate_source
 
 
@@ -117,7 +117,7 @@ def operation_contract(feature_type: str) -> OperationContract | None:
     return OPERATION_CONTRACTS.get(feature_type)
 
 
-def feature_contract_issues(feature: FeatureOperation) -> list[str]:
+def feature_contract_issues(feature: FeatureOperation | SpecificationFeature) -> list[str]:
     """Return deterministic draft/graph errors before CadQuery is invoked."""
     contract = operation_contract(feature.type)
     if contract is None:
@@ -161,7 +161,7 @@ def feature_contract_issues(feature: FeatureOperation) -> list[str]:
     return issues
 
 
-def _profile_contract_issues(feature: FeatureOperation, profile_type: str) -> list[str]:
+def _profile_contract_issues(feature: FeatureOperation | SpecificationFeature, profile_type: str) -> list[str]:
     profile = feature.profile
     assert profile is not None
     required_dimensions = {
@@ -212,7 +212,6 @@ def compile_project_feature_graph(project: CADProject) -> CADProject:
         if operation.status in {"planned", "implemented"}:
             operation.status = "implemented"
             operation.implementation = operation.id
-            operation.capability_status = "supported"
     return compiled
 
 

@@ -752,7 +752,7 @@ class FeatureCompilerTests(unittest.TestCase):
         with self.assertRaisesRegex(CompilerError, "freeform_feature.*unsupported primitive type"):
             compile_project_feature_graph(project)
 
-    def test_compiled_and_unresolved_capability_labels_are_independent_from_coverage(self):
+    def test_compilation_does_not_claim_capability_evidence(self):
         graph = FeatureGraph.model_validate(
             {
                 "operations": [
@@ -778,7 +778,7 @@ class FeatureCompilerTests(unittest.TestCase):
         compiled = compile_project_feature_graph(project)
         operation = compiled.feature_graph.operations[0]
         self.assertEqual(operation.status, "implemented")
-        self.assertEqual(operation.capability_status, "supported")
+        self.assertEqual(operation.capability_status, "experimental")
 
 if __name__ == "__main__":
     unittest.main()

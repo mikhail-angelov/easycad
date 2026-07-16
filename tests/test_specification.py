@@ -7,14 +7,23 @@ from unittest.mock import AsyncMock, patch
 
 import app.ai_generation as ai
 from app.feature_compiler import OPERATION_CONTRACTS, draft_specification_operation_types
-from app.models import DraftSpecification, SpecificationAssumption, SpecificationDimension, SpecificationFeature
+from app.models import (
+    DraftSpecification,
+    SpecificationAnnotation,
+    SpecificationAssumption,
+    SpecificationDimension,
+    SpecificationFeature,
+    SpecificationQuestion,
+)
 from pydantic import ValidationError as PydanticValidationError
+from app.draft_builder import DraftBuilder
 from app.specification import (
     SpecificationValidationError,
     apply_specification_edits,
     project_from_specification,
     validate_specification,
 )
+from app.runner import run_project
 from tests.provider_payloads import normalize_draft_specification_payload
 
 
@@ -178,6 +187,76 @@ class SpecificationTests(unittest.TestCase):
         accepted = apply_specification_edits(specification, {}, ["wall_guess"], "")
         validate_specification(accepted)
 
+    def test_unknown_acceptance_ids_are_rejected(self):
+        specification = complete_specification()
+        with self.assertRaisesRegex(SpecificationValidationError, "Unknown assumption 'missing'"):
+            apply_specification_edits(specification, {}, ["missing"], "")
+        with self.assertRaisesRegex(SpecificationValidationError, "Unknown feature 'missing'"):
+            apply_specification_edits(specification, {}, [], "", accepted_feature_ids=["missing"])
+
+    def test_draft_builder_requires_metadata_and_cross_namespace_ids(self):
+        builder = DraftBuilder({})
+        self.assertTrue(builder.add_dimension({"id": "base", "label": "Length", "value": 40})["ok"])
+        result = builder.add_feature(
+            {"id": "base", "label": "Base", "type": "box", "operation": "add", "parameters": {"length": 1, "width": 1, "height": 1}}
+        )
+        self.assertFalse(result["ok"])
+        self.assertIn("duplicate", result["message"])
+        with self.assertRaisesRegex(ValueError, "set_draft_metadata"):
+            builder.finish()
+
+        self.assertFalse(builder.set_metadata({"title": "Plate", "units": "inch"})["ok"])
+        self.assertFalse(builder.set_metadata({"title": "Plate", "units": "mm", "extra": True})["ok"])
+        self.assertTrue(builder.set_metadata({"title": "Plate", "units": "mm"})["ok"])
+        self.assertFalse(builder.set_metadata({"title": "Renamed plate", "units": "mm"})["ok"])
+
+    def test_text_feature_accepts_text_dimension_and_signed_cut_distance(self):
+        specification = DraftSpecification(
+            dimensions=[
+                SpecificationDimension(id="length", label="Length", value=40, status="confirmed"),
+                SpecificationDimension(id="width", label="Width", value=30, status="confirmed"),
+                SpecificationDimension(id="height", label="Height", value=5, status="confirmed"),
+                SpecificationDimension(id="content", label="Content", value="EASY", status="confirmed"),
+                SpecificationDimension(id="size", label="Size", value=8, status="confirmed"),
+                SpecificationDimension(id="depth", label="Depth", value=-1, status="confirmed"),
+                SpecificationDimension(id="text_x", label="Text X", value=10, status="confirmed"),
+                SpecificationDimension(id="text_y", label="Text Y", value=10, status="confirmed"),
+                SpecificationDimension(id="text_z", label="Text Z", value=5, status="confirmed"),
+            ],
+            features=[
+                SpecificationFeature(
+                    id="base", label="Base", type="box", operation="add",
+                    parameters={"length": "length", "width": "width", "height": "height"}, status="confirmed",
+                ),
+                SpecificationFeature(
+                    id="label", label="Label", type="text", operation="cut", target="base",
+                    parameters={"content": "content", "size": "size", "distance": "depth"}, status="confirmed",
+                    placement={"origin": ["text_x", "text_y", "text_z"]},
+                )
+            ],
+        )
+        values = validate_specification(specification)
+        self.assertEqual(values["depth"], -1)
+        project = project_from_specification(specification)
+        self.assertEqual(project.parameters["content"].type, "text")
+        self.assertIn("# feature:label", project.cad.source)
+        self.assertEqual(run_project(project, {}, fmt="stl")["status"], "success")
+
+    def test_text_dimension_is_rejected_in_numeric_feature_field(self):
+        specification = complete_specification()
+        specification.dimensions[0].value = "forty"
+        with self.assertRaisesRegex(SpecificationValidationError, "text dimension 'length' where a numeric value is required"):
+            validate_specification(specification)
+
+    def test_units_and_review_references_are_validated(self):
+        with self.assertRaises(PydanticValidationError):
+            DraftSpecification(units="inch")
+        specification = complete_specification()
+        specification.questions = [SpecificationQuestion(id="missing", field_id="unknown", prompt="Enter value")]
+        specification.annotations = [SpecificationAnnotation(id="marker", field_id="unknown", x=0.5, y=0.5, label="Unknown")]
+        with self.assertRaisesRegex(SpecificationValidationError, "unknown review item"):
+            validate_specification(specification)
+
     def test_unknown_reference_and_unsupported_feature_are_reported(self):
         specification = complete_specification()
         specification.features.append(
@@ -229,6 +308,8 @@ class SpecificationTests(unittest.TestCase):
         self.assertIn("body and groove are observations", prompt)
         self.assertIn("Geometry interpretation rules", prompt)
         self.assertIn("A workplane is the plane of the feature profile", prompt)
+        self.assertIn("circular features are concentric", prompt)
+        self.assertIn("same complete placement origin", prompt)
         self.assertIn("needs_input or an assumed proposal with a question", prompt)
         self.assertIn("through/сквозное is a confirmed instruction", prompt)
         self.assertIn("never use offset, center, position, depth, or centered_on_width", prompt)
@@ -260,6 +341,7 @@ class SpecificationTests(unittest.TestCase):
         response = {"title": "Plate", "dimensions": [], "features": [], "assumptions": [], "questions": [], "annotations": []}
         analysis = {"views": [{"id": "front"}], "dimensions": [{"id": "length", "value": 40}], "features": [{"id": "base", "type": "body"}], "uncertainties": []}
         previous = complete_specification()
+        previous.assumptions = [SpecificationAssumption(id="wall_guess", value=3, rationale="not shown")]
         user_inputs = {
             "dimension_values": {"length": 42},
             "accepted_feature_ids": ["base"],
@@ -293,6 +375,11 @@ class SpecificationTests(unittest.TestCase):
         self.assertEqual(request_context["drawing_analysis"], analysis)
         self.assertEqual(request_context["previous_specification"], previous.model_dump(mode="json"))
         self.assertEqual(request_context["user_inputs"], user_inputs)
+        self.assertEqual(builder.await_args.kwargs["required_dimension_ids"], {item.id for item in previous.dimensions})
+        self.assertEqual(builder.await_args.kwargs["required_feature_ids"], {item.id for item in previous.features})
+        self.assertEqual(builder.await_args.kwargs["required_assumption_ids"], {item.id for item in previous.assumptions})
+        self.assertEqual(builder.await_args.kwargs["preserved_dimensions"]["length"]["value"], 42)
+        self.assertEqual(builder.await_args.kwargs["preserved_features"]["base"]["status"], "confirmed")
         tool_names = {tool["function"]["name"] for tool in payload["tools"]}
         self.assertIn("set_draft_metadata", tool_names)
         self.assertIn("add_box", tool_names)

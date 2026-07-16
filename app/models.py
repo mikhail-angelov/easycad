@@ -196,7 +196,7 @@ class SpecificationAnnotation(BaseModel):
 class DraftSpecification(BaseModel):
     id: str = Field(default_factory=lambda: str(uuid4()))
     title: str = "Untitled specification"
-    units: str = "mm"
+    units: Literal["mm"] = "mm"
     source: SourceInfo = Field(default_factory=SourceInfo)
     analysis: DrawingAnalysis = Field(default_factory=DrawingAnalysis)
     dimensions: List[SpecificationDimension] = Field(default_factory=list)
