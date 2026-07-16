@@ -26,6 +26,11 @@ Geometry interpretation rules:
 * If the drawing does not establish the profile face or extrusion span, return
   needs_input or an assumed proposal with a question. Do not silently choose
   an axis or placement.
+* In particular, when a groove or cut is only described as centred on a span
+  and its run direction or extrusion span is not dimensioned, it is ambiguous:
+  add a required question with alternatives for running along that span or
+  through the perpendicular material thickness. Do not mark either reading
+  confirmed until the user answers.
 """.strip()
 
 

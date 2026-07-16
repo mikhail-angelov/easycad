@@ -1,0 +1,57 @@
+{
+  "vision_response": {
+    "title": "L-Shaped Bracket with Semi-Circular Groove and Through Hole",
+    "units": "millimeters",
+    "views": [{"id": "iso_view", "type": "isometric", "description": "Isometric projection showing the overall geometry and dimensions"}],
+    "dimensions": {
+      "overall_width": 60,
+      "overall_height": 56,
+      "base_thickness": 20,
+      "upright_thickness": 28,
+      "base_length_to_center": 48,
+      "base_radius": 30,
+      "hole_diameter": 24,
+      "groove_radius": 12
+    },
+    "features": [
+      {"id": "base_plate", "name": "Rounded Base Plate", "type": "body", "operation_hint": "add", "target": null, "depends_on": [], "confidence": 1.0, "evidence": {"source_view_ids": ["iso_view"], "dimension_ids": ["20", "48", "R30"]}, "profile": "Rectangular section 60mm wide with a semi-circular end of radius 30mm", "placement": {"origin": "bottom_rear_corner", "plane": "XY"}},
+      {"id": "upright_block", "name": "Vertical Upright", "type": "body", "operation_hint": "add", "target": "base_plate", "depends_on": ["base_plate"], "confidence": 1.0, "evidence": {"source_view_ids": ["iso_view"], "dimension_ids": ["56", "28", "60"]}, "profile": "Rectangular block 60mm x 28mm x 36mm (56-20 height)", "placement": {"reference": "top_rear_surface_of_base", "direction": "Z+"}},
+      {"id": "vertical_hole", "name": "Through Hole", "type": "hole", "operation_hint": "cut", "target": "base_plate", "depends_on": ["base_plate"], "confidence": 1.0, "evidence": {"source_view_ids": ["iso_view"], "dimension_ids": ["dia_24", "R30"]}, "profile": "Circular diameter 24mm", "placement": {"reference": "concentric_with_base_radius", "origin": "center_of_R30_arc"}},
+      {"id": "top_groove", "name": "Semi-Circular Groove", "type": "groove", "operation_hint": "cut", "target": "upright_block", "depends_on": ["upright_block"], "confidence": 1.0, "evidence": {"source_view_ids": ["iso_view"], "dimension_ids": ["R12", "60"]}, "profile": "Semi-circle radius 12mm", "placement": {"reference": "top_face_of_upright", "axis": "centered_on_width_60"}}
+    ],
+    "uncertainties": {"concentricity": "The hole is assumed concentric with the R30 base arc based on visual alignment.", "groove_centering": "The R12 groove is assumed centered on the 60mm width as no offset is provided.", "text_translation": "Russian text 'Отв. Ф24 сквозное' confirms 'Hole Dia 24 through'."},
+    "overall_shape": "An L-shaped bracket consisting of a horizontal rounded base and a vertical rectangular block, featuring a central through-hole in the base and a longitudinal semi-circular channel in the top.",
+    "construction_strategy": "1. Extrude the base profile (60mm width, 48mm length to center + 30mm radius) to a height of 20mm. 2. Extrude the upright block (60mm x 28mm) from the rear of the base to a total height of 56mm. 3. Cut a 24mm diameter hole concentric with the base radius. 4. Cut a semi-circular groove of radius 12mm through the top of the upright block, centered on the 60mm width."
+  },
+  "user_clarification": "The R12 groove is a short channel through the upright thickness: use plane YZ, start at X=0, centre it at Y=30 and Z=56, and cut 28 mm along X.",
+  "expected_tool_names": [
+    "set_draft_metadata",
+    "add_dimension", "add_dimension", "add_dimension", "add_dimension", "add_dimension", "add_dimension", "add_dimension", "add_dimension", "add_dimension",
+    "add_box", "add_cylinder", "add_box", "add_through_hole", "add_cylinder", "finish_draft"
+  ],
+  "golden_specification": {
+    "title": "L-Shaped Bracket with Semi-Circular Groove and Through Hole",
+    "units": "mm",
+    "dimensions": [
+      {"id": "overall_width", "label": "Overall width", "value": 60, "source": "drawing", "confidence": 1, "status": "confirmed", "critical": true, "evidence": ["iso_view"]},
+      {"id": "overall_height", "label": "Overall height", "value": 56, "source": "drawing", "confidence": 1, "status": "confirmed", "critical": true, "evidence": ["iso_view"]},
+      {"id": "base_thickness", "label": "Base thickness", "value": 20, "source": "drawing", "confidence": 1, "status": "confirmed", "critical": true, "evidence": ["iso_view"]},
+      {"id": "upright_thickness", "label": "Upright thickness", "value": 28, "source": "drawing", "confidence": 1, "status": "confirmed", "critical": true, "evidence": ["iso_view"]},
+      {"id": "base_length_to_center", "label": "Base length to centre", "value": 48, "source": "drawing", "confidence": 1, "status": "confirmed", "critical": true, "evidence": ["iso_view"]},
+      {"id": "base_radius", "label": "Base radius", "value": 30, "source": "drawing", "confidence": 1, "status": "confirmed", "critical": true, "evidence": ["iso_view"]},
+      {"id": "hole_diameter", "label": "Hole diameter", "value": 24, "source": "drawing", "confidence": 1, "status": "confirmed", "critical": true, "evidence": ["iso_view"]},
+      {"id": "groove_radius", "label": "Groove radius", "value": 12, "source": "drawing", "confidence": 1, "status": "confirmed", "critical": true, "evidence": ["iso_view"]},
+      {"id": "width_mid", "label": "Width midpoint", "expression": "overall_width / 2", "source": "derived", "confidence": 1, "status": "confirmed", "critical": true, "evidence": ["derived from overall_width"]}
+    ],
+    "features": [
+      {"id": "base_body", "label": "Base body", "type": "box", "operation": "add", "target": null, "parameters": {"length": "base_length_to_center", "width": "overall_width", "height": "base_thickness"}, "placement": {"plane": "XY", "origin": [0, 0, 0]}, "status": "confirmed", "critical_fields": ["placement"], "confidence": 1, "evidence": ["iso_view"], "alternatives": {}},
+      {"id": "base_round_end", "label": "Rounded base end", "type": "cylinder", "operation": "add", "target": "base_body", "parameters": {"radius": "base_radius", "height": "base_thickness"}, "placement": {"plane": "XY", "origin": ["base_length_to_center", "width_mid", 0]}, "status": "confirmed", "critical_fields": ["placement"], "confidence": 1, "evidence": ["iso_view"], "alternatives": {}},
+      {"id": "upright", "label": "Vertical upright", "type": "box", "operation": "add", "target": "base_body", "parameters": {"length": "upright_thickness", "width": "overall_width", "height": 36}, "placement": {"plane": "XY", "origin": [0, 0, "base_thickness"]}, "status": "confirmed", "critical_fields": ["placement"], "confidence": 1, "evidence": ["iso_view"], "alternatives": {}},
+      {"id": "vertical_hole", "label": "Through hole", "type": "through_hole", "operation": "cut", "target": "base_body", "parameters": {"diameter": "hole_diameter", "depth": "base_thickness"}, "placement": {"plane": "XY", "origin": ["base_length_to_center", "width_mid", 0]}, "status": "confirmed", "critical_fields": ["placement"], "confidence": 1, "evidence": ["iso_view"], "alternatives": {}},
+      {"id": "top_groove", "label": "Semi-circular top groove", "type": "cylinder", "operation": "cut", "target": "base_body", "parameters": {"radius": "groove_radius", "height": "upright_thickness"}, "placement": {"plane": "YZ", "origin": [0, "width_mid", "overall_height"]}, "status": "confirmed", "critical_fields": ["placement"], "confidence": 1, "evidence": ["iso_view", "user clarification"], "alternatives": {}}
+    ],
+    "assumptions": [],
+    "questions": [],
+    "annotations": []
+  }
+}
