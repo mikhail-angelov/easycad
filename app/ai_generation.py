@@ -38,8 +38,8 @@ from .feature_compiler import (
     compiler_operation_types,
     draft_operation_contract_descriptions,
     draft_specification_operation_types,
-    planner_operation_types,
 )
+from .draft_geometry_rules import draft_geometry_rules
 from .expressions import ExpressionError, evaluate_expression
 from .source_images import get_source_image, store_source_image
 from .validator import validate_project
@@ -172,43 +172,6 @@ def normalize_draft_specification_payload(payload: Dict[str, Any]) -> Dict[str, 
     return normalized
 
 
-def fallback_draft_specification(payload: Dict[str, Any], analysis: Dict[str, Any], errors: List[Dict[str, str]]) -> DraftSpecification:
-    """Return a reviewable, schema-valid draft when provider JSON cannot be normalized safely."""
-    title = str(payload.get("title") or analysis.get("title") or "Untitled specification")
-    repaired = "; ".join(error["field"] for error in errors[:5]) or "provider response"
-    return DraftSpecification.model_validate(
-        {
-            "title": title,
-            "units": "mm",
-            "analysis": {"views": analysis.get("views", []), "dimensions": [], "features": analysis.get("features", []), "uncertainties": []},
-            "questions": [{"id": "provider_format_repair", "field_id": "provider_format_repair", "prompt": f"EasyCAD needs clarification because it repaired incomplete provider data: {repaired}.", "required": True}],
-        }
-    )
-
-
-async def generate_project_from_image(
-    data: bytes,
-    filename: str,
-    mime_type: str,
-    instructions: str = "",
-    validate_result: bool = True,
-) -> CADProject:
-    image_info = validate_image_upload(data, filename, mime_type)
-    openrouter_key = os.environ.get("OPEN_ROUTER_KEY")
-    deepseek_key = os.environ.get("DEEP_SEEK_KEY")
-    if not openrouter_key:
-        raise GenerationError("vision_analysis", "OPEN_ROUTER_KEY is not configured")
-    if not deepseek_key:
-        raise GenerationError("cad_generation", "DEEP_SEEK_KEY is not configured")
-
-    analysis_payload = await analyze_drawing(data, image_info["mime_type"], instructions, openrouter_key)
-    plan_payload = await plan_cad_project(analysis_payload, instructions, deepseek_key)
-    project = project_from_plan(plan_payload, analysis_payload, image_info, data)
-    if validate_result:
-        validate_project(project)
-    return project
-
-
 async def generate_draft_specification_from_image(
     data: bytes, filename: str, mime_type: str, instructions: str = ""
 ) -> DraftSpecification:
@@ -321,100 +284,6 @@ async def analyze_drawing(data: bytes, mime_type: str, instructions: str, api_ke
     return normalize_drawing_analysis(result)
 
 
-async def plan_cad_project(analysis: Dict[str, Any], instructions: str, api_key: str) -> Dict[str, Any]:
-    model = normalize_model_id(os.environ.get("DEEP_SEEK_MODEL", os.environ.get("DEEPSEEK_MODEL", "deepseek-chat")))
-    url = os.environ.get("DEEP_SEEK_BASE_URL", "https://api.deepseek.com/chat/completions")
-    prompt = (
-        "Generate a structured parametric CAD plan from this drawing analysis. "
-        "Return only one JSON object with keys: title, confidence, parameters, feature_graph, feature_summary, assumptions. "
-        "parameters must be an array of objects with id, label, type, value or expression, unit, min, max, step, source, confidence, editable. "
-        "Supported parameter types are number, expression, text, and choice. Choice parameters may include options. "
-        "feature_summary must contain id, name, type, description. "
-        "feature_graph must contain operations mapping every drawing_analysis feature id. Each operation must contain id, type, "
-        "operation, source_feature_ids, target when applicable, confidence, status, parameters, and placement/profile where required. "
-        "Operation id must equal the source drawing feature id when one operation represents that feature. When a feature is split "
-        "into multiple operations, every operation must include that drawing feature id in source_feature_ids. Use status implemented "
-        "when a trusted compiler operation represents the feature. Use approximated, "
-        "unresolved, or unsupported with an assumption when exact implementation is not possible. Never silently omit a feature. "
-        "Do not return Python or CadQuery source. Every engineering dimension must be represented by a parameter reference. "
-        f"Use only trusted compiler operation types: {planner_operation_types()}. "
-        "A box requires parameters length, width, height. A cylinder requires radius and height; use placement.plane to choose its axis. "
-        "Extrude requires a rectangle, circle, or polyline profile and parameter distance. "
-        "Hole requires diameter and depth. Slot and pocket require length, width, depth. Modifiers require target. "
-        "Patterns require target plus pattern type, count, axis, and pitch or angle. Placement origin is exactly three parameter IDs or numbers. "
-        "Do not use center_x, center_y, face names, or expressions such as overall_width/2 in operations. Create a named derived "
-        "parameter with type expression, then reference that parameter ID. Do not put geometry inside an implementation object. "
-        "For an L-shaped body, use two box operations: a base box followed by an upright box targeting the base; do not use an L-shape profile. "
-        "For example, a base operation is {\"id\":\"base_body\",\"type\":\"box\",\"operation\":\"add\",\"source_feature_ids\":[\"base_body\"],\"parameters\":{\"length\":\"overall_length\",\"width\":\"overall_width\",\"height\":\"base_height\"},\"placement\":{\"origin\":[0,0,0]},\"status\":\"implemented\"}. "
-        "For an L-shaped bracket, declare derived parameters for upright_height = overall_height - base_height and "
-        "upright_x = overall_length - upright_length. The upright must target the base and start at "
-        "[upright_x, 0, base_height]; never place it at overall_length or z=0. Every add after the root body must "
-        "target a previous body. Cuts must target the latest solid containing their feature. Do not use a tangent, "
-        "zero-thickness, or edge-only boolean to approximate a rounded end. "
-        "A rectangular top slot on an L-bracket is a pocket, not a rounded slot: target the upright, use its intended "
-        "length and width, declare top_slot_z = overall_height - slot_depth, and use [slot_center_x, slot_center_y, "
-        "top_slot_z] as its origin so its positive extrusion removes material. "
-        "If this schema cannot represent a feature, set status unsupported with an assumption; never invent a new implemented type. "
-        "Prefer simple extrusions, revolutions, holes, pockets, chamfers, fillets, and simple top-face text features. "
-        "If the drawing shows engraved, embossed, stamped, or printed lettering, transcribe it exactly, including Cyrillic, and add parameters "
-        "text_content (type text), text_mode (type choice with options none, engrave, emboss), and text_size (type number, mm). "
-        "Model clear text markings with CadQuery .text(...) on a stable face when the placement is obvious. "
-        "For local CadQuery use combine='cut' for engraved/recessed text and combine='a' for embossed/raised text; do not use a cut= keyword. "
-        "On a top face, recessed text must use negative distance into the solid, for example .text(label, size, -depth, combine='cut'). "
-        "If the face or placement is ambiguous, add an assumption. "
-        "Do not model real screw threads, helical geometry, or decorative thread ridges; represent threaded sections as plain cylinders at major diameter. "
-        "Avoid fragile operations that often fail export, including helixes, freeform sweeps, and boolean cuts with tangent or zero-thickness contact. "
-        "If a dimension is unclear, create an assumed parameter and add an assumption. "
-        "Do not include Markdown fences or prose outside JSON."
-    )
-    if instructions.strip():
-        prompt += f"\nUser instructions: {instructions.strip()}"
-
-    payload = {
-        "model": model,
-        "messages": [
-            {"role": "system", "content": prompt},
-            {"role": "user", "content": json.dumps({"drawing_analysis": analysis}, ensure_ascii=False)},
-        ],
-        "temperature": 0.1,
-        "max_tokens": 20000,
-        "tools": [{"type": "function", "function": {"name": "submit_draft_specification", "description": "Return the DraftSpecification.", "parameters": DraftSpecification.model_json_schema(), "strict": True}}],
-        "tool_choice": {"type": "function", "function": {"name": "submit_draft_specification"}},
-    }
-    result = await _chat_json(url, api_key, payload, "cad_generation")
-    issues = _cad_plan_preflight_issues(result, analysis)
-    if _has_cad_plan_shape(result) and not issues:
-        return result
-    retry_payload = dict(payload)
-    retry_reason = (
-        "The previous JSON was not a complete CAD plan."
-        if not _has_cad_plan_shape(result)
-        else "The previous CAD plan failed deterministic geometry preflight: " + "; ".join(issues)
-    )
-    retry_payload["messages"] = list(payload["messages"]) + [
-        {
-            "role": "user",
-            "content": (
-                f"{retry_reason} Return one corrected JSON object with "
-                "top-level keys exactly including parameters, feature_graph, feature_summary, and assumptions. "
-                "parameters must be an array, not a single parameter object. Preserve every drawing feature and "
-                "correct the reported geometry rather than explaining it in assumptions."
-            ),
-        }
-    ]
-    result = await _chat_json(url, api_key, retry_payload, "cad_generation")
-    if not _has_cad_plan_shape(result):
-        raise GenerationError("cad_generation", "CAD plan did not include required parameters and Feature Graph")
-    issues = _cad_plan_preflight_issues(result, analysis)
-    if issues:
-        raise GenerationError(
-            "cad_generation",
-            "CAD plan failed deterministic preflight: " + "; ".join(issues),
-            {"preflight_issues": issues},
-        )
-    return result
-
-
 async def plan_draft_specification(
     analysis: Dict[str, Any],
     instructions: str,
@@ -445,26 +314,8 @@ async def plan_draft_specification(
         "A drawing label that says a hole is through/сквозное is a confirmed instruction to cut through its target thickness; do not ask about it again. "
         "countersink needs diameter, depth, sink_diameter, sink_depth; slot/pocket need length, width, depth; "
         "rib needs length, thickness, height; fillet needs radius; chamfer needs distance; shell needs thickness. "
-        "For a semi-circular groove, use a cylinder with operation cut: place the cylinder center on the material surface so only its semicircle intersects. "
-        "For a hex-head bolt, use extrude with a required polyline profile containing six numeric two-dimensional points and distance=head_thickness; "
-        "never omit the profile and never use strings such as '-radius' or '0' as point coordinates. Add the shank as a cylinder targeting the head. "
-        "The current catalogue has no thread primitive: represent a threaded section as the same smooth shank cylinder and state that approximation; do not emit text, groove, or an unsupported thread feature. "
-        "Use chamfer modifiers with a positive distance for bolt chamfers, not a revolve cut. "
-        "Cylinder extrusion direction is determined only by plane: XY extrudes Z, XZ extrudes Y, and YZ extrudes X; axis and direction are descriptive only. "
-        "Therefore a groove running along Y must use plane XZ. CadQuery extrudes XZ in negative Y, so a groove spanning "
-        "a body from Y=0 to Y=overall_width must start at origin Y=overall_width, with its origin Z at the top surface. "
-        "For the L-bracket drawing with a 60 mm-wide, 28 mm-deep upright and an R12 semicircle visible on its end face, the groove runs "
-        "through the 28 mm depth along X, not through the 60 mm width along Y. Declare groove_center_y = overall_width / 2 and use a cylinder "
-        "cut on plane YZ with origin [0, groove_center_y, overall_height] and height=upright_thickness. Do NOT use plane XZ for that groove: "
-        "it places the cut on a side edge rather than symmetrically in the upright end face. "
-        "Coordinate convention: an XY box has length along X, width along Y, and height along Z. "
-        "For a rectangular base with a semi-circular end, use a box that ends at the arc center (length=straight_length, not total length) "
-        "and add a cylinder centered on its end face. Before either feature, declare a derived dimension base_end_center_y = base_width / 2. "
-        "Use that dimension ID literally: the cylinder and its concentric through-hole MUST have origin "
-        "[straight_length, base_end_center_y, 0]. Never use the full width as Y, never put the center at Y=0, and never put an expression "
-        "such as width/2 directly in origin. "
-        "For an upright on that base, its height is overall_height minus base_thickness and its origin Z is base_thickness. "
-        "For this coordinate convention, keep an upright's width within the base Y span: when width is the drawing's overall width, its Y origin is 0; its 28mm depth is the X length, not a Y offset. "
+        + draft_geometry_rules()
+        + "\n"
         "Build one connected solid: the first feature is the only root; every additive feature after the first MUST set target to the existing root body, and every cut MUST target that same connected body. "
         "Feature placement may contain only reference, plane, origin, axis, direction, rotation_deg, and offsets. "
         "For fillet and chamfer, target is the feature ID; placement.reference is optional CadQuery edge-selector text such as '>Z', "
@@ -485,6 +336,9 @@ async def plan_draft_specification(
             "accepted_assumption_ids and accepted_feature_ids are explicit user approvals and their matching items must be returned "
             "with status confirmed. An accepted assumption is an authoritative answer for every feature and dimension in its affected_ids; "
             "apply it to the corresponding placement or parameter fields and keep those features confirmed. "
+            "A clarification linked to a question overrides an earlier proposal for that question's field_id, including a whole feature and "
+            "its placement or parameters. Apply that clarification even when the user also accepted the earlier proposal; the clarification "
+            "is the newer, more specific input. "
             "An accepted feature is an authoritative approval of its proposed critical fields: do not downgrade it to needs_input or assumed, "
             "and do not ask a new question about any of its proposed geometry. Do not return a question that is answered by a direct value "
             "or an accepted proposal. "
@@ -878,108 +732,6 @@ def _normalize_parameter_source(value: str) -> str:
     if value in {"drawing", "derived", "inferred", "assumed", "manual"}:
         return value
     return "manual"
-
-
-def _has_cad_plan_shape(payload: Dict[str, Any]) -> bool:
-    return (
-        isinstance(payload.get("parameters"), (list, dict))
-        and isinstance(payload.get("feature_graph"), (list, dict))
-    )
-
-
-def _cad_plan_preflight_issues(plan: Dict[str, Any], analysis: Dict[str, Any]) -> List[str]:
-    """Reject planner output that is JSON-shaped but cannot describe a connected solid."""
-    if not _has_cad_plan_shape(plan):
-        return ["missing parameters or feature_graph"]
-    graph = plan.get("feature_graph")
-    operations = graph.get("operations") if isinstance(graph, dict) else graph
-    if not isinstance(operations, list) or not operations:
-        return ["feature_graph has no operations"]
-
-    parameter_ids = {
-        str(item.get("id"))
-        for item in plan.get("parameters", [])
-        if isinstance(item, dict) and str(item.get("id") or "").strip()
-    }
-    issues: List[str] = []
-    seen_ids = set()
-    add_operations: List[Dict[str, Any]] = []
-    trusted_types = compiler_operation_types()
-    for index, operation in enumerate(operations):
-        if not isinstance(operation, dict):
-            issues.append(f"operation {index + 1} is not an object")
-            continue
-        operation_id = str(operation.get("id") or f"operation {index + 1}")
-        operation_type = canonical_operation_type(str(operation.get("type") or ""))
-        if operation.get("status", "implemented") == "implemented" and operation_type not in trusted_types:
-            issues.append(f"{operation_id} uses unsupported operation type {operation_type}")
-        target = operation.get("target")
-        if target and str(target) not in seen_ids:
-            issues.append(f"{operation_id} targets a missing or later operation {target}")
-        if operation.get("operation") == "add":
-            add_operations.append(operation)
-            if len(add_operations) > 1 and not target:
-                issues.append(f"{operation_id} is an added body without a target")
-        placement = operation.get("placement")
-        if isinstance(placement, dict) and "origin" in placement:
-            origin = placement["origin"]
-            if not isinstance(origin, list) or len(origin) != 3:
-                issues.append(f"{operation_id} placement.origin must have exactly three values")
-            else:
-                for value in origin:
-                    if isinstance(value, str) and value not in parameter_ids:
-                        issues.append(f"{operation_id} placement uses undeclared or inline expression {value}")
-                        break
-        seen_ids.add(operation_id)
-
-    shape_text = " ".join(
-        str(analysis.get(key) or "") for key in ("title", "overall_shape", "construction_strategy")
-    ).lower()
-    if "l-shaped" in shape_text or "l shaped" in shape_text:
-        _l_bracket_preflight_issues(add_operations, operations, issues)
-    return issues
-
-
-def _l_bracket_preflight_issues(
-    add_operations: List[Dict[str, Any]], operations: List[Dict[str, Any]], issues: List[str]
-) -> None:
-    boxes = [
-        operation
-        for operation in add_operations
-        if canonical_operation_type(str(operation.get("type") or "")) == "box"
-        and operation.get("status", "implemented") == "implemented"
-    ]
-    if len(boxes) < 2:
-        issues.append("L-shaped bracket requires a base box and an upright box")
-        return
-    base, upright = boxes[0], boxes[1]
-    upright_id = str(upright.get("id") or "upright")
-    if upright.get("target") != base.get("id"):
-        issues.append(f"{upright_id} must target base body {base.get('id')}")
-    placement = upright.get("placement") or {}
-    origin = placement.get("origin") if isinstance(placement, dict) else None
-    if not isinstance(origin, list) or len(origin) != 3:
-        return
-    if origin[0] in {"overall_length", "total_length"}:
-        issues.append(f"{upright_id} starts at the end of the base instead of inside it")
-    if origin[2] == 0:
-        issues.append(f"{upright_id} starts at z=0 instead of on top of the base")
-    height = (upright.get("parameters") or {}).get("height")
-    if height in {"overall_height", "total_height"}:
-        issues.append(f"{upright_id} height must exclude base thickness")
-    for operation in operations:
-        operation_id = str(operation.get("id") or "").lower()
-        feature_ids = " ".join(str(value).lower() for value in operation.get("source_feature_ids", []))
-        top_feature_name = f"{operation_id} {feature_ids}"
-        if "top" not in top_feature_name or not any(term in top_feature_name for term in ("slot", "groove")):
-            continue
-        if canonical_operation_type(str(operation.get("type") or "")) != "pocket":
-            issues.append(f"{operation.get('id')} top cut must use pocket")
-        if operation.get("target") != upright.get("id"):
-            issues.append(f"{operation.get('id')} top cut must target {upright.get('id')}")
-        top_origin = (operation.get("placement") or {}).get("origin")
-        if isinstance(top_origin, list) and len(top_origin) == 3 and top_origin[2] in {"overall_height", "total_height"}:
-            issues.append(f"{operation.get('id')} top cut must start below the top surface")
 
 
 def _normalize_features(raw: Any) -> List[FeatureSummary]:

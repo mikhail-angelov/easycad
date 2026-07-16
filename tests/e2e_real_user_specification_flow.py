@@ -161,7 +161,11 @@ def _user_answer(prompt: str) -> str:
     if "hex" in lower or "head" in lower:
         return "Confirm the hex head is 12 mm thick and 27 mm across flats."
     if "groove" in lower:
-        return "Confirm the R12 groove is centered, lies on the top surface, and runs through the full 60 mm Y extent."
+        return (
+            "The R12 semicircle is visible on the upright end face. Its cylinder must use plane YZ, start at X=0, "
+            "be centered at Y=30 and Z=56, and cut through the 28 mm upright depth along X. "
+            "The marked R12 value is the radius, so the circular profile diameter is 24 mm."
+        )
     if "hole" in lower or "concentric" in lower:
         return "Confirm the Ø24 hole is concentric with the R30 arc and cuts through the 20 mm base only."
     return "Confirm the proposed geometry shown in the drawing."
