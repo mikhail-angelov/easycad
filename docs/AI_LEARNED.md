@@ -412,3 +412,25 @@ Using plane `XZ` makes the cylinder run through the 60 mm width instead of the 2
 ### Ruled-out approaches
 
 - Tried treating the visible top groove as an XZ/Y-axis cut; the drawing shows its semicircle on the upright end face, which requires YZ/X-axis extrusion.
+
+## 2026-07-16 — Keep legacy provider adapters out of runtime modules
+
+### Goal
+
+Avoid keeping obsolete planner-payload compatibility paths in the production image-to-draft module.
+
+### Golden path
+
+Move compatibility normalization for recorded provider payloads into `tests/provider_payloads.py`. Build test projects directly with public models and `compile_project_feature_graph`, rather than importing a legacy `project_from_plan` adapter from `app/ai_generation.py`.
+
+### Verification
+
+`.venv/bin/python -m unittest -q tests.test_http_api tests.test_source_images tests.test_specification tests.test_validation` passed (55 tests).
+
+### Failure pattern avoided
+
+Test-only compatibility code in the application module leaves obsolete direct-planner behavior visible as a production API and makes the active draft pipeline harder to audit.
+
+### Ruled-out approaches
+
+- Kept test projects on `project_from_plan`; rejected because that preserved the entire legacy adapter chain in runtime code.

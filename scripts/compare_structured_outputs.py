@@ -15,8 +15,8 @@ ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
 
 import app.main  # noqa: E402  Loads .env without printing secrets.
-from app.ai_generation import normalize_draft_specification_payload  # noqa: E402
 from app.models import DraftSpecification  # noqa: E402
+from tests.provider_payloads import normalize_draft_specification_payload  # noqa: E402
 
 SCHEMA = DraftSpecification.model_json_schema()
 SCHEMA["required"] = ["title", "units", "dimensions", "features", "assumptions", "questions", "annotations"]

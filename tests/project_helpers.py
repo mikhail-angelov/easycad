@@ -1,6 +1,18 @@
 from __future__ import annotations
 
-from app.ai_generation import project_from_plan
+from app.feature_compiler import compile_project_feature_graph
+from app.models import (
+    CADParameter,
+    CADProject,
+    CADSource,
+    DrawingAnalysis,
+    FeatureCoverageReport,
+    FeatureGraph,
+    FeatureSummary,
+    GenerationResult,
+    SourceInfo,
+)
+from app.source_images import store_source_image
 
 
 def plate_plan() -> dict:
@@ -22,4 +34,20 @@ def plate_analysis() -> dict:
 
 
 def make_plate_project():
-    return project_from_plan(plate_plan(), plate_analysis(), {"filename": "plate.png", "mime_type": "image/png"}, b"drawing")
+    image_ref, image_sha256 = store_source_image(b"drawing")
+    project = CADProject(
+        title="Plate",
+        source=SourceInfo(filename="plate.png", mime_type="image/png", image_ref=image_ref, image_sha256=image_sha256),
+        analysis=DrawingAnalysis(features=plate_analysis()["features"]),
+        parameters={
+            "plate_length": CADParameter(label="Length", value=40),
+            "plate_width": CADParameter(label="Width", value=30),
+            "plate_thickness": CADParameter(label="Height", value=5),
+        },
+        feature_graph=FeatureGraph.model_validate(plate_plan()["feature_graph"]),
+        feature_coverage=FeatureCoverageReport.model_validate({"entries": [{"feature_id": "base", "operation_ids": ["base"], "status": "implemented", "confidence": 1.0}]}),
+        feature_summary=[FeatureSummary(id="base", name="Base", type="body", description="Plate")],
+        cad=CADSource(source="", source_kind="compiled"),
+        generation=GenerationResult(status="needs_review"),
+    )
+    return compile_project_feature_graph(project)

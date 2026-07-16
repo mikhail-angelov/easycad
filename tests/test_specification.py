@@ -15,6 +15,7 @@ from app.specification import (
     project_from_specification,
     validate_specification,
 )
+from tests.provider_payloads import normalize_draft_specification_payload
 
 
 def complete_specification() -> DraftSpecification:
@@ -238,9 +239,10 @@ class SpecificationTests(unittest.TestCase):
     def test_draft_planner_preserves_the_complete_vision_analysis_for_replanning(self):
         response = {"title": "Plate", "dimensions": [], "features": [], "assumptions": [], "questions": [], "annotations": []}
         analysis = {"views": [{"id": "front"}], "dimensions": [{"id": "length", "value": 40}], "features": [], "uncertainties": [{"id": "depth"}]}
-        with patch.object(ai, "_chat_json", AsyncMock(return_value=response)):
+        with patch.object(ai, "_run_draft_builder", AsyncMock(return_value=DraftSpecification.model_validate(response))) as builder:
             draft = asyncio.run(ai.plan_draft_specification(analysis, "", "key"))
-        self.assertEqual(draft.analysis.model_dump(mode="json"), analysis)
+        self.assertEqual(builder.await_args.args[3], analysis)
+        self.assertEqual(draft.title, "Plate")
 
     def test_draft_planner_does_not_allow_provider_analysis_to_replace_vision_analysis(self):
         response = {
@@ -249,7 +251,8 @@ class SpecificationTests(unittest.TestCase):
             "dimensions": [], "features": [], "assumptions": [], "questions": [], "annotations": [],
         }
         analysis = {"views": [], "dimensions": [{"id": "length", "value": 40}], "features": [], "uncertainties": []}
-        with patch.object(ai, "_chat_json", AsyncMock(return_value=response)):
+        expected = DraftSpecification.model_validate({**response, "analysis": analysis})
+        with patch.object(ai, "_run_draft_builder", AsyncMock(return_value=expected)):
             draft = asyncio.run(ai.plan_draft_specification(analysis, "", "key"))
         self.assertEqual(draft.analysis.model_dump(mode="json"), analysis)
 
@@ -305,8 +308,7 @@ class SpecificationTests(unittest.TestCase):
             "questions": [{"id": "rim_side", "question": "Which side has the rim?", "related_features": ["rim"]}],
             "annotations": [{"id": "height_note", "x": 0.5, "y": 0.2, "text": "Height 30 mm", "links_to": "height"}],
         }
-        with patch.object(ai, "_chat_json", AsyncMock(return_value=response)):
-            draft = asyncio.run(ai.plan_draft_specification({"features": []}, "", "key"))
+        draft = DraftSpecification.model_validate(normalize_draft_specification_payload(response))
 
         self.assertEqual(draft.units, "mm")
         self.assertEqual(draft.dimensions[0].evidence, ["front view"])
@@ -323,8 +325,7 @@ class SpecificationTests(unittest.TestCase):
             "questions": [{"id": "hole_position", "description": "Where is the hole?", "required_for": ["hole"]}],
             "annotations": [{"id": "overview", "x": 0.5, "y": 0.5, "text": "Width and hole", "links_to": ["width", "hole"]}],
         }
-        with patch.object(ai, "_chat_json", AsyncMock(return_value=response)):
-            draft = asyncio.run(ai.plan_draft_specification({"features": []}, "", "key"))
+        draft = DraftSpecification.model_validate(normalize_draft_specification_payload(response))
 
         self.assertEqual(draft.annotations[0].field_id, "width")
         self.assertEqual(draft.annotations[0].field_ids, ["width", "hole"])
@@ -344,7 +345,7 @@ class SpecificationTests(unittest.TestCase):
             "questions": [{"id": "q1", "question": "Which short side has the rim?", "related_feature": "main_body"}],
             "annotations": [{"id": "ann1", "x": 0.5, "y": 0.1, "text": "Outer length 80mm", "links_to": "outer_length"}],
         }
-        draft = ai.DraftSpecification.model_validate(ai.normalize_draft_specification_payload(payload))
+        draft = ai.DraftSpecification.model_validate(normalize_draft_specification_payload(payload))
         self.assertIsNone(draft.features[1].placement.origin)
         self.assertEqual(draft.dimensions[0].source, "drawing")
         self.assertEqual(draft.questions[0].field_id, "main_body")
@@ -359,12 +360,12 @@ class SpecificationTests(unittest.TestCase):
                 "assumptions": [], "questions": [], "annotations": [],
             }
         }
-        draft = DraftSpecification.model_validate(ai.normalize_draft_specification_payload(payload))
+        draft = DraftSpecification.model_validate(normalize_draft_specification_payload(payload))
         self.assertEqual(draft.features[0].id, "base")
 
     def test_draft_normalizes_deepseek_draft_specification_wrapper(self):
         payload = {"draft_specification": {"title": "Plate", "dimensions": [], "features": [{"id": "base", "label": "Base", "type": "box", "operation": "add"}], "assumptions": [], "questions": [], "annotations": []}}
-        draft = DraftSpecification.model_validate(ai.normalize_draft_specification_payload(payload))
+        draft = DraftSpecification.model_validate(normalize_draft_specification_payload(payload))
         self.assertEqual(draft.features[0].id, "base")
 
     def test_confirmed_specification_compiles_to_trusted_feature_graph(self):

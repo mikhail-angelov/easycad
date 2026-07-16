@@ -2,7 +2,8 @@ from __future__ import annotations
 
 import unittest
 
-from app.ai_generation import project_from_plan
+from app.feature_compiler import compile_project_feature_graph
+from app.models import CADParameter, CADProject, CADSource, FeatureGraph, SourceInfo
 from app.source_images import get_source_image, store_source_image
 
 
@@ -17,26 +18,15 @@ class SourceImageTests(unittest.TestCase):
         self.assertTrue(first_ref.startswith("memory://sha256/"))
 
     def test_project_keeps_source_reference_without_embedding_image_by_default(self):
-        project = project_from_plan(
-            {
-                "title": "Plate",
-                "parameters": [{"id": "length", "label": "Length", "value": 10}],
-                "feature_graph": {
-                    "operations": [
-                        {
-                            "id": "base",
-                            "type": "box",
-                            "operation": "add",
-                            "parameters": {"length": "length", "width": 5, "height": 2},
-                            "status": "implemented",
-                            "implementation": "base",
-                        }
-                    ]
-                },
-            },
-            {"title": "Plate", "units": "mm"},
-            {"filename": "plate.png", "mime_type": "image/png", "width": 640, "height": 480},
-            b"source-image",
+        image_ref, image_sha256 = store_source_image(b"source-image")
+        project = compile_project_feature_graph(
+            CADProject(
+                title="Plate",
+                source=SourceInfo(filename="plate.png", mime_type="image/png", image_ref=image_ref, image_sha256=image_sha256, width=640, height=480),
+                parameters={"length": CADParameter(label="Length", value=10)},
+                feature_graph=FeatureGraph.model_validate({"operations": [{"id": "base", "type": "box", "operation": "add", "parameters": {"length": "length", "width": 5, "height": 2}, "status": "implemented", "implementation": "base"}]}),
+                cad=CADSource(source="", source_kind="compiled"),
+            )
         )
 
         self.assertEqual(project.source.width, 640)
