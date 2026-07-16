@@ -9,6 +9,7 @@ import warnings
 from datetime import datetime
 from pathlib import Path
 from typing import Any, Dict, List, Optional
+from uuid import uuid4
 
 import httpx
 from fastapi import HTTPException
@@ -35,6 +36,7 @@ MAX_UPLOAD_BYTES = 20 * 1024 * 1024
 MAX_IMAGE_DIMENSION = 12000
 OPENROUTER_URL = "https://openrouter.ai/api/v1/chat/completions"
 LLM_LOG_DIR = Path(os.environ.get("EASYCAD_LLM_LOG_DIR", "logs"))
+MAX_DRAFT_PLANNER_TURNS = 2
 logger = logging.getLogger("easycad.llm")
 MODEL_ALIASES = {
     "gemini_3_flash": "google/gemini-3-flash-preview",
@@ -293,13 +295,15 @@ async def plan_draft_specification(
         "required_assumption_ids": {item.id for item in previous_specification.assumptions} if previous_specification else set(),
         **_confirmed_replan_snapshots(previous_specification, user_inputs or {}),
     }
-    try:
-        return await _run_draft_builder(url, api_key, payload, analysis, **builder_kwargs)
-    except GenerationError as exc:
-        if exc.stage != "draft_specification" or "tool-call limit" not in str(exc):
-            raise
-        logger.warning("Restarting draft planner after provider tool-call loop")
-        return await _run_draft_builder(url, api_key, payload, analysis, **builder_kwargs)
+    return await _run_draft_builder(
+        url,
+        api_key,
+        payload,
+        analysis,
+        planner_run_id=uuid4().hex[:12],
+        planner_mode="replan" if previous_specification else "initial",
+        **builder_kwargs,
+    )
 
 
 def _confirmed_replan_snapshots(
@@ -487,6 +491,8 @@ async def _run_draft_builder(
     preserved_dimensions: Dict[str, Dict[str, Any]] | None = None,
     preserved_features: Dict[str, Dict[str, Any]] | None = None,
     preserved_assumptions: Dict[str, Dict[str, Any]] | None = None,
+    planner_run_id: str | None = None,
+    planner_mode: str = "initial",
 ) -> DraftSpecification:
     builder = DraftBuilder(analysis)
     messages = list(payload["messages"])
@@ -497,27 +503,51 @@ async def _run_draft_builder(
         "X-Title": "EasyCAD",
     }
     last_results: List[Dict[str, Any]] = []
-    for _ in range(48):
+    for turn in range(1, MAX_DRAFT_PLANNER_TURNS + 1):
         try:
             async with httpx.AsyncClient(timeout=120) as client:
                 response = await client.post(url, headers=headers, json={**payload, "messages": messages})
         except httpx.HTTPError as exc:
-            detail = {"exception_type": type(exc).__name__, "exception_message": str(exc)}
+            detail = {
+                "exception_type": type(exc).__name__,
+                "exception_message": str(exc),
+                "planner_run_id": planner_run_id,
+                "planner_mode": planner_mode,
+            }
             logger.exception("LLM request failed stage=draft_specification detail=%s", detail)
             raise GenerationError("draft_specification", "Provider request failed", detail) from exc
         if response.status_code >= 400:
-            detail = {"status_code": response.status_code, "response": response.text[:4000]}
+            detail = {
+                "status_code": response.status_code,
+                "response": response.text[:4000],
+                "planner_run_id": planner_run_id,
+                "planner_mode": planner_mode,
+            }
             logger.error("LLM request failed stage=draft_specification detail=%s", detail)
             raise GenerationError("draft_specification", f"Provider returned HTTP {response.status_code}", detail)
         try:
             response_payload = response.json()
             message = response_payload["choices"][0]["message"]
         except (KeyError, IndexError, ValueError, TypeError) as exc:
-            detail = {"response": response.text[:4000], "exception_type": type(exc).__name__}
+            detail = {
+                "response": response.text[:4000],
+                "exception_type": type(exc).__name__,
+                "planner_run_id": planner_run_id,
+                "planner_mode": planner_mode,
+            }
             logger.exception("LLM response was malformed stage=draft_specification detail=%s", detail)
             raise GenerationError("draft_specification", "Provider returned a malformed tool response", detail) from exc
         calls = message.get("tool_calls", [])
-        _log_model_response("draft_specification", {**payload, "messages": messages}, 1, response.status_code, message.get("content", ""), response_payload)
+        _log_model_response(
+            "draft_specification",
+            {**payload, "messages": messages},
+            turn,
+            response.status_code,
+            message.get("content", ""),
+            response_payload,
+            planner_run_id=planner_run_id,
+            planner_mode=planner_mode,
+        )
         if not calls:
             raise GenerationError("draft_specification", "Planner stopped before finish_draft")
         messages.append(message)
@@ -583,7 +613,16 @@ async def _run_draft_builder(
             last_results.append({"tool": name, **result})
             last_results = last_results[-8:]
             messages.append({"role": "tool", "tool_call_id": call["id"], "content": json.dumps(result)})
-    raise GenerationError("draft_specification", "Planner exceeded tool-call limit", {"last_tool_results": last_results})
+    raise GenerationError(
+        "draft_specification",
+        f"Planner exceeded the {MAX_DRAFT_PLANNER_TURNS}-turn limit before completing the draft",
+        {
+            "last_tool_results": last_results,
+            "max_provider_turns": MAX_DRAFT_PLANNER_TURNS,
+            "planner_run_id": planner_run_id,
+            "planner_mode": planner_mode,
+        },
+    )
 
 
 def submit_draft_specification_tool_schema() -> Dict[str, Any]:
@@ -720,6 +759,9 @@ def _log_model_response(
     status_code: int,
     content: Any,
     response_payload: Any,
+    *,
+    planner_run_id: str | None = None,
+    planner_mode: str | None = None,
 ) -> None:
     record = {
         "created_at": datetime.utcnow().isoformat() + "Z",
@@ -730,6 +772,9 @@ def _log_model_response(
         "content": content,
         "response": response_payload,
     }
+    if planner_run_id is not None:
+        record["planner_run_id"] = planner_run_id
+        record["planner_mode"] = planner_mode
     try:
         LLM_LOG_DIR.mkdir(parents=True, exist_ok=True)
         with (LLM_LOG_DIR / "llm_responses.jsonl").open("a", encoding="utf-8") as handle:
@@ -737,12 +782,18 @@ def _log_model_response(
     except OSError as exc:
         logger.warning("Failed to write LLM response log: %s", exc)
 
+    planner_context = (
+        f" planner_run_id={planner_run_id} planner_mode={planner_mode}"
+        if planner_run_id is not None
+        else ""
+    )
     logger.warning(
-        "LLM response stage=%s model=%s attempt=%s status=%s %s",
+        "LLM response stage=%s model=%s attempt=%s status=%s%s %s",
         stage,
         request_payload.get("model"),
         attempt,
         status_code,
+        planner_context,
         _response_log_summary(content, response_payload),
     )
 
