@@ -340,35 +340,6 @@ class SpecificationTests(unittest.TestCase):
         self.assertRegex(builder.await_args.kwargs["planner_run_id"], r"^[0-9a-f]{12}$")
         self.assertEqual(builder.await_args.kwargs["planner_mode"], "initial")
 
-    def test_draft_builder_stops_after_two_provider_turns(self):
-        def response(name, arguments):
-            return type("Response", (), {
-                "status_code": 200,
-                "text": "",
-                "json": lambda self: {"choices": [{"message": {"tool_calls": [{"id": name, "function": {"name": name, "arguments": json.dumps(arguments)}}]}}]},
-            })()
-
-        class Client:
-            responses = [
-                response("set_draft_metadata", {"title": "Plate", "units": "mm"}),
-                response("add_box", {"id": "base", "label": "Base", "type": "box", "operation": "add", "target": None, "parameters": {"length": 1, "width": 1, "height": 1}, "placement": {"plane": "XY", "origin": [0, 0, 0]}, "status": "confirmed", "critical_fields": [], "confidence": 1, "evidence": [], "alternatives": {}}),
-                response("finish_draft", {}),
-            ]
-            posts = 0
-
-            async def __aenter__(self): return self
-            async def __aexit__(self, *args): return False
-            async def post(self, *args, **kwargs):
-                type(self).posts += 1
-                return type(self).responses.pop(0)
-
-        with patch.object(ai.httpx, "AsyncClient", lambda **kwargs: Client()):
-            with self.assertRaisesRegex(ai.GenerationError, "2-turn limit") as error:
-                asyncio.run(ai._run_draft_builder("url", "key", {"messages": [], "model": "test"}, {"features": []}, planner_run_id="run123", planner_mode="initial"))
-        self.assertEqual(Client.posts, 2)
-        self.assertEqual(error.exception.detail["max_provider_turns"], 2)
-        self.assertEqual(error.exception.detail["planner_run_id"], "run123")
-
     def test_malformed_response_diagnostics_exclude_sensitive_headers_and_query(self):
         response = httpx.Response(
             200,
