@@ -155,8 +155,68 @@ def validate_generation_geometry(project: CADProject, result: Dict[str, object],
         raise RunnerError(
             "geometry_validation",
             "Generated model bounding box does not match declared overall dimensions",
-            {"mismatches": mismatches, "bounding_box": bbox, "expected": expected},
+            {
+                "mismatches": mismatches,
+                "bounding_box": bbox,
+                "expected": expected,
+                "feature_extent_hints": _additive_feature_extent_hints(project, expected),
+            },
         )
+
+
+def _additive_feature_extent_hints(project: CADProject, expected: Dict[str, float | None], tolerance: float = 1.0) -> list[str]:
+    """Name the additive features whose resolved extents fall outside the declared overall size."""
+    try:
+        values = concrete_parameters(project, {})
+    except RunnerError:
+        return []
+
+    def resolved(value: object) -> float:
+        if isinstance(value, str):
+            value = values[value]
+        if not isinstance(value, (int, float)):
+            raise KeyError(str(value))
+        return float(value)
+
+    hints: list[str] = []
+    axes = ("x", "y", "z")
+    for operation in project.feature_graph.operations:
+        if operation.operation != "add" or operation.placement is None:
+            continue
+        plane = (operation.placement.plane or "XY").upper()
+        try:
+            origin = [resolved(value) for value in (operation.placement.origin or [0, 0, 0])]
+            feature_type = operation.type.lower()
+            if feature_type == "box" and plane == "XY":
+                spans = {
+                    "x": (0.0, resolved(operation.parameters.get("length"))),
+                    "y": (0.0, resolved(operation.parameters.get("width"))),
+                    "z": (0.0, resolved(operation.parameters.get("height"))),
+                }
+            elif feature_type == "cylinder":
+                radius = resolved(operation.parameters.get("radius"))
+                height = resolved(operation.parameters.get("height"))
+                in_plane = {axis.lower() for axis in plane}
+                spans = {axis: (-radius, radius) for axis in in_plane}
+                spans[({"x", "y", "z"} - in_plane).pop()] = (0.0, height)
+            else:
+                continue
+        except (KeyError, TypeError, ValueError):
+            continue
+        for index, axis in enumerate(axes):
+            if axis not in spans:
+                continue
+            low = spans[axis][0] + origin[index]
+            high = spans[axis][1] + origin[index]
+            limit = expected.get(axis)
+            if limit is None:
+                continue
+            if high > limit + tolerance or low < -tolerance:
+                hints.append(
+                    f"{operation.id} spans {axis}={low:g}..{high:g}, outside the declared overall "
+                    f"{axis} extent 0..{limit:g}; correct its placement.origin or its size"
+                )
+    return hints
 
 def validate_feature_coverage(project: CADProject) -> None:
     unresolved_ids = [
@@ -445,6 +505,9 @@ def build_repair_hints(detail: Dict[str, object]) -> list[str]:
             hints.append("Confirm the cut plane, origin, and depth so the cutting solid intersects its target.")
         elif "expected" in text and "got" in text:
             hints.append(f"Expected geometry: {text}.")
+    extent_hints = detail.get("feature_extent_hints")
+    if isinstance(extent_hints, list):
+        hints.extend(str(hint) for hint in extent_hints)
     return hints or ["Describe the intended feature position, direction, and dimensions so the planner can revise it."]
 
 

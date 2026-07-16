@@ -187,6 +187,8 @@ def _user_dimension_value(dimension: dict) -> float:
         return 2.0
     if "corner radius" in dimension.get("label", "").lower():
         return 1.0
+    if "midpoint" in f"{dimension['id']} {dimension.get('label', '')}".lower():
+        return 30.0
     if "distance" in dimension.get("label", "").lower():
         return 1.5
     if "total length" in dimension.get("label", "").lower():
@@ -202,7 +204,8 @@ def _assert_bracket_front_end_geometry(specification: dict) -> None:
     features = {item["id"]: item for item in specification["features"]}
     round_end = next(
         item for item in features.values()
-        if item["type"] == "cylinder" and item["operation"] == "add" and item["parameters"].get("radius") in {"base_radius", "base_end_radius"}
+        if item["type"] == "cylinder" and item["operation"] == "add"
+        and _coordinate_value(item["parameters"].get("radius"), values) == 30
     )
     hole = next(item for item in features.values() if item["type"] == "through_hole")
     for feature in (round_end, hole):
@@ -216,10 +219,27 @@ def _coordinate_value(value: object, values: dict[str, float]) -> float:
     return values[value] if isinstance(value, str) else float(value)
 
 
+def _groove_radius(feature: dict, values: dict[str, float]) -> float | None:
+    """Resolved radius of a circular cut feature, or None when it is not one."""
+    if feature["operation"] != "cut":
+        return None
+    try:
+        if feature["type"] == "cylinder":
+            return _coordinate_value(feature["parameters"]["radius"], values)
+        if feature["type"] == "extrude" and (feature.get("profile") or {}).get("type") == "circle":
+            profile = feature["profile"]["dimensions"]
+            if "radius" in profile:
+                return _coordinate_value(profile["radius"], values)
+            return _coordinate_value(profile["diameter"], values) / 2
+    except (KeyError, ValueError, TypeError):
+        return None
+    return None
+
+
 def _assert_bracket_top_groove_geometry(specification: dict) -> None:
     """Fixture 3's R12 cut is on the upright end face and runs through its 28 mm depth."""
     values = validate_specification(DraftSpecification.model_validate(specification))
-    groove = next(item for item in specification["features"] if item["id"] == "top_groove")
+    groove = next(item for item in specification["features"] if _groove_radius(item, values) == 12)
     unittest.TestCase().assertEqual(groove["operation"], "cut")
     unittest.TestCase().assertEqual(groove["placement"]["plane"], "YZ")
     if groove["type"] == "cylinder":

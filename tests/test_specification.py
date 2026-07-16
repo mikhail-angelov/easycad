@@ -212,6 +212,102 @@ class SpecificationTests(unittest.TestCase):
         self.assertTrue(builder.set_metadata({"title": "Plate", "units": "mm"})["ok"])
         self.assertFalse(builder.set_metadata({"title": "Renamed plate", "units": "mm"})["ok"])
 
+    def test_draft_builder_rejects_dangling_question_and_annotation_references_at_add_time(self):
+        builder = DraftBuilder({})
+        self.assertTrue(builder.set_metadata({"title": "Bracket", "units": "mm"})["ok"])
+        self.assertTrue(builder.add_dimension({"id": "width", "label": "Width", "value": 60})["ok"])
+        self.assertTrue(
+            builder.add_feature(
+                {"id": "base", "label": "Base", "type": "box", "operation": "add",
+                 "parameters": {"length": 40, "width": "width", "height": 20}}
+            )["ok"]
+        )
+
+        dangling = builder.add_question({"id": "groove_q", "field_id": "top_groove", "prompt": "Groove direction?"})
+        self.assertFalse(dangling["ok"])
+        self.assertIn("top_groove", dangling["message"])
+        self.assertIn("add", dangling["message"].lower())
+        self.assertEqual(builder.draft.questions, [])
+
+        self_reference = builder.add_question({"id": "groove_q", "field_id": "groove_q", "prompt": "Groove direction?"})
+        self.assertFalse(self_reference["ok"])
+
+        self.assertTrue(builder.add_question({"id": "base_q", "field_id": "base", "prompt": "Base length?"})["ok"])
+        self.assertTrue(builder.add_question({"id": "width_q", "field_id": "width", "prompt": "Width value?"})["ok"])
+
+        dangling_annotation = builder.add_annotation(
+            {"id": "ann_groove", "field_id": "top_groove", "x": 0.5, "y": 0.5, "label": "R12"}
+        )
+        self.assertFalse(dangling_annotation["ok"])
+        self.assertIn("top_groove", dangling_annotation["message"])
+        self.assertEqual(builder.draft.annotations, [])
+
+        self.assertTrue(
+            builder.add_annotation(
+                {"id": "ann_base", "field_id": "base", "field_ids": ["base_q", "width"], "x": 0.5, "y": 0.5, "label": "Base"}
+            )["ok"]
+        )
+        self.assertEqual(builder.reference_issues(), [])
+
+    def test_draft_builder_replaces_stored_items_when_an_id_is_repeated(self):
+        builder = DraftBuilder({})
+        self.assertTrue(builder.set_metadata({"title": "Bracket", "units": "mm"})["ok"])
+        self.assertTrue(builder.add_dimension({"id": "width", "label": "Width", "value": 60})["ok"])
+        corrected = builder.add_dimension({"id": "width", "label": "Width", "value": 62})
+        self.assertTrue(corrected["ok"])
+        self.assertTrue(corrected["replaced"])
+        self.assertEqual(len(builder.draft.dimensions), 1)
+        self.assertEqual(builder.draft.dimensions[0].value, 62)
+
+        base = {"id": "base", "label": "Base", "type": "box", "operation": "add",
+                "parameters": {"length": 40, "width": "width", "height": 20}}
+        self.assertTrue(builder.add_feature(base)["ok"])
+        replaced = builder.add_feature({**base, "parameters": {**base["parameters"], "height": 25}})
+        self.assertTrue(replaced["ok"])
+        self.assertTrue(replaced["replaced"])
+        self.assertEqual(len(builder.draft.features), 1)
+        self.assertEqual(builder.draft.features[0].parameters["height"], 25)
+
+        cross_namespace = builder.add_feature({**base, "id": "width"})
+        self.assertFalse(cross_namespace["ok"])
+
+    def test_draft_builder_normalizes_compact_placement_strings(self):
+        builder = DraftBuilder({})
+        self.assertTrue(builder.set_metadata({"title": "Bracket", "units": "mm"})["ok"])
+        self.assertTrue(builder.add_dimension({"id": "center_x", "label": "Centre X", "value": 48})["ok"])
+        result = builder.add_feature(
+            {"id": "base", "label": "Base", "type": "cylinder", "operation": "add",
+             "parameters": {"radius": 30, "height": 20}, "placement": "XY(center_x, 30, 0)"}
+        )
+        self.assertTrue(result["ok"], result)
+        placement = builder.draft.features[0].placement
+        self.assertEqual(placement.plane, "XY")
+        self.assertEqual(placement.origin, ["center_x", 30.0, 0.0])
+
+        bare_plane = builder.add_feature(
+            {"id": "boss", "label": "Boss", "type": "cylinder", "operation": "add", "target": "base",
+             "parameters": {"radius": 5, "height": 10}, "placement": "YZ"}
+        )
+        self.assertTrue(bare_plane["ok"], bare_plane)
+        self.assertEqual(builder.draft.features[1].placement.plane, "YZ")
+
+        json_encoded = builder.add_feature(
+            {"id": "hole", "label": "Hole", "type": "through_hole", "operation": "cut", "target": "base",
+             "parameters": {"diameter": 10, "depth": 20},
+             "placement": "{\"origin\": [\"center_x\", 30, 0], \"plane\": \"XY\"}"}
+        )
+        self.assertTrue(json_encoded["ok"], json_encoded)
+        self.assertEqual(builder.draft.features[2].placement.origin, ["center_x", 30, 0])
+
+        loose_text = builder.add_feature(
+            {"id": "groove", "label": "Groove", "type": "cylinder", "operation": "cut", "target": "base",
+             "parameters": {"radius": 12, "height": 28},
+             "placement": "origin: [0, 30, 56], axis: [1, 0, 0], plane: YZ"}
+        )
+        self.assertTrue(loose_text["ok"], loose_text)
+        self.assertEqual(builder.draft.features[3].placement.plane, "YZ")
+        self.assertEqual(builder.draft.features[3].placement.origin, [0.0, 30.0, 56.0])
+
     def test_text_feature_accepts_text_dimension_and_signed_cut_distance(self):
         specification = DraftSpecification(
             dimensions=[

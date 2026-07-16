@@ -222,7 +222,8 @@ async def plan_draft_specification(
         "Build a DraftSpecification by calling the supplied tools until finish_draft. Do not return CAD code, Feature Graph, or JSON prose. "
         "Start with set_draft_metadata immediately. Do not spend a response explaining or reasoning about the drawing before making a tool call. "
         "You operate a server-owned builder: call set_draft_metadata exactly once; add each dimension exactly once; add each feature once with its matching add_<type> tool; then add assumptions, questions, annotations, and call finish_draft exactly once. "
-        "After a tool result with ok=true, that item is stored: never call that tool for the same ID again. After ok=false, correct and retry only that item. "
+        "After a tool result with ok=true, that item is stored. Re-calling an add_ tool with an already-stored ID replaces that stored item: "
+        "use this only to correct an item that a later tool result reports as wrong; never repeat an unchanged item. After ok=false, correct and retry only that item. "
         "When all intended items have ok=true results, call finish_draft immediately. Never omit finish_draft and never continue after it. "
         "Each dimension requires id, label, value or expression, unit, source, confidence, status, critical, evidence. "
         "Each feature requires id, label, type, operation, target, parameters, placement, status, critical_fields, confidence, evidence. "
@@ -317,10 +318,12 @@ def _confirmed_replan_snapshots(
             "preserved_features": {},
             "preserved_assumptions": {},
         }
+    clarifications = user_inputs.get("clarifications", {})
+    build_repair_requested = bool(str(clarifications.get("build_repair") or "").strip())
     questions = {item.id: item.field_id for item in previous_specification.questions}
     clarified_fields = {
         questions[question_id]
-        for question_id, text in user_inputs.get("clarifications", {}).items()
+        for question_id, text in clarifications.items()
         if text and question_id in questions
     }
 
@@ -337,7 +340,9 @@ def _confirmed_replan_snapshots(
             payload.update({"value": direct_values[item.id], "expression": None, "status": "confirmed", "source": "manual"})
         dimensions[item.id] = payload
     accepted_features = set(user_inputs.get("accepted_feature_ids", []))
-    features = {
+    # A build_repair diagnostic invalidates accepted feature geometry: the planner must be free to
+    # correct any feature's placement or parameters, so features are not byte-exact preserved then.
+    features = {} if build_repair_requested else {
         item.id: {**item.model_dump(mode="json"), "status": "confirmed" if item.id in accepted_features else item.status}
         for item in previous_specification.features
         if (item.status == "confirmed" or item.id in accepted_features) and not superseded(item.id)
@@ -586,19 +591,33 @@ async def _run_draft_builder(
                             ("feature", preserved_features or {}, {item.id: item.model_dump(mode="json") for item in builder.draft.features}),
                             ("assumption", preserved_assumptions or {}, {item.id: item.model_dump(mode="json") for item in builder.draft.assumptions}),
                         )
-                        changed = [
-                            f"{kind}:{item_id}"
+                        changed_items = [
+                            (kind, item_id, expected_payload)
                             for kind, expected, actual in preserved_items
-                            for item_id, payload in expected.items()
-                            if actual.get(item_id) != payload
+                            for item_id, expected_payload in expected.items()
+                            if actual.get(item_id) != expected_payload
                         ]
                         reference_issues = builder.reference_issues()
-                        if changed or reference_issues:
+                        if changed_items or reference_issues:
+                            changed = [f"{kind}:{item_id}" for kind, item_id, _ in changed_items]
+                            restore_hint = (
+                                (
+                                    f"Confirmed items changed without a clarification: {', '.join(changed)}. "
+                                    "Restore each by calling its add_ tool again with the same ID (a repeated ID replaces "
+                                    "the stored item) and exactly the stored payload. Expected payloads: "
+                                    + json.dumps(
+                                        {item_id: expected_payload for _, item_id, expected_payload in changed_items[:3]},
+                                        ensure_ascii=False,
+                                    )
+                                )
+                                if changed_items
+                                else ""
+                            )
                             result = {
                                 "ok": False,
                                 "field": "complete_replan",
                                 "message": "; ".join([
-                                    *([f"Confirmed items changed without a clarification: {', '.join(changed)}"] if changed else []),
+                                    *([restore_hint] if restore_hint else []),
                                     *reference_issues,
                                 ]),
                             }
@@ -616,6 +635,7 @@ async def _run_draft_builder(
             last_results.append({"tool": name, **result})
             last_results = last_results[-8:]
             messages.append({"role": "tool", "tool_call_id": call["id"], "content": json.dumps(result)})
+    _dump_planner_context(planner_run_id, {**payload, "messages": messages})
     raise GenerationError(
         "draft_specification",
         f"Planner exceeded the {MAX_DRAFT_PLANNER_TURNS}-turn limit before completing the draft",
@@ -626,6 +646,17 @@ async def _run_draft_builder(
             "planner_mode": planner_mode,
         },
     )
+
+
+def _dump_planner_context(planner_run_id: str | None, request_payload: Dict[str, Any]) -> None:
+    """Persist the complete provider conversation of a failed planner run for offline replay."""
+    try:
+        LLM_LOG_DIR.mkdir(parents=True, exist_ok=True)
+        path = LLM_LOG_DIR / f"planner_context_{planner_run_id or 'unknown'}.json"
+        path.write_text(json.dumps(request_payload, ensure_ascii=False, indent=2), encoding="utf-8")
+        logger.warning("Planner context dumped to %s", path)
+    except OSError as exc:
+        logger.warning("Failed to dump planner context: %s", exc)
 
 
 def _safe_response_diagnostics(response: httpx.Response, provider_url: str) -> Dict[str, object]:
@@ -792,6 +823,7 @@ def _log_model_response(
         "model": request_payload.get("model"),
         "content": content,
         "response": response_payload,
+        "request_message_count": len(request_payload.get("messages", []) or []),
     }
     if planner_run_id is not None:
         record["planner_run_id"] = planner_run_id
