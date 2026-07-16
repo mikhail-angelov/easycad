@@ -361,3 +361,29 @@ The repository has no retained legacy 3D viewer to reuse. A static render artifa
 ### Ruled-out approaches
 
 - Tried finding an old OrbitControls/STL viewer in git history; none was present in the application history.
+
+## 2026-07-16 — Verify the round-end bracket before STL export
+
+### Goal
+
+Prevent fixture 3 from producing a valid STL whose R30 end and concentric hole are placed on the side edge instead of the end face.
+
+### Golden path
+
+1. In the draft-planner coordinate contract, declare `base_end_center_y = base_width / 2` as a derived dimension.
+2. Use the dimension ID in both the end-cylinder and concentric through-hole origins: `[straight_length, base_end_center_y, 0]`.
+3. Make the real fixture-3 flow resolve those origins and assert `[48, 30, 0]` before Build.
+4. Build the checked specification and export its STL.
+
+### Verification
+
+On 2026-07-16, a real DeepSeek response for `fixtures/3.png` produced a derived centre dimension and both features resolved to `[48, 30, 0]`. The checked response compiled and exported a 45,484-byte STL.
+
+### Failure pattern avoided
+
+An STL can be syntactically and semantically buildable while an additive end cylinder and its through-hole use the full width as Y, placing the round end on a side edge.
+
+### Ruled-out approaches
+
+- Tried asserting only that Build returned `success`; it missed the side-edge geometry.
+- Tried allowing `width/2` directly in `placement.origin`; tool contracts reject executable expressions there.
