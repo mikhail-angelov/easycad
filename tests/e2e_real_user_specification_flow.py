@@ -9,6 +9,8 @@ from pathlib import Path
 from fastapi.testclient import TestClient
 
 from app.main import app, load_env
+from app.models import DraftSpecification
+from app.specification import validate_specification
 
 
 ROOT = Path(__file__).resolve().parent.parent
@@ -53,6 +55,8 @@ class RealUserSpecificationFlowE2E(unittest.TestCase):
             set(item["id"] for item in initial["features"]).issubset(item["id"] for item in replanned["features"]),
             "replan removed a feature accepted by the user",
         )
+        if IMAGE.stem == "3":
+            _assert_bracket_front_end_geometry(replanned)
 
         build_payload = _build_with_one_user_geometry_correction(client, replanned)
         self.assertEqual(build_payload["status"], "success", build_payload.get("diagnostics"))
@@ -183,6 +187,26 @@ def _user_dimension_value(dimension: dict) -> float:
     if "upright height" in dimension.get("label", "").lower():
         return 36.0
     raise AssertionError(f"The user-flow fixture needs an explicit value for {dimension['id']}")
+
+
+def _assert_bracket_front_end_geometry(specification: dict) -> None:
+    """Fixture 3 has a round front end, not a circular feature on its side edge."""
+    values = validate_specification(DraftSpecification.model_validate(specification))
+    features = {item["id"]: item for item in specification["features"]}
+    round_end = next(
+        item for item in features.values()
+        if item["type"] == "cylinder" and item["operation"] == "add" and item["parameters"].get("radius") in {"base_radius", "base_end_radius"}
+    )
+    hole = next(item for item in features.values() if item["type"] == "through_hole")
+    for feature in (round_end, hole):
+        origin = feature["placement"]["origin"]
+        unittest.TestCase().assertEqual(_coordinate_value(origin[0], values), 48)
+        unittest.TestCase().assertEqual(_coordinate_value(origin[1], values), 30)
+        unittest.TestCase().assertEqual(_coordinate_value(origin[2], values), 0)
+
+
+def _coordinate_value(value: object, values: dict[str, float]) -> float:
+    return values[value] if isinstance(value, str) else float(value)
 
 
 if __name__ == "__main__":

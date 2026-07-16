@@ -219,16 +219,18 @@ class SpecificationTests(unittest.TestCase):
             "questions": [{"id": "width_question", "field_id": "width", "prompt": "Enter width"}],
             "annotations": [],
         }
-        with patch.object(ai, "_chat_json", AsyncMock(return_value=response)) as chat:
+        with patch.object(ai, "_run_draft_builder", AsyncMock(return_value=DraftSpecification.model_validate(response))) as builder:
             draft = asyncio.run(ai.plan_draft_specification({"features": []}, "", "key"))
         self.assertEqual(draft.questions[0].field_id, "width")
-        prompt = chat.await_args.args[2]["messages"][0]["content"]
+        prompt = builder.await_args.args[2]["messages"][0]["content"]
         self.assertIn("Do not return CAD code", prompt)
         self.assertIn("draft-compatible compiler types", prompt)
         self.assertIn("body and groove are observations", prompt)
         self.assertIn("a groove running along Y must use plane XZ", prompt)
         self.assertIn("through/сквозное is a confirmed instruction", prompt)
         self.assertIn("an XY box has length along X, width along Y, and height along Z", prompt)
+        self.assertIn("base_end_center_y = base_width / 2", prompt)
+        self.assertIn("[straight_length, base_end_center_y, 0]", prompt)
         self.assertIn("never use offset, center, position, depth, or centered_on_width", prompt)
 
     def test_draft_planner_preserves_the_complete_vision_analysis_for_replanning(self):
