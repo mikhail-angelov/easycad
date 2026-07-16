@@ -5,6 +5,8 @@ import asyncio
 import json
 from unittest.mock import AsyncMock, patch
 
+import httpx
+
 import app.ai_generation as ai
 from app.feature_compiler import OPERATION_CONTRACTS, draft_specification_operation_types
 from app.models import (
@@ -366,6 +368,20 @@ class SpecificationTests(unittest.TestCase):
         self.assertEqual(Client.posts, 2)
         self.assertEqual(error.exception.detail["max_provider_turns"], 2)
         self.assertEqual(error.exception.detail["planner_run_id"], "run123")
+
+    def test_malformed_response_diagnostics_exclude_sensitive_headers_and_query(self):
+        response = httpx.Response(
+            200,
+            content=b" \n\t",
+            headers={"content-type": "application/json", "x-request-id": "provider-request", "authorization": "secret"},
+        )
+
+        detail = ai._safe_response_diagnostics(response, "https://user:password@example.test/v1/chat?token=secret")
+
+        self.assertEqual(detail["provider_url"], "https://example.test/v1/chat")
+        self.assertEqual(detail["response_headers"], {"content-type": "application/json", "content-length": "3", "x-request-id": "provider-request"})
+        self.assertEqual(detail["response_content_length"], 3)
+        self.assertEqual(detail["response_prefix_hex"], "200a09")
 
     def test_draft_planner_does_not_allow_provider_analysis_to_replace_vision_analysis(self):
         response = {

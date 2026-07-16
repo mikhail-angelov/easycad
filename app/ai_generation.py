@@ -9,6 +9,7 @@ import warnings
 from datetime import datetime
 from pathlib import Path
 from typing import Any, Dict, List, Optional
+from urllib.parse import urlsplit, urlunsplit
 from uuid import uuid4
 
 import httpx
@@ -37,6 +38,7 @@ MAX_IMAGE_DIMENSION = 12000
 OPENROUTER_URL = "https://openrouter.ai/api/v1/chat/completions"
 LLM_LOG_DIR = Path(os.environ.get("EASYCAD_LLM_LOG_DIR", "logs"))
 MAX_DRAFT_PLANNER_TURNS = 2
+SAFE_RESPONSE_HEADER_NAMES = {"content-type", "content-length", "x-request-id", "cf-ray", "server", "via"}
 logger = logging.getLogger("easycad.llm")
 MODEL_ALIASES = {
     "gemini_3_flash": "google/gemini-3-flash-preview",
@@ -534,6 +536,7 @@ async def _run_draft_builder(
                 "exception_type": type(exc).__name__,
                 "planner_run_id": planner_run_id,
                 "planner_mode": planner_mode,
+                **_safe_response_diagnostics(response, url),
             }
             logger.exception("LLM response was malformed stage=draft_specification detail=%s", detail)
             raise GenerationError("draft_specification", "Provider returned a malformed tool response", detail) from exc
@@ -623,6 +626,24 @@ async def _run_draft_builder(
             "planner_mode": planner_mode,
         },
     )
+
+
+def _safe_response_diagnostics(response: httpx.Response, provider_url: str) -> Dict[str, object]:
+    """Record enough malformed-response context to debug a provider without logging secrets."""
+    parsed_url = urlsplit(provider_url)
+    safe_url = urlunsplit((parsed_url.scheme, parsed_url.netloc.rsplit("@", 1)[-1], parsed_url.path, "", ""))
+    headers = {
+        name.lower(): value
+        for name, value in response.headers.items()
+        if name.lower() in SAFE_RESPONSE_HEADER_NAMES
+    }
+    body = response.content
+    return {
+        "provider_url": safe_url,
+        "response_headers": headers,
+        "response_content_length": len(body),
+        "response_prefix_hex": body[:64].hex(),
+    }
 
 
 def submit_draft_specification_tool_schema() -> Dict[str, Any]:
