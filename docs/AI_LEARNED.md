@@ -387,3 +387,28 @@ An STL can be syntactically and semantically buildable while an additive end cyl
 
 - Tried asserting only that Build returned `success`; it missed the side-edge geometry.
 - Tried allowing `width/2` directly in `placement.origin`; tool contracts reject executable expressions there.
+
+## 2026-07-16 — Map the fixture-3 top groove to the upright end face
+
+### Goal
+
+Keep the R12 top groove in `fixtures/3.png` centred on the upright end face instead of cutting a side edge.
+
+### Golden path
+
+1. Use the drawing's coordinate convention: upright thickness 28 is X depth; width 60 is Y.
+2. Declare `groove_center_y = overall_width / 2`.
+3. Compile the groove as a cylinder cut on plane `YZ` with origin `[0, groove_center_y, overall_height]` and `height=upright_thickness`.
+4. In the real user-flow fixture, resolve and assert plane, origin, and height before Build.
+
+### Verification
+
+On 2026-07-16, a real DeepSeek tool loop returned `plane=YZ`, origin `[0, groove_center_y, overall_height]`, and height `upright_thickness`; the resulting fixture-3 STL was exported successfully.
+
+### Failure pattern avoided
+
+Using plane `XZ` makes the cylinder run through the 60 mm width instead of the 28 mm upright depth, producing a groove on a side edge or in a corner even though the CAD build succeeds.
+
+### Ruled-out approaches
+
+- Tried treating the visible top groove as an XZ/Y-axis cut; the drawing shows its semicircle on the upright end face, which requires YZ/X-axis extrusion.

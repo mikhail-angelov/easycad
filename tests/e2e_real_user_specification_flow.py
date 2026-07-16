@@ -57,6 +57,7 @@ class RealUserSpecificationFlowE2E(unittest.TestCase):
         )
         if IMAGE.stem == "3":
             _assert_bracket_front_end_geometry(replanned)
+            _assert_bracket_top_groove_geometry(replanned)
 
         build_payload = _build_with_one_user_geometry_correction(client, replanned)
         self.assertEqual(build_payload["status"], "success", build_payload.get("diagnostics"))
@@ -207,6 +208,20 @@ def _assert_bracket_front_end_geometry(specification: dict) -> None:
 
 def _coordinate_value(value: object, values: dict[str, float]) -> float:
     return values[value] if isinstance(value, str) else float(value)
+
+
+def _assert_bracket_top_groove_geometry(specification: dict) -> None:
+    """Fixture 3's R12 cut is on the upright end face and runs through its 28 mm depth."""
+    values = validate_specification(DraftSpecification.model_validate(specification))
+    groove = next(item for item in specification["features"] if item["id"] == "top_groove")
+    unittest.TestCase().assertEqual(groove["type"], "cylinder")
+    unittest.TestCase().assertEqual(groove["operation"], "cut")
+    unittest.TestCase().assertEqual(groove["placement"]["plane"], "YZ")
+    unittest.TestCase().assertEqual(_coordinate_value(groove["parameters"]["height"], values), 28)
+    origin = groove["placement"]["origin"]
+    unittest.TestCase().assertEqual(_coordinate_value(origin[0], values), 0)
+    unittest.TestCase().assertEqual(_coordinate_value(origin[1], values), 30)
+    unittest.TestCase().assertEqual(_coordinate_value(origin[2], values), 56)
 
 
 if __name__ == "__main__":
