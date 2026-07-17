@@ -308,6 +308,37 @@ class SpecificationTests(unittest.TestCase):
         self.assertEqual(builder.draft.features[3].placement.plane, "YZ")
         self.assertEqual(builder.draft.features[3].placement.origin, [0.0, 30.0, 56.0])
 
+    def test_zero_valued_dimension_is_valid_as_origin_coordinate_but_not_as_size(self):
+        specification = complete_specification()
+        specification.dimensions.append(
+            SpecificationDimension(id="zero_coord", label="Zero coordinate", value=0, status="confirmed")
+        )
+        specification.features[0].placement.origin = ["zero_coord", 0, 0]
+        values = validate_specification(specification)
+        self.assertEqual(values["zero_coord"], 0.0)
+
+        specification.features[0].parameters["height"] = "zero_coord"
+        with self.assertRaisesRegex(SpecificationValidationError, "zero_coord must be positive"):
+            validate_specification(specification)
+
+    def test_clarification_superseded_items_may_be_removed_in_replan(self):
+        specification = complete_specification()
+        specification.features.append(
+            SpecificationFeature(
+                id="rim", label="Rim", type="box", operation="add", target="base",
+                parameters={"length": 5, "width": 5, "height": 3}, status="assumed",
+            )
+        )
+        specification.questions.append(
+            SpecificationQuestion(id="rim_q", field_id="rim", prompt="Keep the rim?")
+        )
+        superseded = ai._clarification_superseded_ids(
+            specification, {"clarifications": {"rim_q": "Exclude the rim entirely."}}
+        )
+        self.assertEqual(superseded, {"rim"})
+        self.assertEqual(ai._clarification_superseded_ids(specification, {"clarifications": {}}), set())
+        self.assertEqual(ai._clarification_superseded_ids(None, {"clarifications": {"rim_q": "x"}}), set())
+
     def test_text_feature_accepts_text_dimension_and_signed_cut_distance(self):
         specification = DraftSpecification(
             dimensions=[

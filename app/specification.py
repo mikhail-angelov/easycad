@@ -98,10 +98,11 @@ def validate_specification(specification: DraftSpecification) -> Dict[str, float
         for feature in specification.features
         if feature.type == "text" and feature.operation == "cut" and isinstance(feature.parameters.get("distance"), str)
     }
+    # Sizes (parameters, profile, pattern) must be positive; placement-origin coordinates may be zero.
     positive_value_ids = {
         parameter_id
         for feature in specification.features
-        for parameter_id in _feature_parameter_references(feature)
+        for parameter_id in _feature_size_references(feature)
         if not (
             feature.type == "text"
             and feature.operation == "cut"
@@ -130,7 +131,8 @@ def validate_specification(specification: DraftSpecification) -> Dict[str, float
             continue
         value = float(dimension.value)
         allows_signed_value = dimension.id in signed_text_distance_ids - positive_value_ids
-        if not math.isfinite(value) or value == 0 or (value < 0 and not allows_signed_value):
+        allows_zero_value = dimension.id not in positive_value_ids
+        if not math.isfinite(value) or (value == 0 and not allows_zero_value) or (value < 0 and not allows_signed_value):
             field_ids.append(dimension.id)
             messages.append(f"{dimension.id} must be positive")
             continue
@@ -154,7 +156,7 @@ def validate_specification(specification: DraftSpecification) -> Dict[str, float
                 del pending[field_id]
                 progressed = True
                 continue
-            if not math.isfinite(value) or value <= 0:
+            if not math.isfinite(value) or value < 0 or (value == 0 and field_id in positive_value_ids):
                 field_ids.append(field_id)
                 messages.append(f"{field_id} expression must resolve to a positive value")
             else:
@@ -235,8 +237,8 @@ def validate_specification(specification: DraftSpecification) -> Dict[str, float
     return values
 
 
-def _feature_parameter_references(feature: SpecificationFeature) -> List[str]:
-    """Strings in executable geometry are dimension IDs, never free-form CAD expressions."""
+def _feature_size_references(feature: SpecificationFeature) -> List[str]:
+    """Dimension IDs used as sizes: feature parameters, profile geometry, and pattern fields."""
     references: List[str] = []
 
     def add(value: object) -> None:
@@ -260,10 +262,17 @@ def _feature_parameter_references(feature: SpecificationFeature) -> List[str]:
             feature.pattern.end_margin,
         ):
             add(value)
+    return references
+
+
+def _feature_parameter_references(feature: SpecificationFeature) -> List[str]:
+    """Strings in executable geometry are dimension IDs, never free-form CAD expressions."""
+    references = _feature_size_references(feature)
     placement = FeaturePlacement.model_validate(feature.placement)
     if placement.origin:
         for value in placement.origin:
-            add(value)
+            if isinstance(value, str):
+                references.append(value)
     return references
 
 

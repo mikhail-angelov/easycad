@@ -246,16 +246,23 @@ async def plan_draft_specification(
         "For fillet and chamfer, target is the feature ID; placement.reference is optional CadQuery edge-selector text such as '>Z', "
         "never a feature ID. Omit reference when the selected edges are not known. "
         "Use origin as exactly three numeric values or dimension IDs for translation, never expressions; never use offset, center, position, depth, or centered_on_width. "
+        "Write constant origin coordinates as plain numbers: use 0 directly and never declare a dimension for the constant zero. "
         "Use status confirmed only for unambiguous observed values. Use needs_input for missing critical data, conflicted for contradictions, "
         "and assumed only with an assumption describing the proposal. Every missing size, position, target, cut direction, or depth needed "
         "for a printable feature must become a required question. Never silently invent a dimension. "
+        "Ask a question only for a fact without which the solid cannot be built: a missing size, position, direction, target, or depth. "
+        "Secondary or cosmetic details such as whether an undimensioned edge is filleted or sharp are never questions: propose them as "
+        "assumed features with an assumption, or leave them out. Ask every necessary question in this draft; do not hold questions back "
+        "for a later round, and never re-ask about geometry an earlier answer or acceptance already settled. "
         "Annotations use normalized x and y coordinates from 0 to 1 and link to a dimension, feature, or question. "
     )
     if previous_specification is not None:
         prompt += (
             "Return a complete replacement DraftSpecification, not a patch. The previous specification is reference context only; "
             "use the drawing analysis and user inputs to resolve it again. Return every previous dimension, feature, and assumption: "
-            "never delete an existing item or return an empty graph. Keep their IDs and proposed geometry unless user input changes them, "
+            "never delete an existing item or return an empty graph. The one exception is an item that a clarification directly "
+            "overrides: correct it, and omit it only when the user's answer says to exclude or remove it. "
+            "Keep IDs and proposed geometry unless user input changes them, "
             "so the review UI remains connected. Treat user inputs as the latest clarification. "
             "User input contract: dimension_values are direct user-entered facts and must be returned as confirmed; "
             "accepted_assumption_ids and accepted_feature_ids are explicit user approvals and their matching items must be returned "
@@ -292,10 +299,11 @@ async def plan_draft_specification(
         "tools": draft_builder_tools(),
         "tool_choice": "required",
     }
+    superseded_ids = _clarification_superseded_ids(previous_specification, user_inputs or {})
     builder_kwargs = {
-        "required_dimension_ids": {item.id for item in previous_specification.dimensions} if previous_specification else set(),
-        "required_feature_ids": {item.id for item in previous_specification.features} if previous_specification else set(),
-        "required_assumption_ids": {item.id for item in previous_specification.assumptions} if previous_specification else set(),
+        "required_dimension_ids": {item.id for item in previous_specification.dimensions} - superseded_ids if previous_specification else set(),
+        "required_feature_ids": {item.id for item in previous_specification.features} - superseded_ids if previous_specification else set(),
+        "required_assumption_ids": {item.id for item in previous_specification.assumptions} - superseded_ids if previous_specification else set(),
         **_confirmed_replan_snapshots(previous_specification, user_inputs or {}),
     }
     return await _run_draft_builder(
@@ -309,6 +317,30 @@ async def plan_draft_specification(
     )
 
 
+def _clarification_superseded_ids(
+    previous_specification: DraftSpecification | None, user_inputs: Dict[str, Any]
+) -> set[str]:
+    """Previous item IDs a user clarification directly overrides; these may be corrected or removed."""
+    if previous_specification is None:
+        return set()
+    questions = {item.id: item.field_id for item in previous_specification.questions}
+    clarified_fields = {
+        questions[question_id]
+        for question_id, text in user_inputs.get("clarifications", {}).items()
+        if text and question_id in questions
+    }
+    superseded: set[str] = set()
+    for item in [*previous_specification.dimensions, *previous_specification.features, *previous_specification.assumptions]:
+        if any(field_id == item.id or field_id.startswith(f"{item.id}.") for field_id in clarified_fields):
+            superseded.add(item.id)
+    # An assumption about a superseded item is superseded with it: the clarification may restructure
+    # the geometry the assumption describes.
+    for assumption in previous_specification.assumptions:
+        if any(affected_id in superseded for affected_id in assumption.affected_ids):
+            superseded.add(assumption.id)
+    return superseded
+
+
 def _confirmed_replan_snapshots(
     previous_specification: DraftSpecification | None, user_inputs: Dict[str, Any]
 ) -> Dict[str, Dict[str, Dict[str, Any]]]:
@@ -320,15 +352,10 @@ def _confirmed_replan_snapshots(
         }
     clarifications = user_inputs.get("clarifications", {})
     build_repair_requested = bool(str(clarifications.get("build_repair") or "").strip())
-    questions = {item.id: item.field_id for item in previous_specification.questions}
-    clarified_fields = {
-        questions[question_id]
-        for question_id, text in clarifications.items()
-        if text and question_id in questions
-    }
+    superseded_ids = _clarification_superseded_ids(previous_specification, user_inputs)
 
     def superseded(item_id: str) -> bool:
-        return any(field_id == item_id or field_id.startswith(f"{item_id}.") for field_id in clarified_fields)
+        return item_id in superseded_ids
 
     dimensions = {}
     direct_values = user_inputs.get("dimension_values", {})
@@ -591,11 +618,18 @@ async def _run_draft_builder(
                             ("feature", preserved_features or {}, {item.id: item.model_dump(mode="json") for item in builder.draft.features}),
                             ("assumption", preserved_assumptions or {}, {item.id: item.model_dump(mode="json") for item in builder.draft.assumptions}),
                         )
+                        def _comparable(kind: str, payload: Dict[str, Any] | None) -> Dict[str, Any] | None:
+                            # affected_ids is bookkeeping that legitimately changes when a clarification
+                            # restructures the referenced geometry; the reviewed content is the rest.
+                            if kind == "assumption" and isinstance(payload, dict):
+                                return {key: value for key, value in payload.items() if key != "affected_ids"}
+                            return payload
+
                         changed_items = [
                             (kind, item_id, expected_payload)
                             for kind, expected, actual in preserved_items
                             for item_id, expected_payload in expected.items()
-                            if actual.get(item_id) != expected_payload
+                            if _comparable(kind, actual.get(item_id)) != _comparable(kind, expected_payload)
                         ]
                         reference_issues = builder.reference_issues()
                         if changed_items or reference_issues:

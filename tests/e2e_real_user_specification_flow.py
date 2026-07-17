@@ -53,9 +53,12 @@ class RealUserSpecificationFlowE2E(unittest.TestCase):
         self.assertTrue(validation_payload["valid"], validation_payload.get("diagnostics"))
         self.assertEqual(replanned["questions"], [], replanned["questions"])
         self.assertTrue(replanned["features"], "replan removed the complete feature graph")
+        clarified_ids = {question["field_id"] for question in initial["questions"]}
         self.assertTrue(
-            set(item["id"] for item in initial["features"]).issubset(item["id"] for item in replanned["features"]),
-            "replan removed a feature accepted by the user",
+            (set(item["id"] for item in initial["features"]) - clarified_ids).issubset(
+                item["id"] for item in replanned["features"]
+            ),
+            "replan removed a feature accepted by the user without a clarification",
         )
         if IMAGE.stem == "3":
             _assert_bracket_front_end_geometry(replanned)
@@ -170,6 +173,13 @@ def _user_answer(prompt: str) -> str:
         )
     if "hole" in lower or "concentric" in lower:
         return "Confirm the Ø24 hole is concentric with the R30 arc and cuts through the 20 mm base only."
+    if "rim" in lower:
+        return (
+            "Keep the rim as drawn: it runs from the top of the box along each short side, "
+            "5 mm wide and 3 mm tall. The inner cavity keeps uniform 3 mm walls and a 2 mm bottom."
+        )
+    if "cavity" in lower or "pocket" in lower or "wall" in lower:
+        return "The cavity is centered with uniform 3 mm walls, a 2 mm bottom, and 2 mm inner corner radius; it opens through the top."
     return "Confirm the proposed geometry shown in the drawing."
 
 
@@ -185,10 +195,25 @@ def _user_dimension_value(dimension: dict) -> float:
         return 2.0
     if "washer" in dimension.get("label", "").lower():
         return 2.0
-    if "corner radius" in dimension.get("label", "").lower():
+    label = f"{dimension['id']} {dimension.get('label', '')}".lower()
+    if "outer corner" in label:
+        return 5.0
+    if "inner corner" in label:
+        return 2.0
+    if "corner radius" in label:
         return 1.0
-    if "midpoint" in f"{dimension['id']} {dimension.get('label', '')}".lower():
+    if "midpoint" in label:
         return 30.0
+    if "wall" in label:
+        return 3.0
+    if "bottom" in label:
+        return 2.0
+    if "rim" in label and "width" in label:
+        return 5.0
+    if "rim" in label and ("height" in label or "thickness" in label):
+        return 3.0
+    if "rim" in label and "length" in label:
+        return 50.0
     if "distance" in dimension.get("label", "").lower():
         return 1.5
     if "total length" in dimension.get("label", "").lower():
