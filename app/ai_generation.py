@@ -35,7 +35,7 @@ MAX_UPLOAD_BYTES = 20 * 1024 * 1024
 MAX_IMAGE_DIMENSION = 12000
 OPENROUTER_URL = "https://openrouter.ai/api/v1/chat/completions"
 LLM_LOG_DIR = Path(os.environ.get("EASYCAD_LLM_LOG_DIR", "logs"))
-MAX_DRAFT_PLANNER_TURNS = 48
+MAX_DRAFT_PLANNER_TURNS = 12
 MAX_INCREMENTAL_REPLAN_TURNS = 16
 SAFE_RESPONSE_HEADER_NAMES = {"content-type", "content-length", "x-request-id", "cf-ray", "server", "via"}
 logger = logging.getLogger("easycad.llm")
@@ -157,9 +157,7 @@ async def plan_draft_specification(
 ) -> DraftSpecification:
     """Convert image observations into an editable pre-CAD specification."""
     freeform_instruction = str((user_inputs or {}).get("freeform_instruction", "")).strip()
-    incremental = previous_specification is not None and (
-        os.environ.get("EASYCAD_REPLAN_MODE", "full") == "incremental" or bool(freeform_instruction)
-    )
+    incremental = False
     openrouter_planner_model = os.environ.get("OPEN_ROUTER_PLANNER_MODEL", "").strip()
     if openrouter_planner_model:
         model = normalize_model_id(openrouter_planner_model)
@@ -173,7 +171,7 @@ async def plan_draft_specification(
     prompt = (
         "Build a DraftSpecification by calling the supplied tools until finish_draft. Do not return CAD code, Feature Graph, or JSON prose. "
         "Start with set_draft_metadata immediately. Do not spend a response explaining or reasoning about the drawing before making a tool call. "
-        "You operate a server-owned builder: call set_draft_metadata exactly once; add each dimension exactly once; add each feature once with its matching add_<type> tool; then add assumptions, questions, annotations, and call finish_draft exactly once. "
+        "You operate a server-owned builder: call set_draft_metadata once, add dimensions and features, then call finish_draft. "
         "After a tool result with ok=true, that item is stored. Re-calling an add_ tool with an already-stored ID replaces that stored item: "
         "use this only to correct an item that a later tool result reports as wrong; never repeat an unchanged item. After ok=false, correct and retry only that item. "
         "When all intended items have ok=true results, call finish_draft immediately. Never omit finish_draft and never continue after it. "
@@ -209,7 +207,13 @@ async def plan_draft_specification(
         "or a 100 x 100 x 10 mm box when none are readable. "
         "Annotations use normalized x and y coordinates from 0 to 1 and link to a dimension or feature. "
     )
-    if previous_specification is not None and not incremental:
+    if previous_specification is not None:
+        prompt += (
+            " This is a seeded, already-rendered model. Its metadata, dimensions, and features are already stored. "
+            "Do not call set_draft_metadata and do not repeat unchanged items. Apply the user's requested change by adding or "
+            "replacing only the affected items, then call finish_draft immediately."
+        )
+    if False:  # The old review/acceptance workflow has been removed.
         prompt += (
             "Return a complete replacement DraftSpecification, not a patch. The previous specification is reference context only; "
             "use the drawing analysis and user inputs to resolve it again. Return every previous dimension, feature, and assumption: "
@@ -267,8 +271,8 @@ async def plan_draft_specification(
     excluded_ids = sorted(set((user_inputs or {}).get("excluded_feature_ids", [])))
     if excluded_ids:
         prompt += f"\nExplicitly excluded feature IDs: {', '.join(excluded_ids)}. Do not return these features."
-    superseded_ids = _clarification_superseded_ids(previous_specification, user_inputs or {})
-    locked_items = _incremental_locked_items(previous_specification, user_inputs or {}) if incremental else set()
+    superseded_ids: set[str] = set()
+    locked_items: set[tuple[str, str]] = set()
     previous_payload: object = previous_specification.model_dump(mode="json") if previous_specification else None
     if incremental and previous_specification:
         open_items = {
@@ -297,23 +301,17 @@ async def plan_draft_specification(
         ],
         "temperature": 0.1,
         "max_tokens": 20000 if openrouter_planner_model else 5000,
-        "tools": draft_builder_tools(incremental=incremental),
+        "tools": draft_builder_tools(incremental=incremental, seeded=previous_specification is not None),
         "tool_choice": "required",
     }
-    builder_kwargs = ({"previous_specification": previous_specification, "locked_items": locked_items, "incremental": True,
-                       "answered_question_ids": {key for key, value in (user_inputs or {}).get("clarifications", {}).items() if str(value).strip()}} if incremental else {
-        "required_dimension_ids": set() if freeform_instruction else ({item.id for item in previous_specification.dimensions} - superseded_ids if previous_specification else set()),
-        "required_feature_ids": set() if freeform_instruction else ({item.id for item in previous_specification.features} - superseded_ids if previous_specification else set()),
-        "required_assumption_ids": set() if freeform_instruction else ({item.id for item in previous_specification.assumptions} - superseded_ids if previous_specification else set()),
-        **({} if freeform_instruction else _confirmed_replan_snapshots(previous_specification, user_inputs or {})),
-    })
+    builder_kwargs = {"previous_specification": previous_specification}
     return await _run_draft_builder(
         url,
         api_key,
         payload,
         analysis,
         planner_run_id=uuid4().hex[:12],
-        planner_mode="replan" if previous_specification else "initial",
+        planner_mode="initial",
         **builder_kwargs,
     )
 
@@ -496,7 +494,7 @@ def _pattern_schema(pattern_types: tuple[str, ...], value_schema: Dict[str, Any]
     return {"oneOf": variants}
 
 
-def draft_builder_tools(*, incremental: bool = False) -> List[Dict[str, Any]]:
+def draft_builder_tools(*, incremental: bool = False, seeded: bool = False) -> List[Dict[str, Any]]:
     schema = DraftSpecification.model_json_schema()["$defs"]
     feature_variants = _draft_feature_schema()["oneOf"]
     # Each function schema is sent independently.  Keep the shared definitions
@@ -505,18 +503,11 @@ def draft_builder_tools(*, incremental: bool = False) -> List[Dict[str, Any]]:
         return {**parameters, "$defs": schema}
 
     tools = [
-        {"type": "function", "function": {"name": "set_draft_metadata", "parameters": {"type": "object", "additionalProperties": False, "required": ["title", "units"], "properties": {"title": {"type": "string"}, "units": {"const": "mm"}}}}},
         {"type": "function", "function": {"name": "add_dimension", "parameters": with_definitions(schema["SpecificationDimension"])}},
-        {"type": "function", "function": {"name": "add_assumption", "parameters": {"type": "object", "additionalProperties": False, "required": ["id", "value", "rationale", "affected_ids", "status"], "properties": {"id": {"type": "string"}, "value": {"anyOf": [{"type": "number"}, {"type": "string"}]}, "rationale": {"type": "string"}, "affected_ids": {"type": "array", "items": {"type": "string"}}, "status": {"enum": ["assumed", "confirmed"]}}}}},
-        {"type": "function", "function": {"name": "add_question", "parameters": with_definitions(schema["SpecificationQuestion"])}},
-        {"type": "function", "function": {"name": "add_annotation", "parameters": with_definitions(schema["SpecificationAnnotation"])}},
         {"type": "function", "function": {"name": "finish_draft", "parameters": {"type": "object", "additionalProperties": False, "properties": {}}}},
     ]
-    if incremental:
-        tools.extend([
-            {"type": "function", "function": {"name": "remove_item", "parameters": {"type": "object", "additionalProperties": False, "required": ["item_type", "id", "reason"], "properties": {"item_type": {"enum": ["dimension", "feature", "assumption", "question", "annotation"]}, "id": {"type": "string"}, "reason": {"type": "string"}}}}},
-            {"type": "function", "function": {"name": "resolve_question", "parameters": {"type": "object", "additionalProperties": False, "required": ["id"], "properties": {"id": {"type": "string"}}}}},
-        ])
+    if not seeded:
+        tools.insert(0, {"type": "function", "function": {"name": "set_draft_metadata", "parameters": {"type": "object", "additionalProperties": False, "required": ["title", "units"], "properties": {"title": {"type": "string"}, "units": {"const": "mm"}}}}})
     for variant in feature_variants:
         feature_type = variant["properties"]["type"]["const"]
         tools.append({"type": "function", "function": {"name": f"add_{feature_type}", "description": f"Add exactly one {feature_type} feature.", "parameters": with_definitions(variant)}})
@@ -609,7 +600,7 @@ async def _run_draft_builder_impl(
     answered_question_ids: set[str] | None = None,
     _run_stats: Dict[str, Any] | None = None,
 ) -> DraftSpecification:
-    builder = DraftBuilder.seed(previous_specification, locked_items or set()) if incremental and previous_specification else DraftBuilder(analysis)
+    builder = DraftBuilder.seed(previous_specification) if previous_specification else DraftBuilder(analysis)
     messages = list(payload["messages"])
     headers = {
         "Authorization": f"Bearer {api_key}",
@@ -617,10 +608,11 @@ async def _run_draft_builder_impl(
         "HTTP-Referer": "https://easycad.local",
         "X-Title": "EasyCAD",
     }
-    last_results: List[Dict[str, Any]] = []
     required_feature_replacements: Dict[str, frozenset[str]] = {}
     last_finish_failure: tuple[str, str] | None = None
     repeated_finish_failures = 0
+    last_tool_failure: tuple[str, str] | None = None
+    repeated_tool_failures = 0
     turn_cap = MAX_INCREMENTAL_REPLAN_TURNS if incremental else MAX_DRAFT_PLANNER_TURNS
     for turn in range(1, turn_cap + 1):
         if _run_stats is not None:
@@ -801,7 +793,6 @@ async def _run_draft_builder_impl(
                 else:
                     result = builder.add_feature(args)
             else: result = {"ok": False, "message": "unknown tool"}
-            last_results.append({"tool": name, **result})
             if _run_stats is not None and not result.get("ok", False):
                 _run_stats["tool_errors"] += 1
                 if name == "finish_draft":
@@ -810,8 +801,21 @@ async def _run_draft_builder_impl(
                     rejections[reason] = rejections.get(reason, 0) + 1
             elif _run_stats is not None and name == "remove_item":
                 _run_stats["removed_items"].append({"item": result.get("removed"), "reason": result.get("reason")})
-            last_results = last_results[-8:]
             messages.append({"role": "tool", "tool_call_id": call["id"], "content": json.dumps(result)})
+            if result.get("ok", False):
+                last_tool_failure = None
+                repeated_tool_failures = 0
+            else:
+                signature = (name, json.dumps(result, ensure_ascii=False, sort_keys=True))
+                repeated_tool_failures = repeated_tool_failures + 1 if signature == last_tool_failure else 1
+                last_tool_failure = signature
+                if repeated_tool_failures >= 3:
+                    logger.warning(
+                        "Planner repeated the same rejected tool call; returning the accumulated draft planner_run_id=%s tool=%s",
+                        planner_run_id,
+                        name,
+                    )
+                    return builder.draft
             if name == "finish_draft" and not result.get("ok", False):
                 signature = (str(result.get("field", "unknown")), str(result.get("message", "")))
                 repeated_finish_failures = repeated_finish_failures + 1 if signature == last_finish_failure else 1
@@ -823,18 +827,12 @@ async def _run_draft_builder_impl(
                         {"field": signature[0], "message": signature[1], "planner_run_id": planner_run_id},
                         planner_outcome="planner_stopped",
                     )
-    _dump_planner_context(planner_run_id, {**payload, "messages": messages})
-    raise GenerationError(
-        "draft_specification",
-        f"Planner exceeded the {turn_cap}-turn limit before completing the draft",
-        {
-            "last_tool_results": last_results,
-            "max_provider_turns": turn_cap,
-            "planner_run_id": planner_run_id,
-            "planner_mode": planner_mode,
-        },
-        planner_outcome="turn_limit",
+    logger.warning(
+        "Planner turn limit reached; returning the accumulated draft planner_run_id=%s turns=%s",
+        planner_run_id,
+        turn_cap,
     )
+    return builder.draft
 
 
 def _dump_planner_context(planner_run_id: str | None, request_payload: Dict[str, Any]) -> None:

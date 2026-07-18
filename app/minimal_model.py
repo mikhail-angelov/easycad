@@ -2,8 +2,6 @@
 
 from __future__ import annotations
 
-import math
-
 from .feature_compiler import feature_contract_issues
 from .draft_lint import lint_draft
 from .models import DraftSpecification, SpecificationFeature
@@ -13,9 +11,6 @@ from .specification import project_from_specification, resolve_dimension_values
 def minimal_reliable_draft(draft: DraftSpecification) -> DraftSpecification:
     """Keep only confirmed, self-contained geometry; disclose everything else as omitted."""
     result = draft.model_copy(deep=True)
-    result.questions = []
-    result.annotations = []
-    result.assumptions = []
     values, _ = resolve_dimension_values(result)
     text_content_dimensions = {
         str(feature.parameters.get("content"))
@@ -60,20 +55,6 @@ def minimal_reliable_draft(draft: DraftSpecification) -> DraftSpecification:
         if not any(item.id == "minimal_body" for item in result.features):
             result.features.insert(0, _fallback_box())
         _cover_unmodeled_analysis(result)
-    return result
-
-
-def fallback_draft(draft: DraftSpecification) -> DraftSpecification:
-    """Return the always-compilable last-resort body while retaining omissions."""
-    result = draft.model_copy(deep=True)
-    result.questions = []
-    result.annotations = []
-    result.assumptions = []
-    result.dimensions = []
-    for feature in result.features:
-        _omit(feature, "Omitted because the requested geometry could not be rendered")
-    result.features.insert(0, _fallback_box())
-    _cover_unmodeled_analysis(result)
     return result
 
 

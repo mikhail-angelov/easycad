@@ -1,7 +1,8 @@
-"""Server-owned transaction for narrow LLM draft-building tools."""
+"""Small server-owned builder for planner tool calls."""
 
 from __future__ import annotations
 
+import json
 import re
 from dataclasses import dataclass, field
 from typing import Any
@@ -9,11 +10,7 @@ from typing import Any
 from pydantic import ValidationError
 
 from .feature_compiler import feature_contract_issues
-from .models import (
-    DrawingAnalysis, DraftSpecification, SpecificationAnnotation, SpecificationAssumption,
-    SpecificationDimension, SpecificationFeature, SpecificationQuestion,
-)
-from .specification import analysis_coverage_issues, review_reference_issues
+from .models import DrawingAnalysis, DraftSpecification, SpecificationDimension, SpecificationFeature
 
 
 @dataclass
@@ -21,276 +18,112 @@ class DraftBuilder:
     analysis: dict[str, Any]
     draft: DraftSpecification = field(default_factory=DraftSpecification)
     metadata_set: bool = False
-    locked_items: set[tuple[str, str]] = field(default_factory=set)
 
     def __post_init__(self) -> None:
-        # Local import avoids the module cycle: ai_generation owns the one analysis normalizer
-        # and imports DraftBuilder for execution.
         from .ai_generation import normalize_drawing_analysis
-
         self.analysis = normalize_drawing_analysis(self.analysis)
         self.draft.analysis = DrawingAnalysis.model_validate(self.analysis)
 
     @classmethod
-    def seed(cls, previous: DraftSpecification, locked_items: set[tuple[str, str]]) -> "DraftBuilder":
-        builder = cls(previous.analysis.model_dump(mode="json"), previous.model_copy(deep=True), True, set(locked_items))
-        return builder
-
-    def _locked(self, item_type: str, item_id: str) -> dict[str, Any] | None:
-        if (item_type, item_id) in self.locked_items:
-            return {"ok": False, "field": item_id, "message": f"{item_type} '{item_id}' is locked; provide a clarification before modifying it"}
-        return None
+    def seed(cls, previous: DraftSpecification) -> "DraftBuilder":
+        return cls(previous.analysis.model_dump(mode="json"), previous.model_copy(deep=True), True)
 
     def set_metadata(self, payload: dict[str, Any]) -> dict[str, Any]:
-        if self.metadata_set:
-            return {"ok": False, "field": "metadata", "message": "set_draft_metadata may only be called once"}
-        if set(payload) != {"title", "units"}:
-            return {"ok": False, "field": "metadata", "message": "set_draft_metadata requires only title and units"}
-        title, units = payload["title"], payload["units"]
-        if not isinstance(title, str) or not title.strip():
-            return {"ok": False, "field": "title", "message": "title must be a non-empty string"}
-        if units != "mm":
-            return {"ok": False, "field": "units", "message": "units must be mm"}
-        self.draft.title, self.draft.units = title, units
-        self.metadata_set = True
+        if isinstance(payload.get("units"), str) and payload["units"].strip().lower() in {"millimeter", "millimeters"}:
+            payload["units"] = "mm"
+        if self.metadata_set or set(payload) != {"title", "units"}:
+            return {"ok": False, "message": "set_draft_metadata requires title and mm units once"}
+        if not isinstance(payload["title"], str) or not payload["title"].strip() or payload["units"] != "mm":
+            return {"ok": False, "message": "title must be non-empty and units must be mm"}
+        self.draft.title, self.draft.units, self.metadata_set = payload["title"], "mm", True
         return {"ok": True}
 
     def add_dimension(self, payload: dict[str, Any]) -> dict[str, Any]:
         try:
-            dimension = SpecificationDimension.model_validate(payload)
+            item = SpecificationDimension.model_validate(payload)
         except ValidationError as exc:
             return {"ok": False, "error": exc.errors()[0]}
-        if locked := self._locked("dimension", dimension.id):
-            return locked
-        if any(item.id == dimension.id for item in self.draft.features):
-            return {"ok": False, "field": "id", "message": f"duplicate dimension id '{dimension.id}' is already a feature id"}
-        replaced = _replace_or_append(self.draft.dimensions, dimension)
-        return {"ok": True, "dimension_id": dimension.id, **({"replaced": True} if replaced else {})}
+        if any(feature.id == item.id for feature in self.draft.features):
+            return {"ok": False, "message": f"duplicate id '{item.id}'"}
+        return _store(self.draft.dimensions, item, "dimension_id")
 
     def add_feature(self, payload: dict[str, Any]) -> dict[str, Any]:
-        _normalize_compact_placement(payload)
+        _normalize_placement(payload)
+        if str(payload.get("target", "")).strip().lower() in {"", "none", "null"}:
+            payload["target"] = None
         try:
-            feature = SpecificationFeature.model_validate(payload)
+            item = SpecificationFeature.model_validate(payload)
         except ValidationError as exc:
             return {"ok": False, "error": exc.errors()[0]}
-        if locked := self._locked("feature", feature.id):
-            return locked
-        if any(item.id == feature.id for item in self.draft.dimensions):
-            return {"ok": False, "field": "id", "message": f"duplicate feature id '{feature.id}' is already a dimension id"}
-        issues = feature_contract_issues(feature)  # same contract as Build
-        if issues:
-            return {"ok": False, "field": feature.id, "message": issues[0]}
-        known_dimensions = {item.id for item in self.draft.dimensions}
-        unknown_references = sorted(
-            reference for reference in _feature_dimension_references(feature) if reference not in known_dimensions
-        )
-        if unknown_references:
-            return {
-                "ok": False,
-                "field": feature.id,
-                "message": (
-                    f"{feature.id} references undeclared dimensions: {', '.join(unknown_references)}. "
-                    "Coordinates and parameters must be numbers or declared dimension IDs; add a derived dimension "
-                    "first instead of using an inline expression."
-                ),
-            }
-        if feature.target and not any(item.id == feature.target for item in self.draft.features):
-            return {"ok": False, "field": feature.id, "message": f"{feature.id} targets missing or later feature '{feature.target}'"}
-        if feature.type in {"fillet", "chamfer"} and feature.placement.reference in {
-            item.id for item in self.draft.features
-        }:
-            return {
-                "ok": False,
-                "field": feature.id,
-                "message": (
-                    f"{feature.id} placement.reference is an edge selector, not a feature ID. "
-                    "Keep the feature ID only in target; omit placement.reference or use a valid CadQuery selector such as '>Z'."
-                ),
-            }
-        replaced = _replace_or_append(self.draft.features, feature)
-        return {"ok": True, "feature_id": feature.id, **({"replaced": True} if replaced else {})}
-
-    def add_assumption(self, payload: dict[str, Any]) -> dict[str, Any]:
-        item_id = str(payload.get("id", ""))
-        if locked := self._locked("assumption", item_id):
-            return locked
-        return self._append("assumptions", SpecificationAssumption, payload)
-
-    def add_question(self, payload: dict[str, Any]) -> dict[str, Any]:
-        item_id = str(payload.get("id", ""))
-        if locked := self._locked("question", item_id):
-            return locked
-        return self._append("questions", SpecificationQuestion, payload, self._question_reference_issue)
-
-    def add_annotation(self, payload: dict[str, Any]) -> dict[str, Any]:
-        item_id = str(payload.get("id", ""))
-        if locked := self._locked("annotation", item_id):
-            return locked
-        return self._append("annotations", SpecificationAnnotation, payload, self._annotation_reference_issue)
-
-    def remove_item(self, payload: dict[str, Any]) -> dict[str, Any]:
-        item_type, item_id = str(payload.get("item_type", "")), str(payload.get("id", ""))
-        collections = {"dimension": "dimensions", "feature": "features", "assumption": "assumptions", "question": "questions", "annotation": "annotations"}
-        if item_type not in collections or not item_id or not str(payload.get("reason", "")).strip():
-            return {"ok": False, "message": "remove_item requires item_type, id, and reason"}
-        if locked := self._locked(item_type, item_id):
-            return locked
-        items = getattr(self.draft, collections[item_type])
-        if not any(item.id == item_id for item in items):
-            return {"ok": False, "message": f"unknown {item_type} '{item_id}'"}
-        setattr(self.draft, collections[item_type], [item for item in items if item.id != item_id])
-        return {"ok": True, "removed": {"item_type": item_type, "id": item_id}, "reason": payload["reason"]}
-
-    def resolve_question(self, payload: dict[str, Any]) -> dict[str, Any]:
-        question_id = str(payload.get("id", ""))
-        if locked := self._locked("question", question_id):
-            return locked
-        if not any(item.id == question_id for item in self.draft.questions):
-            return {"ok": False, "message": f"unknown question '{question_id}'"}
-        self.draft.questions = [item for item in self.draft.questions if item.id != question_id]
-        return {"ok": True, "resolved_question_id": question_id}
-
-    def _append(self, field_name: str, model: Any, payload: dict[str, Any], reference_issue: Any = None) -> dict[str, Any]:
-        try:
-            item = model.model_validate(payload)
-        except ValidationError as exc:
-            return {"ok": False, "error": exc.errors()[0]}
-        if reference_issue is not None:
-            issue = reference_issue(item)
-            if issue:
-                return {"ok": False, "field": "field_id", "message": issue}
-        replaced = _replace_or_append(getattr(self.draft, field_name), item)
-        return {"ok": True, "id": item.id, **({"replaced": True} if replaced else {})}
-
-    def _question_reference_issue(self, question: SpecificationQuestion) -> str | None:
-        known = {item.id for item in self.draft.dimensions + self.draft.features}
-        if question.field_id in known:
-            return None
-        return (
-            f"question '{question.id}' field_id '{question.field_id}' is not a declared dimension or feature ID. "
-            "First add the item the question asks about — represent an observed but ambiguous shape with a supported "
-            "feature type (for example a cylinder cut for a groove) and status needs_input — then re-add this question "
-            "with field_id set to that item's ID."
-        )
-
-    def _annotation_reference_issue(self, annotation: SpecificationAnnotation) -> str | None:
-        known = {item.id for item in self.draft.dimensions + self.draft.features + self.draft.questions}
-        missing = sorted(field_id for field_id in {annotation.field_id, *annotation.field_ids} if field_id not in known)
-        if not missing:
-            return None
-        return (
-            f"annotation '{annotation.id}' references unknown review items: {', '.join(missing)}. "
-            "Annotations may only link to already-added dimension, feature, or question IDs; add those items first."
-        )
+        if any(dimension.id == item.id for dimension in self.draft.dimensions):
+            return {"ok": False, "message": f"duplicate id '{item.id}'"}
+        if issues := feature_contract_issues(item):
+            return {"ok": False, "message": issues[0]}
+        known_dimensions = {dimension.id for dimension in self.draft.dimensions}
+        unknown = sorted(ref for ref in _references(item) if ref not in known_dimensions)
+        if unknown:
+            return {"ok": False, "message": f"{item.id} references undeclared dimensions: {', '.join(unknown)}"}
+        if item.target and not any(feature.id == item.target for feature in self.draft.features):
+            return {"ok": False, "message": f"{item.id} targets missing feature '{item.target}'"}
+        return _store(self.draft.features, item, "feature_id")
 
     def finish(self) -> DraftSpecification:
         if not self.metadata_set:
             raise ValueError("set_draft_metadata must be called before finish_draft")
-        self.draft.analysis = DrawingAnalysis.model_validate(self.analysis)
         return self.draft
 
-    def reference_issues(self) -> list[str]:
-        issues = review_reference_issues(self.draft)
-        uncovered = analysis_coverage_issues(self.draft)
-        if uncovered:
-            issues.append(f"Uncovered analysis feature IDs: {', '.join(uncovered)}")
-        return issues
 
-
-_COMPACT_PLACEMENT_PATTERN = re.compile(r"^\s*(XY|XZ|YZ)\s*(?:\(\s*(.*?)\s*\))?\s*$", re.IGNORECASE)
-_LOOSE_PLANE_PATTERN = re.compile(r"plane\W*\s*(XY|XZ|YZ)", re.IGNORECASE)
-_LOOSE_VECTOR_PATTERN = r"\W*\s*\[([^\]]*)\]"
-
-
-def _normalize_compact_placement(payload: dict[str, Any]) -> None:
-    """Accept known provider string variants of the structured placement/profile/pattern objects."""
-    import json as _json
-
-    for key in ("placement", "profile", "pattern"):
-        value = payload.get(key)
-        if isinstance(value, str):
-            try:
-                parsed = _json.loads(value)
-            except ValueError:
-                parsed = None
-            if isinstance(parsed, dict):
-                payload[key] = parsed
-    placement = payload.get("placement")
-    if not isinstance(placement, str):
-        return
-    match = _COMPACT_PLACEMENT_PATTERN.match(placement)
-    if match:
-        normalized: dict[str, Any] = {"plane": match.group(1).upper()}
-        origin = _coordinate_tokens(match.group(2) or "")
-        if origin is not None:
-            normalized["origin"] = origin
-        payload["placement"] = normalized
-        return
-    # Loose "origin: [x, y, z], plane: XY, axis: [..]" text.
-    loose: dict[str, Any] = {}
-    plane_match = _LOOSE_PLANE_PATTERN.search(placement)
-    if plane_match:
-        loose["plane"] = plane_match.group(1).upper()
-    vector_match = re.search("origin" + _LOOSE_VECTOR_PATTERN, placement, re.IGNORECASE)
-    if vector_match:
-        vector = _coordinate_tokens(vector_match.group(1))
-        if vector is not None:
-            loose["origin"] = vector
-    if loose:
-        payload["placement"] = loose
-
-
-def _coordinate_tokens(text: str) -> list[Any] | None:
-    text = text.strip()
-    if not text:
-        return None
-    values: list[Any] = []
-    for token in text.split(","):
-        token = token.strip().strip("'\"")
-        try:
-            values.append(float(token))
-        except ValueError:
-            values.append(token)
-    return values if len(values) == 3 else None
-
-
-def _replace_or_append(items: list, item: Any) -> bool:
-    """Store `item`, replacing an existing entry with the same ID in place. Returns True on replace."""
+def _store(items: list, item: Any, key: str) -> dict[str, Any]:
     for index, existing in enumerate(items):
         if existing.id == item.id:
             items[index] = item
-            return True
+            return {"ok": True, key: item.id, "replaced": True}
     items.append(item)
-    return False
+    return {"ok": True, key: item.id}
 
 
-def _feature_dimension_references(feature: SpecificationFeature) -> list[str]:
-    """Return ID-like string values used by executable feature geometry."""
-    references: list[str] = []
+def _normalize_placement(payload: dict[str, Any]) -> None:
+    value = payload.get("placement")
+    if not isinstance(value, str):
+        return
+    try:
+        decoded = json.loads(value)
+    except json.JSONDecodeError:
+        decoded = None
+    if isinstance(decoded, dict):
+        payload["placement"] = decoded
+        return
+    match = re.fullmatch(r"\s*(XY|XZ|YZ)\s*(?:\(\s*(.*?)\s*\))?\s*", value, re.IGNORECASE)
+    if not match:
+        match = re.fullmatch(
+            r"\s*(?:(XY|XZ|YZ)\s*[;,]?)?\s*origin\s*[:=]\s*\[\s*(.*?)\s*\]\s*",
+            value,
+            re.IGNORECASE,
+        )
+        if not match:
+            return
+    origin_text = match.group(2)
+    origin = [_placement_value(part) for part in origin_text.split(",")] if origin_text else None
+    placement = {"origin": origin} if origin and len(origin) == 3 else {}
+    if match.group(1):
+        placement["plane"] = match.group(1).upper()
+    payload["placement"] = placement
 
-    def add(value: object) -> None:
-        if isinstance(value, str):
-            references.append(value)
 
-    for value in feature.parameters.values():
-        add(value)
+def _placement_value(value: str) -> int | float | str:
+    value = value.strip()
+    if re.fullmatch(r"[+-]?\d+", value):
+        return int(value)
+    if re.fullmatch(r"[+-]?(?:\d+\.\d*|\.\d+)", value):
+        return float(value)
+    return value
+
+
+def _references(feature: SpecificationFeature) -> list[str]:
+    values = [*feature.parameters.values(), *(feature.placement.origin or [])]
     if feature.profile:
-        for value in feature.profile.dimensions.values():
-            add(value)
-        for point in feature.profile.points:
-            for value in point:
-                add(value)
+        values.extend(feature.profile.dimensions.values())
+        values.extend(value for point in feature.profile.points for value in point)
     if feature.pattern:
-        for value in (
-            feature.pattern.count,
-            feature.pattern.pitch,
-            feature.pattern.angle_deg,
-            feature.pattern.start_margin,
-            feature.pattern.end_margin,
-        ):
-            add(value)
-    placement = feature.placement
-    if placement and placement.origin:
-        for value in placement.origin:
-            add(value)
-    return references
+        values.extend(value for value in (feature.pattern.count, feature.pattern.pitch, feature.pattern.angle_deg, feature.pattern.start_margin, feature.pattern.end_margin) if value is not None)
+    return [value for value in values if isinstance(value, str)]

@@ -168,37 +168,6 @@ class SpecificationFeature(BaseModel):
     source_feature_ids: List[str] = Field(default_factory=list)
 
 
-class SpecificationExclusion(BaseModel):
-    feature_id: str = Field(pattern=r"^[a-z][a-z0-9_]*$")
-    source_feature_ids: List[str] = Field(default_factory=list)
-    reason: str = Field(min_length=1)
-
-
-class SpecificationAssumption(BaseModel):
-    id: str = Field(pattern=r"^[a-z][a-z0-9_]*$")
-    value: ParameterValue
-    rationale: str
-    affected_ids: List[str] = Field(default_factory=list)
-    status: SpecificationStatus = "assumed"
-
-
-class SpecificationQuestion(BaseModel):
-    id: str = Field(pattern=r"^[a-z][a-z0-9_]*$")
-    field_id: str
-    prompt: str
-    alternatives: List[ParameterValue] = Field(default_factory=list)
-    required: bool = True
-
-
-class SpecificationAnnotation(BaseModel):
-    id: str = Field(pattern=r"^[a-z][a-z0-9_]*$")
-    field_id: str
-    field_ids: List[str] = Field(default_factory=list)
-    x: float = Field(ge=0, le=1)
-    y: float = Field(ge=0, le=1)
-    label: str
-
-
 class DraftSpecification(BaseModel):
     id: str = Field(default_factory=lambda: str(uuid4()))
     title: str = "Untitled specification"
@@ -207,11 +176,6 @@ class DraftSpecification(BaseModel):
     analysis: DrawingAnalysis = Field(default_factory=DrawingAnalysis)
     dimensions: List[SpecificationDimension] = Field(default_factory=list)
     features: List[SpecificationFeature] = Field(default_factory=list)
-    assumptions: List[SpecificationAssumption] = Field(default_factory=list)
-    questions: List[SpecificationQuestion] = Field(default_factory=list)
-    annotations: List[SpecificationAnnotation] = Field(default_factory=list)
-    exclusions: List[SpecificationExclusion] = Field(default_factory=list)
-    free_text: str = ""
 
     @model_validator(mode="after")
     def stable_ids_are_unique(self) -> "DraftSpecification":

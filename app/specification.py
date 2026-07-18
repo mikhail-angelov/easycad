@@ -21,7 +21,6 @@ from .models import (
     FeatureOperation,
     FeaturePlacement,
     FeatureSummary,
-    ParameterValue,
     SpecificationFeature,
 )
 
@@ -33,90 +32,6 @@ class SpecificationValidationError(ValueError):
 
     def __str__(self) -> str:
         return "; ".join(self.messages)
-
-
-def apply_specification_edits(
-    specification: DraftSpecification,
-    values: Dict[str, ParameterValue],
-    accepted_assumption_ids: List[str],
-    free_text: str,
-    accepted_feature_ids: List[str] | None = None,
-) -> DraftSpecification:
-    updated = specification.model_copy(deep=True)
-    dimensions = {item.id: item for item in updated.dimensions}
-    for field_id, value in values.items():
-        if field_id not in dimensions:
-            raise SpecificationValidationError([field_id], [f"Unknown dimension '{field_id}'"])
-        dimension = dimensions[field_id]
-        dimension.value = value
-        dimension.expression = None
-        dimension.status = "confirmed"
-        dimension.source = "manual"
-    accepted = set(accepted_assumption_ids)
-    unknown_assumptions = accepted - {item.id for item in updated.assumptions}
-    if unknown_assumptions:
-        unknown_id = sorted(unknown_assumptions)[0]
-        raise SpecificationValidationError([unknown_id], [f"Unknown assumption '{unknown_id}'"])
-    for assumption in updated.assumptions:
-        if assumption.id in accepted:
-            assumption.status = "confirmed"
-    accepted_features = set(accepted_feature_ids or [])
-    unknown_features = accepted_features - {item.id for item in updated.features}
-    if unknown_features:
-        unknown_id = sorted(unknown_features)[0]
-        raise SpecificationValidationError([unknown_id], [f"Unknown feature '{unknown_id}'"])
-    for feature in updated.features:
-        if feature.id in accepted_features:
-            feature.status = "confirmed"
-    updated.free_text = free_text.strip()
-    return updated
-
-
-def review_reference_issues(specification: DraftSpecification) -> list[str]:
-    dimension_ids = {item.id for item in specification.dimensions}
-    feature_ids = {item.id for item in specification.features}
-    question_ids = {item.id for item in specification.questions}
-    issues = []
-    for question in specification.questions:
-        if question.field_id not in dimension_ids | feature_ids:
-            issues.append(f"{question.id} references unknown review item '{question.field_id}'")
-    valid_annotation_ids = dimension_ids | feature_ids | question_ids
-    for annotation in specification.annotations:
-        for field_id in [annotation.field_id, *annotation.field_ids]:
-            if field_id not in valid_annotation_ids:
-                issues.append(f"{annotation.id} references unknown review item '{field_id}'")
-    return issues
-
-
-def analysis_coverage_issues(specification: DraftSpecification, *, build_gate: bool = False) -> list[str]:
-    analysis_ids = {str(item.get("id")) for item in specification.analysis.features if item.get("id")}
-    feature_coverage = {
-        source_id
-        for feature in specification.features
-        for source_id in ({feature.id} | set(feature.source_feature_ids))
-    }
-    covered = set(feature_coverage)
-    if build_gate:
-        covered.update(source_id for exclusion in specification.exclusions for source_id in exclusion.source_feature_ids)
-    else:
-        covered.update(source_id for assumption in specification.assumptions for source_id in assumption.affected_ids)
-        covered.update(question.field_id for question in specification.questions)
-    return sorted(analysis_ids - covered)
-
-
-def exclusion_record_issues(specification: DraftSpecification) -> list[str]:
-    analysis_ids = {str(item.get("id")) for item in specification.analysis.features if item.get("id")}
-    live_ids = {item.id for item in specification.features}
-    issues: list[str] = []
-    for exclusion in specification.exclusions:
-        unknown = sorted(set(exclusion.source_feature_ids) - analysis_ids)
-        if unknown:
-            issues.append(f"exclusion {exclusion.feature_id} references unknown analysis features: {', '.join(unknown)}")
-        if exclusion.feature_id in live_ids:
-            issues.append(f"exclusion {exclusion.feature_id} still names a live feature")
-        if not exclusion.reason.strip():
-            issues.append(f"exclusion {exclusion.feature_id} requires a reason")
-    return issues
 
 
 def resolve_dimension_values(specification: DraftSpecification) -> tuple[Dict[str, float], List[str]]:
@@ -231,10 +146,6 @@ def validate_specification(specification: DraftSpecification) -> Dict[str, float
             field_ids.extend(sorted(pending))
             messages.append("Could not resolve derived dimensions")
             break
-    for assumption in specification.assumptions:
-        if assumption.status == "assumed":
-            field_ids.append(assumption.id)
-            messages.append(f"{assumption.id} must be accepted or replaced")
     known_features = set()
     for feature in specification.features:
         if feature.status == "unsupported":
@@ -292,10 +203,6 @@ def validate_specification(specification: DraftSpecification) -> Dict[str, float
                 field_ids.append(feature.id)
                 messages.append(f"{feature.id} references unknown or unresolved dimension '{parameter_id}'")
         known_features.add(feature.id)
-    for issue in review_reference_issues(specification):
-        item_id = issue.split(" references", 1)[0]
-        field_ids.append(item_id)
-        messages.append(issue)
     if not known_features:
         field_ids.append("features")
         messages.append("specification must include at least one supported feature")
@@ -398,7 +305,7 @@ def project_from_specification(specification: DraftSpecification) -> CADProject:
             entries=[FeatureCoverageEntry(feature_id=item.id, operation_ids=[] if item.status == "unsupported" else [item.id], status="unsupported" if item.status == "unsupported" else "implemented", confidence=item.confidence, explanation=item.label if item.status == "unsupported" else None) for item in specification.features]
         ),
         feature_summary=summaries,
-        assumptions=[item.rationale for item in specification.assumptions if item.status == "confirmed"],
+        assumptions=[],
         cad=CADSource(source="", source_kind="compiled"),
     )
     return compile_project_feature_graph(project)

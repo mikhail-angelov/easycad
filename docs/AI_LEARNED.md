@@ -660,3 +660,28 @@ The previous UI required separate validate, schematic, draft-build, preview, ful
 ### Ruled-out approaches
 
 - Kept a separate preview endpoint; rejected because the first two actions can return the exact STL consumed by the viewer.
+
+## 2026-07-18 — Tolerate provider tool-call spelling variants
+
+### Goal
+
+Prevent a valid planner batch from looping when the provider serializes otherwise valid CAD fields in common textual forms.
+
+### Golden path
+
+1. In `DraftBuilder`, normalize `millimeter` and `millimeters` to `mm`.
+2. Treat root targets written as `none` or `null` as JSON null.
+3. Decode a placement JSON string or `origin: [x, y, z]` form before Pydantic validation, converting numeric coordinates to numbers.
+4. Stop after three identical rejected tool results, or the planner turn cap, and pass the accumulated draft to `minimal_reliable_draft`, which guarantees a renderable body.
+
+### Verification
+
+On 2026-07-18, the real provider run `02b2b94f6244` completed in six turns after previously repeating `add_box` with renamed IDs. Direct replay of the rejected placement and target payload succeeded, and Python compilation plus the UI build passed.
+
+### Failure pattern avoided
+
+`placement="origin: [0, 0, 0]"` was interpreted as three dimension IDs, while `target="none"` was interpreted as a missing feature. The provider then changed only the feature ID and repeated the rejected call for 25 turns.
+
+### Ruled-out approaches
+
+- Added a special case for `add_box`; rejected because any feature can use the same provider spelling variants.
