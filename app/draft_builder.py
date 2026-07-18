@@ -13,7 +13,7 @@ from .models import (
     DrawingAnalysis, DraftSpecification, SpecificationAnnotation, SpecificationAssumption,
     SpecificationDimension, SpecificationFeature, SpecificationQuestion,
 )
-from .specification import review_reference_issues
+from .specification import analysis_coverage_issues, review_reference_issues
 
 
 @dataclass
@@ -21,6 +21,25 @@ class DraftBuilder:
     analysis: dict[str, Any]
     draft: DraftSpecification = field(default_factory=DraftSpecification)
     metadata_set: bool = False
+    locked_items: set[tuple[str, str]] = field(default_factory=set)
+
+    def __post_init__(self) -> None:
+        # Local import avoids the module cycle: ai_generation owns the one analysis normalizer
+        # and imports DraftBuilder for execution.
+        from .ai_generation import normalize_drawing_analysis
+
+        self.analysis = normalize_drawing_analysis(self.analysis)
+        self.draft.analysis = DrawingAnalysis.model_validate(self.analysis)
+
+    @classmethod
+    def seed(cls, previous: DraftSpecification, locked_items: set[tuple[str, str]]) -> "DraftBuilder":
+        builder = cls(previous.analysis.model_dump(mode="json"), previous.model_copy(deep=True), True, set(locked_items))
+        return builder
+
+    def _locked(self, item_type: str, item_id: str) -> dict[str, Any] | None:
+        if (item_type, item_id) in self.locked_items:
+            return {"ok": False, "field": item_id, "message": f"{item_type} '{item_id}' is locked; provide a clarification before modifying it"}
+        return None
 
     def set_metadata(self, payload: dict[str, Any]) -> dict[str, Any]:
         if self.metadata_set:
@@ -41,6 +60,8 @@ class DraftBuilder:
             dimension = SpecificationDimension.model_validate(payload)
         except ValidationError as exc:
             return {"ok": False, "error": exc.errors()[0]}
+        if locked := self._locked("dimension", dimension.id):
+            return locked
         if any(item.id == dimension.id for item in self.draft.features):
             return {"ok": False, "field": "id", "message": f"duplicate dimension id '{dimension.id}' is already a feature id"}
         replaced = _replace_or_append(self.draft.dimensions, dimension)
@@ -52,6 +73,8 @@ class DraftBuilder:
             feature = SpecificationFeature.model_validate(payload)
         except ValidationError as exc:
             return {"ok": False, "error": exc.errors()[0]}
+        if locked := self._locked("feature", feature.id):
+            return locked
         if any(item.id == feature.id for item in self.draft.dimensions):
             return {"ok": False, "field": "id", "message": f"duplicate feature id '{feature.id}' is already a dimension id"}
         issues = feature_contract_issues(feature)  # same contract as Build
@@ -88,13 +111,44 @@ class DraftBuilder:
         return {"ok": True, "feature_id": feature.id, **({"replaced": True} if replaced else {})}
 
     def add_assumption(self, payload: dict[str, Any]) -> dict[str, Any]:
+        item_id = str(payload.get("id", ""))
+        if locked := self._locked("assumption", item_id):
+            return locked
         return self._append("assumptions", SpecificationAssumption, payload)
 
     def add_question(self, payload: dict[str, Any]) -> dict[str, Any]:
+        item_id = str(payload.get("id", ""))
+        if locked := self._locked("question", item_id):
+            return locked
         return self._append("questions", SpecificationQuestion, payload, self._question_reference_issue)
 
     def add_annotation(self, payload: dict[str, Any]) -> dict[str, Any]:
+        item_id = str(payload.get("id", ""))
+        if locked := self._locked("annotation", item_id):
+            return locked
         return self._append("annotations", SpecificationAnnotation, payload, self._annotation_reference_issue)
+
+    def remove_item(self, payload: dict[str, Any]) -> dict[str, Any]:
+        item_type, item_id = str(payload.get("item_type", "")), str(payload.get("id", ""))
+        collections = {"dimension": "dimensions", "feature": "features", "assumption": "assumptions", "question": "questions", "annotation": "annotations"}
+        if item_type not in collections or not item_id or not str(payload.get("reason", "")).strip():
+            return {"ok": False, "message": "remove_item requires item_type, id, and reason"}
+        if locked := self._locked(item_type, item_id):
+            return locked
+        items = getattr(self.draft, collections[item_type])
+        if not any(item.id == item_id for item in items):
+            return {"ok": False, "message": f"unknown {item_type} '{item_id}'"}
+        setattr(self.draft, collections[item_type], [item for item in items if item.id != item_id])
+        return {"ok": True, "removed": {"item_type": item_type, "id": item_id}, "reason": payload["reason"]}
+
+    def resolve_question(self, payload: dict[str, Any]) -> dict[str, Any]:
+        question_id = str(payload.get("id", ""))
+        if locked := self._locked("question", question_id):
+            return locked
+        if not any(item.id == question_id for item in self.draft.questions):
+            return {"ok": False, "message": f"unknown question '{question_id}'"}
+        self.draft.questions = [item for item in self.draft.questions if item.id != question_id]
+        return {"ok": True, "resolved_question_id": question_id}
 
     def _append(self, field_name: str, model: Any, payload: dict[str, Any], reference_issue: Any = None) -> dict[str, Any]:
         try:
@@ -136,7 +190,11 @@ class DraftBuilder:
         return self.draft
 
     def reference_issues(self) -> list[str]:
-        return review_reference_issues(self.draft)
+        issues = review_reference_issues(self.draft)
+        uncovered = analysis_coverage_issues(self.draft)
+        if uncovered:
+            issues.append(f"Uncovered analysis feature IDs: {', '.join(uncovered)}")
+        return issues
 
 
 _COMPACT_PLACEMENT_PATTERN = re.compile(r"^\s*(XY|XZ|YZ)\s*(?:\(\s*(.*?)\s*\))?\s*$", re.IGNORECASE)

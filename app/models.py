@@ -15,7 +15,8 @@ FeatureOperationKind = Literal["add", "cut", "intersect", "modify", "pattern"]
 FeatureCoverageStatus = Literal["planned", "implemented", "approximated", "unresolved", "unsupported"]
 CapabilityStatus = Literal["supported", "experimental", "unsupported"]
 FeaturePatternKind = Literal["linear", "polar", "mirror", "path"]
-SpecificationStatus = Literal["confirmed", "needs_input", "assumed", "conflicted"]
+SpecificationStatus = Literal["confirmed", "needs_input", "assumed", "conflicted", "unsupported"]
+OverallDimensionRole = Literal["overall_x", "overall_y", "overall_z"]
 
 
 class CADParameter(BaseModel):
@@ -88,6 +89,7 @@ class SpecificationDimension(BaseModel):
     max: Optional[float] = None
     alternatives: List[ParameterValue] = Field(default_factory=list)
     evidence: List[str] = Field(default_factory=list)
+    role: Optional[OverallDimensionRole] = None
 
 
 class FeaturePlacement(BaseModel):
@@ -166,6 +168,13 @@ class SpecificationFeature(BaseModel):
     confidence: float = Field(default=0.5, ge=0, le=1)
     evidence: List[str] = Field(default_factory=list)
     alternatives: Dict[str, List[FeatureValue]] = Field(default_factory=dict)
+    source_feature_ids: List[str] = Field(default_factory=list)
+
+
+class SpecificationExclusion(BaseModel):
+    feature_id: str = Field(pattern=r"^[a-z][a-z0-9_]*$")
+    source_feature_ids: List[str] = Field(default_factory=list)
+    reason: str = Field(min_length=1)
 
 
 class SpecificationAssumption(BaseModel):
@@ -204,6 +213,7 @@ class DraftSpecification(BaseModel):
     assumptions: List[SpecificationAssumption] = Field(default_factory=list)
     questions: List[SpecificationQuestion] = Field(default_factory=list)
     annotations: List[SpecificationAnnotation] = Field(default_factory=list)
+    exclusions: List[SpecificationExclusion] = Field(default_factory=list)
     free_text: str = ""
 
     @model_validator(mode="after")
@@ -220,6 +230,8 @@ class SpecificationEditRequest(BaseModel):
     accepted_feature_ids: List[str] = Field(default_factory=list)
     accepted_assumption_ids: List[str] = Field(default_factory=list)
     clarifications: Dict[str, str] = Field(default_factory=dict)
+    excluded_feature_ids: List[str] = Field(default_factory=list)
+    feature_field_edits: Dict[str, Dict[str, float]] = Field(default_factory=dict)
 
 
 class FeatureEvidence(BaseModel):
@@ -358,7 +370,7 @@ class GenerationResult(BaseModel):
     status: str = "new"
     syntax_status: Literal["not_run", "success", "failed"] = "not_run"
     geometry_status: Literal["not_run", "success", "failed"] = "not_run"
-    semantic_status: Literal["not_run", "success", "failed"] = "not_run"
+    semantic_status: Literal["not_run", "success", "failed", "draft_preview"] = "not_run"
     warnings: List[str] = Field(default_factory=list)
     execution_time_ms: Optional[int] = None
     bounding_box: Optional[Dict[str, float]] = None

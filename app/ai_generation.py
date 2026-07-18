@@ -2,13 +2,14 @@ from __future__ import annotations
 
 import base64
 import json
+import time
 import logging
 import os
 import re
 import warnings
 from datetime import datetime
 from pathlib import Path
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Literal, Optional
 from urllib.parse import urlsplit, urlunsplit
 from uuid import uuid4
 
@@ -31,6 +32,7 @@ from .feature_compiler import (
 from .draft_geometry_rules import draft_geometry_rules
 from .source_images import get_source_image, store_source_image
 from .draft_builder import DraftBuilder
+from .minimal_model import minimal_reliable_draft
 
 
 MAX_UPLOAD_BYTES = 20 * 1024 * 1024
@@ -38,6 +40,7 @@ MAX_IMAGE_DIMENSION = 12000
 OPENROUTER_URL = "https://openrouter.ai/api/v1/chat/completions"
 LLM_LOG_DIR = Path(os.environ.get("EASYCAD_LLM_LOG_DIR", "logs"))
 MAX_DRAFT_PLANNER_TURNS = 48
+MAX_INCREMENTAL_REPLAN_TURNS = 16
 SAFE_RESPONSE_HEADER_NAMES = {"content-type", "content-length", "x-request-id", "cf-ray", "server", "via"}
 logger = logging.getLogger("easycad.llm")
 MODEL_ALIASES = {
@@ -45,10 +48,11 @@ MODEL_ALIASES = {
     "gemini-3-flash": "google/gemini-3-flash-preview",
 }
 class GenerationError(RuntimeError):
-    def __init__(self, stage: str, message: str, detail: Optional[dict] = None):
+    def __init__(self, stage: str, message: str, detail: Optional[dict] = None, *, planner_outcome: Literal["turn_limit", "provider_error", "planner_stopped"] | None = None):
         super().__init__(message)
         self.stage = stage
         self.detail = detail or {}
+        self.planner_outcome = planner_outcome
 
 
 def validate_image_upload(data: bytes, filename: str = "", mime_type: str = "") -> Dict[str, Any]:
@@ -99,6 +103,7 @@ async def generate_draft_specification_from_image(
         raise GenerationError("draft_specification", "DEEP_SEEK_KEY is not configured")
     analysis = await analyze_drawing(data, image_info["mime_type"], instructions, openrouter_key)
     draft = await plan_draft_specification(analysis, instructions, deepseek_key)
+    draft = minimal_reliable_draft(draft)
     image_ref, image_sha256 = store_source_image(data)
     draft.source = SourceInfo(
         filename=image_info.get("filename", ""),
@@ -208,6 +213,10 @@ async def plan_draft_specification(
     user_inputs: Dict[str, Any] | None = None,
 ) -> DraftSpecification:
     """Convert image observations into an editable pre-CAD specification."""
+    freeform_instruction = str((user_inputs or {}).get("freeform_instruction", "")).strip()
+    incremental = previous_specification is not None and (
+        os.environ.get("EASYCAD_REPLAN_MODE", "full") == "incremental" or bool(freeform_instruction)
+    )
     openrouter_planner_model = os.environ.get("OPEN_ROUTER_PLANNER_MODEL", "").strip()
     if openrouter_planner_model:
         model = normalize_model_id(openrouter_planner_model)
@@ -226,7 +235,8 @@ async def plan_draft_specification(
         "use this only to correct an item that a later tool result reports as wrong; never repeat an unchanged item. After ok=false, correct and retry only that item. "
         "When all intended items have ok=true results, call finish_draft immediately. Never omit finish_draft and never continue after it. "
         "Each dimension requires id, label, value or expression, unit, source, confidence, status, critical, evidence. "
-        "Each feature requires id, label, type, operation, target, parameters, placement, status, critical_fields, confidence, evidence. "
+        "Each feature requires id, label, type, operation, target, parameters, placement, status, critical_fields, confidence, evidence, source_feature_ids. "
+        "Map every normalized drawing-analysis feature id to one or more specification features through source_feature_ids; never silently drop an observed feature. "
         f"Feature type must be exactly one of these draft-compatible compiler types: {draft_specification_operation_types()}. "
         "The vision-analysis terms body and groove are observations, not valid feature types: choose a supported type that represents them, "
         "such as box or cylinder, or mark the feature unsupported when no trusted type can represent it. "
@@ -239,6 +249,8 @@ async def plan_draft_specification(
         "A drawing label that says a hole is through/сквозное is a confirmed instruction to cut through its target thickness; do not ask about it again. "
         "countersink needs diameter, depth, sink_diameter, sink_depth; slot/pocket need length, width, depth; "
         "rib needs length, thickness, height; fillet needs radius; chamfer needs distance; shell needs thickness. "
+        "For text, engraved, recessed, or inset means operation=cut; embossed, raised, protruding, or outward text means operation=add. "
+        "Place raised text so its extrusion leaves the named exterior face while still touching the target body. "
         + draft_geometry_rules()
         + "\n"
         "Build one connected solid: the first feature is the only root; every additive feature after the first MUST set target to the existing root body, and every cut MUST target that same connected body. "
@@ -247,16 +259,14 @@ async def plan_draft_specification(
         "never a feature ID. Omit reference when the selected edges are not known. "
         "Use origin as exactly three numeric values or dimension IDs for translation, never expressions; never use offset, center, position, depth, or centered_on_width. "
         "Write constant origin coordinates as plain numbers: use 0 directly and never declare a dimension for the constant zero. "
-        "Use status confirmed only for unambiguous observed values. Use needs_input for missing critical data, conflicted for contradictions, "
-        "and assumed only with an assumption describing the proposal. Every missing size, position, target, cut direction, or depth needed "
-        "for a printable feature must become a required question. Never silently invent a dimension. "
-        "Ask a question only for a fact without which the solid cannot be built: a missing size, position, direction, target, or depth. "
-        "Secondary or cosmetic details such as whether an undimensioned edge is filleted or sharp are never questions: propose them as "
-        "assumed features with an assumption, or leave them out. Ask every necessary question in this draft; do not hold questions back "
-        "for a later round, and never re-ask about geometry an earlier answer or acceptance already settled. "
-        "Annotations use normalized x and y coordinates from 0 to 1 and link to a dimension, feature, or question. "
+        "Use millimetres for every measurement. Build a minimal reliable model, not a complete interpretation: include only geometry with "
+        "unambiguous dimensions, position, target, and direction. Never ask questions in this pass. If a detail is incomplete, contradictory, "
+        "or unsupported, return it as status unsupported with its source_feature_ids and a short omission reason in its label. Do not invent "
+        "a dimension. If the main form is unclear, still return one confirmed box body using the most reliable overall dimensions available, "
+        "or a 100 x 100 x 10 mm box when none are readable. "
+        "Annotations use normalized x and y coordinates from 0 to 1 and link to a dimension or feature. "
     )
-    if previous_specification is not None:
+    if previous_specification is not None and not incremental:
         prompt += (
             "Return a complete replacement DraftSpecification, not a patch. The previous specification is reference context only; "
             "use the drawing analysis and user inputs to resolve it again. Return every previous dimension, feature, and assumption: "
@@ -277,6 +287,31 @@ async def plan_draft_specification(
             "Return every previous question that is still unresolved, preserving its ID and prompt. Remove a previous question only when a direct "
             "user value, clarification, or accepted proposal actually answers it. Only create a new question when the user inputs still leave a necessary modelling fact unresolved."
         )
+        if freeform_instruction:
+            prompt += (
+                " A freeform_instruction is an explicit request to revise the model broadly: it may replace or remove previously "
+                "confirmed dimensions, features, or assumptions when needed to follow that instruction."
+            )
+    elif incremental:
+        prompt += (
+            "Edit the seeded DraftSpecification in place. Locked items are server-owned and cannot be changed. "
+            "The metadata and previous items are already stored: do not call set_draft_metadata and do not re-add unchanged items. "
+            "Call add_* only for unlocked items that need replacement, remove_item for an unlocked obsolete item, "
+            "and resolve_question for every answered question. Then call finish_draft."
+        )
+        if freeform_instruction:
+            prompt += (
+                " The freeform instruction is a direct user decision: create its requested features with status confirmed, "
+                "target the existing rendered body by its stable feature ID, and use source_feature_ids=['freeform_instruction']. "
+                "Do not ask questions for a freeform edit. When it supplies a feature depth but omits another symmetric "
+                "profile span, use that supplied depth as the missing span: this produces the smallest conventional profile "
+                "that can be rendered while preserving every explicit user measurement. Origin conventions are strict: use a "
+                "rectangular box cut when you calculate a profile corner, and use pocket or slot only when placement.origin is "
+                "the profile centre. Never combine a corner coordinate with a centred-profile primitive. Before finish_draft, "
+                "check every freeform position constraint: an edge pair centred on an axis has each feature centre on that "
+                "axis midpoint and lies on the two opposite edges of the other in-plane axis."
+            )
+    if previous_specification is not None:
         prompt += (
             " A clarification with key build_repair is a deterministic build diagnostic supplied to the user: it overrides "
             "any earlier accepted feature geometry named in that clarification. Correct the complete replacement graph accordingly "
@@ -284,28 +319,51 @@ async def plan_draft_specification(
         )
     if instructions.strip():
         prompt += f"\nUser instructions: {instructions.strip()}"
+    if freeform_instruction:
+        prompt += f"\nFreeform model-change instruction: {freeform_instruction}"
+    excluded_ids = sorted(set((user_inputs or {}).get("excluded_feature_ids", [])))
+    if excluded_ids:
+        prompt += f"\nExplicitly excluded feature IDs: {', '.join(excluded_ids)}. Do not return these features."
+    superseded_ids = _clarification_superseded_ids(previous_specification, user_inputs or {})
+    locked_items = _incremental_locked_items(previous_specification, user_inputs or {}) if incremental else set()
+    previous_payload: object = previous_specification.model_dump(mode="json") if previous_specification else None
+    if incremental and previous_specification:
+        open_items = {
+            "dimensions": [item.model_dump(mode="json") for item in previous_specification.dimensions if ("dimension", item.id) not in locked_items],
+            "features": [item.model_dump(mode="json") for item in previous_specification.features if ("feature", item.id) not in locked_items],
+            "assumptions": [item.model_dump(mode="json") for item in previous_specification.assumptions if ("assumption", item.id) not in locked_items],
+            "questions": [item.model_dump(mode="json") for item in previous_specification.questions],
+        }
+        previous_payload = {
+            "open_items": open_items,
+            "locked_items": [{"item_type": kind, "id": item_id} for kind, item_id in sorted(locked_items)],
+            "rendered_model": {
+                "dimensions": [item.model_dump(mode="json") for item in previous_specification.dimensions],
+                "features": [item.model_dump(mode="json") for item in previous_specification.features if item.status == "confirmed"],
+            },
+        }
     payload = {
         "model": model,
         "messages": [
             {"role": "system", "content": prompt},
             {"role": "user", "content": json.dumps({
                 "drawing_analysis": analysis,
-                "previous_specification": previous_specification.model_dump(mode="json") if previous_specification else None,
+                "previous_specification": previous_payload,
                 "user_inputs": user_inputs or {},
             }, ensure_ascii=False)},
         ],
         "temperature": 0.1,
         "max_tokens": 20000 if openrouter_planner_model else 5000,
-        "tools": draft_builder_tools(),
+        "tools": draft_builder_tools(incremental=incremental),
         "tool_choice": "required",
     }
-    superseded_ids = _clarification_superseded_ids(previous_specification, user_inputs or {})
-    builder_kwargs = {
-        "required_dimension_ids": {item.id for item in previous_specification.dimensions} - superseded_ids if previous_specification else set(),
-        "required_feature_ids": {item.id for item in previous_specification.features} - superseded_ids if previous_specification else set(),
-        "required_assumption_ids": {item.id for item in previous_specification.assumptions} - superseded_ids if previous_specification else set(),
-        **_confirmed_replan_snapshots(previous_specification, user_inputs or {}),
-    }
+    builder_kwargs = ({"previous_specification": previous_specification, "locked_items": locked_items, "incremental": True,
+                       "answered_question_ids": {key for key, value in (user_inputs or {}).get("clarifications", {}).items() if str(value).strip()}} if incremental else {
+        "required_dimension_ids": set() if freeform_instruction else ({item.id for item in previous_specification.dimensions} - superseded_ids if previous_specification else set()),
+        "required_feature_ids": set() if freeform_instruction else ({item.id for item in previous_specification.features} - superseded_ids if previous_specification else set()),
+        "required_assumption_ids": set() if freeform_instruction else ({item.id for item in previous_specification.assumptions} - superseded_ids if previous_specification else set()),
+        **({} if freeform_instruction else _confirmed_replan_snapshots(previous_specification, user_inputs or {})),
+    })
     return await _run_draft_builder(
         url,
         api_key,
@@ -339,6 +397,21 @@ def _clarification_superseded_ids(
         if any(affected_id in superseded for affected_id in assumption.affected_ids):
             superseded.add(assumption.id)
     return superseded
+
+
+def _incremental_locked_items(
+    previous_specification: DraftSpecification | None, user_inputs: Dict[str, Any]
+) -> set[tuple[str, str]]:
+    if previous_specification is None:
+        return set()
+    superseded = _clarification_superseded_ids(previous_specification, user_inputs)
+    accepted_features = set(user_inputs.get("accepted_feature_ids", []))
+    accepted_assumptions = set(user_inputs.get("accepted_assumption_ids", []))
+    locked: set[tuple[str, str]] = set()
+    locked.update(("dimension", item.id) for item in previous_specification.dimensions if item.status == "confirmed" and item.id not in superseded)
+    locked.update(("feature", item.id) for item in previous_specification.features if (item.status == "confirmed" or item.id in accepted_features) and item.id not in superseded)
+    locked.update(("assumption", item.id) for item in previous_specification.assumptions if (item.status == "confirmed" or item.id in accepted_assumptions) and item.id not in superseded)
+    return locked
 
 
 def _confirmed_replan_snapshots(
@@ -407,11 +480,12 @@ def _draft_feature_schema() -> Dict[str, Any]:
         "label": {"type": "string"},
         "target": {"anyOf": [{"type": "string"}, {"type": "null"}]},
         "placement": {"$ref": "#/$defs/FeaturePlacement"},
-        "status": {"enum": ["confirmed", "needs_input", "assumed", "conflicted"]},
+        "status": {"enum": ["confirmed", "needs_input", "assumed", "conflicted", "unsupported"]},
         "critical_fields": {"type": "array", "items": {"type": "string"}},
         "confidence": {"type": "number", "minimum": 0, "maximum": 1},
         "evidence": {"type": "array", "items": {"type": "string"}},
         "alternatives": {"type": "object", "additionalProperties": {"type": "array", "items": value_schema}},
+        "source_feature_ids": {"type": "array", "items": {"type": "string"}},
     }
     variants = []
     for feature_type, contract in OPERATION_CONTRACTS.items():
@@ -421,7 +495,7 @@ def _draft_feature_schema() -> Dict[str, Any]:
             "operation": {"enum": list(contract.allowed_operations)},
             "parameters": _parameter_schema(contract.required_parameters, contract.optional_parameters, value_schema),
         }
-        required = ["id", "label", "type", "operation", "target", "parameters", "placement", "status", "critical_fields", "confidence", "evidence", "alternatives"]
+        required = ["id", "label", "type", "operation", "target", "parameters", "placement", "status", "critical_fields", "confidence", "evidence", "alternatives", "source_feature_ids"]
         if contract.requires_profile:
             properties["profile"] = {
                 **_profile_schema(contract.profile_types, value_schema),
@@ -491,7 +565,7 @@ def _pattern_schema(pattern_types: tuple[str, ...], value_schema: Dict[str, Any]
     return {"oneOf": variants}
 
 
-def draft_builder_tools() -> List[Dict[str, Any]]:
+def draft_builder_tools(*, incremental: bool = False) -> List[Dict[str, Any]]:
     schema = DraftSpecification.model_json_schema()["$defs"]
     feature_variants = _draft_feature_schema()["oneOf"]
     # Each function schema is sent independently.  Keep the shared definitions
@@ -507,6 +581,11 @@ def draft_builder_tools() -> List[Dict[str, Any]]:
         {"type": "function", "function": {"name": "add_annotation", "parameters": with_definitions(schema["SpecificationAnnotation"])}},
         {"type": "function", "function": {"name": "finish_draft", "parameters": {"type": "object", "additionalProperties": False, "properties": {}}}},
     ]
+    if incremental:
+        tools.extend([
+            {"type": "function", "function": {"name": "remove_item", "parameters": {"type": "object", "additionalProperties": False, "required": ["item_type", "id", "reason"], "properties": {"item_type": {"enum": ["dimension", "feature", "assumption", "question", "annotation"]}, "id": {"type": "string"}, "reason": {"type": "string"}}}}},
+            {"type": "function", "function": {"name": "resolve_question", "parameters": {"type": "object", "additionalProperties": False, "required": ["id"], "properties": {"id": {"type": "string"}}}}},
+        ])
     for variant in feature_variants:
         feature_type = variant["properties"]["type"]["const"]
         tools.append({"type": "function", "function": {"name": f"add_{feature_type}", "description": f"Add exactly one {feature_type} feature.", "parameters": with_definitions(variant)}})
@@ -527,8 +606,79 @@ async def _run_draft_builder(
     preserved_assumptions: Dict[str, Dict[str, Any]] | None = None,
     planner_run_id: str | None = None,
     planner_mode: str = "initial",
+    previous_specification: DraftSpecification | None = None,
+    locked_items: set[tuple[str, str]] | None = None,
+    incremental: bool = False,
+    answered_question_ids: set[str] | None = None,
 ) -> DraftSpecification:
-    builder = DraftBuilder(analysis)
+    from datetime import datetime, timezone
+    from .draft_lint import lint_draft
+    from .run_metrics import append_planner_run
+
+    stats: Dict[str, Any] = {"turns_used": 0, "tool_calls": 0, "tool_errors": 0, "finish_rejections": {}, "removed_items": []}
+    started = time.monotonic()
+    outcome = "completed"
+    draft: DraftSpecification | None = None
+    try:
+        draft = await _run_draft_builder_impl(
+            url, api_key, payload, analysis,
+            required_dimension_ids=required_dimension_ids,
+            required_feature_ids=required_feature_ids,
+            required_assumption_ids=required_assumption_ids,
+            preserved_dimensions=preserved_dimensions,
+            preserved_features=preserved_features,
+            preserved_assumptions=preserved_assumptions,
+            planner_run_id=planner_run_id,
+            planner_mode=planner_mode,
+            previous_specification=previous_specification,
+            locked_items=locked_items,
+            incremental=incremental,
+            answered_question_ids=answered_question_ids,
+            _run_stats=stats,
+        )
+        return draft
+    except GenerationError as exc:
+        outcome = exc.planner_outcome or "provider_error"
+        raise
+    except Exception:
+        outcome = "provider_error"
+        raise
+    finally:
+        lint = lint_draft(draft) if draft is not None else None
+        append_planner_run({
+            "created_at": datetime.now(timezone.utc).isoformat(),
+            "planner_run_id": planner_run_id,
+            "planner_mode": planner_mode,
+            "model": payload.get("model"),
+            "outcome": outcome,
+            **stats,
+            "lint_errors": sum(item.severity == "error" for item in lint.issues) if lint else 0,
+            "lint_warnings": sum(item.severity == "warning" for item in lint.issues) if lint else 0,
+            "duration_ms": round((time.monotonic() - started) * 1000),
+        })
+
+
+async def _run_draft_builder_impl(
+    url: str,
+    api_key: str,
+    payload: Dict[str, Any],
+    analysis: Dict[str, Any],
+    *,
+    required_dimension_ids: set[str] | None = None,
+    required_feature_ids: set[str] | None = None,
+    required_assumption_ids: set[str] | None = None,
+    preserved_dimensions: Dict[str, Dict[str, Any]] | None = None,
+    preserved_features: Dict[str, Dict[str, Any]] | None = None,
+    preserved_assumptions: Dict[str, Dict[str, Any]] | None = None,
+    planner_run_id: str | None = None,
+    planner_mode: str = "initial",
+    previous_specification: DraftSpecification | None = None,
+    locked_items: set[tuple[str, str]] | None = None,
+    incremental: bool = False,
+    answered_question_ids: set[str] | None = None,
+    _run_stats: Dict[str, Any] | None = None,
+) -> DraftSpecification:
+    builder = DraftBuilder.seed(previous_specification, locked_items or set()) if incremental and previous_specification else DraftBuilder(analysis)
     messages = list(payload["messages"])
     headers = {
         "Authorization": f"Bearer {api_key}",
@@ -537,7 +687,13 @@ async def _run_draft_builder(
         "X-Title": "EasyCAD",
     }
     last_results: List[Dict[str, Any]] = []
-    for turn in range(1, MAX_DRAFT_PLANNER_TURNS + 1):
+    required_feature_replacements: Dict[str, frozenset[str]] = {}
+    last_finish_failure: tuple[str, str] | None = None
+    repeated_finish_failures = 0
+    turn_cap = MAX_INCREMENTAL_REPLAN_TURNS if incremental else MAX_DRAFT_PLANNER_TURNS
+    for turn in range(1, turn_cap + 1):
+        if _run_stats is not None:
+            _run_stats["turns_used"] = turn
         try:
             async with httpx.AsyncClient(timeout=120) as client:
                 response = await client.post(url, headers=headers, json={**payload, "messages": messages})
@@ -584,21 +740,41 @@ async def _run_draft_builder(
             planner_mode=planner_mode,
         )
         if not calls:
-            raise GenerationError("draft_specification", "Planner stopped before finish_draft")
+            raise GenerationError("draft_specification", "Planner stopped before finish_draft", planner_outcome="planner_stopped")
         messages.append(message)
         for call in calls:
+            if _run_stats is not None:
+                _run_stats["tool_calls"] += 1
             name = call["function"]["name"]
             raw_arguments = call["function"].get("arguments", "{}")
             try:
                 args = _parse_json_object(raw_arguments, "draft_specification")
             except GenerationError as exc:
+                if _run_stats is not None:
+                    _run_stats["tool_errors"] += 1
                 messages.append({"role": "tool", "tool_call_id": call["id"], "content": json.dumps({"ok": False, "message": str(exc)})})
                 continue
             if name == "finish_draft":
-                if not builder.metadata_set:
+                if incremental:
+                    unresolved_answers = sorted((answered_question_ids or set()) & {item.id for item in builder.draft.questions})
+                    from .draft_lint import lint_draft
+                    lint_errors = [item.message for item in lint_draft(builder.draft).issues if item.severity == "error"]
+                    reference_issues = builder.reference_issues()
+                    if unresolved_answers or lint_errors or reference_issues:
+                        result = {"ok": False, "field": "incremental_replan", "message": "; ".join([
+                            *([f"Answered questions still unresolved: {', '.join(unresolved_answers)}"] if unresolved_answers else []),
+                            *reference_issues, *lint_errors,
+                        ])}
+                    else:
+                        return builder.finish()
+                elif not builder.metadata_set:
                     result = {"ok": False, "field": "title", "message": "set_draft_metadata must be called before finish_draft"}
                 elif not builder.draft.features:
                     result = {"ok": False, "field": "features", "message": "draft must contain at least one feature before finish_draft"}
+                elif planner_mode == "initial":
+                    # The initial pass is intentionally permissive: minimal_reliable_draft
+                    # immediately filters this raw draft into a compilable body plus omissions.
+                    return builder.finish()
                 else:
                     missing_dimensions = sorted((required_dimension_ids or set()) - {item.id for item in builder.draft.dimensions})
                     missing_features = sorted((required_feature_ids or set()) - {item.id for item in builder.draft.features})
@@ -631,8 +807,16 @@ async def _run_draft_builder(
                             for item_id, expected_payload in expected.items()
                             if _comparable(kind, actual.get(item_id)) != _comparable(kind, expected_payload)
                         ]
+                        required_feature_replacements = {
+                            item_id: frozenset(expected_payload.get("source_feature_ids", []))
+                            for kind, item_id, expected_payload in changed_items
+                            if kind == "feature" and expected_payload.get("source_feature_ids")
+                        }
+                        from .draft_lint import lint_draft
+                        lint_result = lint_draft(builder.draft)
+                        lint_errors = [issue.message for issue in lint_result.issues if issue.severity == "error"]
                         reference_issues = builder.reference_issues()
-                        if changed_items or reference_issues:
+                        if changed_items or reference_issues or lint_errors:
                             changed = [f"{kind}:{item_id}" for kind, item_id, _ in changed_items]
                             restore_hint = (
                                 (
@@ -653,6 +837,7 @@ async def _run_draft_builder(
                                 "message": "; ".join([
                                     *([restore_hint] if restore_hint else []),
                                     *reference_issues,
+                                    *lint_errors,
                                 ]),
                             }
                         else:
@@ -664,21 +849,60 @@ async def _run_draft_builder(
             elif name == "add_assumption": result = builder.add_assumption(args)
             elif name == "add_question": result = builder.add_question(args)
             elif name == "add_annotation": result = builder.add_annotation(args)
-            elif name.startswith("add_"): result = builder.add_feature(args)
+            elif name == "remove_item": result = builder.remove_item(args)
+            elif name == "resolve_question": result = builder.resolve_question(args)
+            elif name.startswith("add_"):
+                feature_id = str(args.get("id", ""))
+                source_ids = frozenset(str(item) for item in args.get("source_feature_ids", []))
+                replacement_ids = sorted(
+                    expected_id for expected_id, expected_sources in required_feature_replacements.items()
+                    if expected_sources == source_ids and expected_id != feature_id
+                )
+                if replacement_ids:
+                    result = {
+                        "ok": False,
+                        "field": "id",
+                        "message": (
+                            f"This source feature must replace the existing feature ID {replacement_ids[0]!r}; "
+                            f"do not create alias ID {feature_id!r}. Call {name} again with id={replacement_ids[0]!r}."
+                        ),
+                    }
+                else:
+                    result = builder.add_feature(args)
             else: result = {"ok": False, "message": "unknown tool"}
             last_results.append({"tool": name, **result})
+            if _run_stats is not None and not result.get("ok", False):
+                _run_stats["tool_errors"] += 1
+                if name == "finish_draft":
+                    reason = str(result.get("field", "unknown"))
+                    rejections = _run_stats["finish_rejections"]
+                    rejections[reason] = rejections.get(reason, 0) + 1
+            elif _run_stats is not None and name == "remove_item":
+                _run_stats["removed_items"].append({"item": result.get("removed"), "reason": result.get("reason")})
             last_results = last_results[-8:]
             messages.append({"role": "tool", "tool_call_id": call["id"], "content": json.dumps(result)})
+            if name == "finish_draft" and not result.get("ok", False):
+                signature = (str(result.get("field", "unknown")), str(result.get("message", "")))
+                repeated_finish_failures = repeated_finish_failures + 1 if signature == last_finish_failure else 1
+                last_finish_failure = signature
+                if repeated_finish_failures >= 3:
+                    raise GenerationError(
+                        "draft_specification",
+                        "Planner made no progress after three identical finish_draft rejections",
+                        {"field": signature[0], "message": signature[1], "planner_run_id": planner_run_id},
+                        planner_outcome="planner_stopped",
+                    )
     _dump_planner_context(planner_run_id, {**payload, "messages": messages})
     raise GenerationError(
         "draft_specification",
-        f"Planner exceeded the {MAX_DRAFT_PLANNER_TURNS}-turn limit before completing the draft",
+        f"Planner exceeded the {turn_cap}-turn limit before completing the draft",
         {
             "last_tool_results": last_results,
-            "max_provider_turns": MAX_DRAFT_PLANNER_TURNS,
+            "max_provider_turns": turn_cap,
             "planner_run_id": planner_run_id,
             "planner_mode": planner_mode,
         },
+        planner_outcome="turn_limit",
     )
 
 
@@ -790,11 +1014,7 @@ def _normalize_analysis_features(raw: Any) -> List[Dict[str, Any]]:
             payload.get("type"),
             payload.get("description"),
         )
-        base_id = next(
-            (_parameter_id(str(value)) for value in candidates if value and _parameter_id(str(value))),
-            "",
-        )
-        base_id = base_id or f"feature_{idx}"
+        base_id = _parameter_id(str(payload.get("id") or "")) or f"feature_{idx}"
         counts[base_id] = counts.get(base_id, 0) + 1
         feature_id = base_id if counts[base_id] == 1 else f"{base_id}_{counts[base_id]}"
         assigned_ids.append(feature_id)

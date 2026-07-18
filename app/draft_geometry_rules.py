@@ -20,6 +20,18 @@ Geometry interpretation rules:
 * A feature centred across a span needs a declared derived midpoint dimension.
   Use that dimension ID in placement.origin; never put arithmetic directly in
   executable feature coordinates.
+* A box placement.origin is its minimum-extent corner. Circle, slot, and
+  pocket profiles are centred on placement.origin. Do not use a box-corner
+  coordinate for a centred cut profile.
+* When a user asks for an additive box at the centre or middle of a plane,
+  that describes the box's geometric centre, not placement.origin. Declare
+  derived coordinates equal to the plane centre minus half the box span on
+  each in-plane axis, then use those coordinates as the box origin.
+* For a pair of edge features, "centred on X" means each feature's geometric
+  centre has the part's X midpoint, so the pair belongs on the opposite Y
+  edges. Conversely, "centred on Y" places the pair on the opposite X edges.
+  Apply the primitive's own origin convention when converting those centres
+  to placement coordinates.
 * For a circular or semi-circular cut that opens onto a material face, place
   its circle centre on that face and extrude it through the required thickness.
   The cut depth is the span along the extrusion axis, not the circle radius.
@@ -40,7 +52,10 @@ Geometry interpretation rules:
 * Additive bodies and cuts share one global coordinate frame. Place every
   feature so a cut actually intersects the material of its target: a cut whose
   origin lies outside its target's occupied extent is a placement error, not a
-  valid interpretation.
+  valid interpretation. placement.origin is the start of the cutting solid;
+  its positive extrusion must penetrate the target by a non-zero distance.
+  Do not start a positive-depth cut on the outside face and extrude away from
+  the material.
 * If the drawing does not establish the profile face or extrusion span, return
   needs_input or an assumed proposal with a question. Do not silently choose
   an axis or placement.

@@ -6,6 +6,7 @@ import os
 import base64
 import hashlib
 import io
+import re
 from pathlib import Path
 from typing import Dict
 from uuid import uuid4
@@ -30,14 +31,21 @@ from .models import (
     RenderArtifact,
     SpecificationEditRequest,
     DraftSpecification,
+    SpecificationExclusion,
     SpecificationQuestion,
 )
 from .specification import (
     SpecificationValidationError,
+    analysis_coverage_issues,
     apply_specification_edits,
+    exclusion_record_issues,
     project_from_specification,
     validate_specification,
 )
+from .draft_lint import lint_draft
+from .review_plan import build_review_plan
+from .draft_preview import draft_schematic
+from .minimal_model import fallback_draft, minimal_reliable_draft
 from .runner import RunnerError, concrete_parameters, run_project
 from .validator import ValidationError, validate_project as validate_project_model
 
@@ -46,7 +54,6 @@ ROOT = Path(__file__).resolve().parent.parent
 PROJECT_DIR = ROOT / "projects"
 STATIC_DIR = ROOT / "static"
 FIXTURE_DIR = ROOT / "fixtures"
-
 
 def load_env() -> None:
     env_path = ROOT / ".env"
@@ -68,6 +75,79 @@ logger = logging.getLogger("easycad.api")
 
 def _specification_error(exc: SpecificationValidationError) -> HTTPException:
     return HTTPException(422, {"stage": "specification_validation", "message": str(exc), "detail": {"field_ids": exc.field_ids, "messages": exc.messages}})
+
+
+def _validated_exclusion_record(specification: DraftSpecification) -> None:
+    issues = exclusion_record_issues(specification)
+    if issues:
+        raise HTTPException(422, {"stage": "analysis_coverage", "message": "; ".join(issues), "detail": {"messages": issues}})
+
+
+def _exclude_features(specification: DraftSpecification, feature_ids: list[str]) -> DraftSpecification:
+    if not feature_ids:
+        return specification.model_copy(deep=True)
+    updated = specification.model_copy(deep=True)
+    requested = set(feature_ids)
+    known = {item.id for item in updated.features}
+    unknown = sorted(requested - known)
+    if unknown:
+        raise HTTPException(422, {"stage": "feature_exclusion", "message": f"Unknown feature ids: {', '.join(unknown)}"})
+    dependents = sorted(item.id for item in updated.features if item.target in requested)
+    if dependents:
+        raise HTTPException(422, {"stage": "feature_exclusion", "message": f"Excluded features are targeted by: {', '.join(dependents)}", "detail": {"feature_ids": dependents}})
+    removed = [item for item in updated.features if item.id in requested]
+    updated.features = [item for item in updated.features if item.id not in requested]
+    updated.questions = [item for item in updated.questions if item.field_id not in requested]
+    updated.annotations = [item for item in updated.annotations if item.field_id not in requested]
+    for annotation in updated.annotations:
+        annotation.field_ids = [item for item in annotation.field_ids if item not in requested]
+    for assumption in updated.assumptions:
+        assumption.affected_ids = [item for item in assumption.affected_ids if item not in requested]
+    existing = {item.feature_id for item in updated.exclusions}
+    for item in removed:
+        if item.id not in existing:
+            updated.exclusions.append(SpecificationExclusion(**{
+                "feature_id": item.id,
+                "source_feature_ids": item.source_feature_ids or ([item.id] if any(raw.get("id") == item.id for raw in updated.analysis.features) else []),
+                "reason": "Explicitly excluded by the user",
+            }))
+    return DraftSpecification.model_validate(updated.model_dump(mode="json"))
+
+
+_ORIGIN_EDIT = re.compile(r"^placement\.origin\[([012])\]$")
+
+
+def _apply_feature_field_edits(specification: DraftSpecification, edits: dict[str, dict[str, float]]) -> DraftSpecification:
+    updated = specification.model_copy(deep=True)
+    features = {item.id: item for item in updated.features}
+    errors: list[str] = []
+    for feature_id, fields in edits.items():
+        feature = features.get(feature_id)
+        if feature is None:
+            errors.append(f"Unknown feature '{feature_id}'")
+            continue
+        for path, value in fields.items():
+            match = _ORIGIN_EDIT.fullmatch(path)
+            parameter = path.removeprefix("parameters.") if path.startswith("parameters.") else None
+            if isinstance(value, bool) or not isinstance(value, (int, float)):
+                errors.append(f"{feature_id}.{path} must be numeric")
+            elif match and feature.placement.origin is not None:
+                pass
+            elif parameter and parameter in feature.parameters and not (feature.type == "text" and parameter == "content"):
+                pass
+            else:
+                errors.append(f"{feature_id}.{path} is not an editable numeric field")
+    if errors:
+        raise HTTPException(422, {"stage": "feature_field_edits", "message": "; ".join(errors), "detail": {"messages": errors}})
+    for feature_id, fields in edits.items():
+        feature = features[feature_id]
+        for path, value in fields.items():
+            match = _ORIGIN_EDIT.fullmatch(path)
+            if match:
+                feature.placement.origin[int(match.group(1))] = value  # type: ignore[index]
+            else:
+                feature.parameters[path.removeprefix("parameters.")] = value
+    return updated
 
 
 def load_project_json(text: str) -> CADProject:
@@ -222,7 +302,7 @@ def validate_feature_coverage(project: CADProject) -> None:
     unresolved_ids = [
         entry.feature_id
         for entry in project.feature_coverage.entries
-        if entry.confidence >= 0.8 and entry.status in {"planned", "unresolved", "unsupported"}
+        if entry.confidence >= 0.8 and entry.status in {"planned", "unresolved"}
     ]
     if unresolved_ids:
         raise RunnerError(
@@ -389,18 +469,9 @@ async def analyze_specification(
         input_mode,
         bool(file.filename),
     )
-    try:
-        input_warning = validate_input_quality_gate(
-            input_mode,
-            has_orthographic_views=has_orthographic_views,
-            has_isometric_view=has_isometric_view,
-            has_units_and_overall_dimensions=has_units_and_overall_dimensions,
-            has_feature_positions=has_feature_positions,
-            has_feature_dimensions_and_directions=has_feature_dimensions_and_directions,
-        )
-    except HTTPException as exc:
-        logger.warning("specification_analyze_rejected request_id=%s detail=%s", request_id, exc.detail)
-        raise
+    # A minimal fallback body is more useful than rejecting an incomplete drawing.
+    # Input-quality flags remain available to clients, but never block first preview.
+    input_warning = None
     try:
         draft = await generate_draft_specification_from_image(
             await file.read(), file.filename or "", file.content_type or "", instructions
@@ -413,42 +484,65 @@ async def analyze_specification(
             sorted(exc.detail),
         )
         raise HTTPException(422, {"stage": exc.stage, "message": str(exc), "detail": exc.detail, "request_id": request_id})
-    if input_warning:
-        draft.questions.append(SpecificationQuestion(id="sketch_review", field_id="input_mode", prompt=input_warning, required=False))
     logger.info("specification_analyze_succeeded request_id=%s", request_id)
-    return {"specification": draft.model_dump(mode="json"), "request_id": request_id}
+    lint = lint_draft(draft)
+    return {"specification": draft.model_dump(mode="json"), "request_id": request_id, "lint": lint.as_dict(), "review_plan": build_review_plan(draft, lint)}
 
 
 @app.post("/api/specifications/validate")
 async def validate_specification_endpoint(req: SpecificationEditRequest):
+    _validated_exclusion_record(req.specification)
+    if req.feature_field_edits and not any((req.dimension_values, req.accepted_feature_ids, req.accepted_assumption_ids, req.clarifications, req.excluded_feature_ids)):
+        draft = _apply_feature_field_edits(req.specification, req.feature_field_edits)
+        try:
+            values = validate_specification(draft)
+            valid = True
+            diagnostics = None
+        except SpecificationValidationError as exc:
+            values = {}
+            valid = False
+            diagnostics = {"field_ids": exc.field_ids, "messages": exc.messages, "hints": specification_repair_hints(exc.field_ids, exc.messages)}
+        lint = lint_draft(draft)
+        response = {"valid": valid, "values": values, "specification": draft.model_dump(mode="json"), "lint": lint.as_dict(), "review_plan": build_review_plan(draft, lint)}
+        if diagnostics:
+            response["diagnostics"] = diagnostics
+        return response
+    if req.feature_field_edits:
+        raise HTTPException(422, {"stage": "feature_field_edits", "message": "feature_field_edits cannot be combined with other edits"})
+    base_specification = _exclude_features(req.specification, req.excluded_feature_ids)
     clarifications = [(question_id, text.strip()) for question_id, text in req.clarifications.items() if text.strip()]
     user_inputs = {
         "dimension_values": req.dimension_values,
         "accepted_feature_ids": req.accepted_feature_ids,
         "accepted_assumption_ids": req.accepted_assumption_ids,
         "clarifications": dict(clarifications),
+        "freeform_instruction": req.clarifications.get("freeform_instruction", "").strip(),
+        "excluded_feature_ids": req.excluded_feature_ids,
     }
-    if any(user_inputs.values()):
+    planner_inputs = {key: value for key, value in user_inputs.items() if key != "excluded_feature_ids"}
+    if any(planner_inputs.values()):
         try:
-            apply_specification_edits(
-                req.specification,
+            base_specification = apply_specification_edits(
+                base_specification,
                 req.dimension_values,
                 req.accepted_assumption_ids,
                 "",
                 req.accepted_feature_ids,
             )
             draft = await plan_draft_specification(
-                req.specification.analysis.model_dump(mode="json"),
+                base_specification.analysis.model_dump(mode="json"),
                 "",
                 os.environ.get("DEEP_SEEK_KEY", ""),
-                previous_specification=req.specification,
+                previous_specification=base_specification,
                 user_inputs=user_inputs,
             )
-            draft.source = req.specification.source
+            draft = minimal_reliable_draft(draft)
+            draft.source = base_specification.source
+            draft.exclusions = base_specification.exclusions
         except SpecificationValidationError as exc:
             return {
                 "valid": False,
-                "specification": req.specification.model_dump(mode="json"),
+                "specification": base_specification.model_dump(mode="json"),
                 "diagnostics": {
                     "field_ids": exc.field_ids,
                     "messages": exc.messages,
@@ -456,45 +550,83 @@ async def validate_specification_endpoint(req: SpecificationEditRequest):
                 },
             }
         except GenerationError as exc:
-            return {"valid": False, "specification": req.specification.model_dump(mode="json"), "diagnostics": {"field_ids": [], "messages": [str(exc)]}}
+            return {"valid": False, "specification": base_specification.model_dump(mode="json"), "diagnostics": {"field_ids": [], "messages": [str(exc)]}}
     else:
-        draft = req.specification
+        draft = base_specification
     try:
         values = validate_specification(draft)
     except SpecificationValidationError as exc:
+        lint = lint_draft(draft)
         return {
             "valid": False,
             "specification": draft.model_dump(mode="json"),
+            "lint": lint.as_dict(),
+            "review_plan": build_review_plan(draft, lint),
             "diagnostics": {
                 "field_ids": exc.field_ids,
                 "messages": exc.messages,
                 "hints": specification_repair_hints(exc.field_ids, exc.messages),
             },
         }
-    return {"valid": True, "values": values, "specification": draft.model_dump(mode="json")}
+    lint = lint_draft(draft)
+    return {"valid": True, "values": values, "specification": draft.model_dump(mode="json"), "lint": lint.as_dict(), "review_plan": build_review_plan(draft, lint)}
 
 
 @app.post("/api/specifications/build")
-def build_specification(specification: DraftSpecification):
+def build_specification(specification: DraftSpecification, mode: str = "build"):
+    if mode == "draft":
+        specification = minimal_reliable_draft(specification)
+    _validated_exclusion_record(specification)
+    uncovered = analysis_coverage_issues(specification, build_gate=True)
+    if uncovered:
+        raise HTTPException(422, {"stage": "analysis_coverage", "message": f"Uncovered analysis feature IDs: {', '.join(uncovered)}", "detail": {"feature_ids": uncovered}})
+    lint = lint_draft(specification)
+    lint_errors = [item for item in lint.issues if item.severity == "error"]
+    if lint_errors or lint.unevaluated_feature_ids:
+        raise HTTPException(422, {"stage": "draft_lint", "message": "; ".join(item.message for item in lint_errors) or "Some feature extents could not be evaluated", "detail": lint.as_dict()})
     try:
         project = project_from_specification(specification)
     except SpecificationValidationError as exc:
-        raise _specification_error(exc)
+        if mode == "draft":
+            project = project_from_specification(fallback_draft(specification))
+        else:
+            raise _specification_error(exc)
     except Exception as exc:
         raise HTTPException(422, {"stage": "feature_graph", "message": str(exc)}) from exc
     try:
         result = run_project(project, {}, fmt="stl", render_views=True)
         project.generation.syntax_status = "success"
         project.generation.geometry_status = "success"
-        validate_generation_geometry(project, result)
-        validate_feature_measurements(project, result)
-        validate_feature_coverage(project)
-        project.generation.semantic_status = "success"
+        if mode == "draft":
+            project.generation.semantic_status = "draft_preview"
+        else:
+            validate_generation_geometry(project, result)
+            validate_feature_measurements(project, result)
+            validate_feature_coverage(project)
+            project.generation.semantic_status = "success"
         apply_generation_metadata(project, result)
     except RunnerError as exc:
+        if mode == "draft":
+            try:
+                project = project_from_specification(fallback_draft(specification))
+                result = run_project(project, {}, fmt="stl", render_views=True)
+                project.generation.syntax_status = "success"
+                project.generation.geometry_status = "success"
+                project.generation.semantic_status = "draft_preview"
+                apply_generation_metadata(project, result)
+                return {"status": "draft_preview", "project": project.model_dump(mode="json"), "exportable": False}
+            except (RunnerError, SpecificationValidationError):
+                pass
         mark_generation_error(project, exc.stage, str(exc), exc.detail)
         return {"status": "needs_review", "project": project.model_dump(mode="json"), "diagnostics": exc.detail, "repair_hints": build_repair_hints(exc.detail)}
-    return {"status": "success", "project": project.model_dump(mode="json")}
+    return {"status": "draft_preview" if mode == "draft" else "success", "project": project.model_dump(mode="json"), "exportable": mode != "draft"}
+
+
+@app.post("/api/specifications/schematic")
+def schematic_specification(specification: DraftSpecification):
+    _validated_exclusion_record(specification)
+    lint = lint_draft(specification)
+    return {"views": draft_schematic(specification), "lint": lint.as_dict()}
 
 
 def build_repair_hints(detail: Dict[str, object]) -> list[str]:
@@ -603,6 +735,8 @@ def preview(req: PreviewRequest):
 @app.post("/api/projects/export")
 def export(req: PreviewRequest, format: str = "step"):
     fmt = format.lower()
+    if req.project.generation.semantic_status != "success":
+        raise HTTPException(409, {"stage": "export_readiness", "message": "Only a semantically validated build can be exported"})
     try:
         validate_trusted_project(req.project)
         validate_feature_coverage(req.project)

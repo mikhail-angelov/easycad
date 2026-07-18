@@ -88,6 +88,70 @@ def review_reference_issues(specification: DraftSpecification) -> list[str]:
     return issues
 
 
+def analysis_coverage_issues(specification: DraftSpecification, *, build_gate: bool = False) -> list[str]:
+    analysis_ids = {str(item.get("id")) for item in specification.analysis.features if item.get("id")}
+    feature_coverage = {
+        source_id
+        for feature in specification.features
+        for source_id in ({feature.id} | set(feature.source_feature_ids))
+    }
+    covered = set(feature_coverage)
+    if build_gate:
+        covered.update(source_id for exclusion in specification.exclusions for source_id in exclusion.source_feature_ids)
+    else:
+        covered.update(source_id for assumption in specification.assumptions for source_id in assumption.affected_ids)
+        covered.update(question.field_id for question in specification.questions)
+    return sorted(analysis_ids - covered)
+
+
+def exclusion_record_issues(specification: DraftSpecification) -> list[str]:
+    analysis_ids = {str(item.get("id")) for item in specification.analysis.features if item.get("id")}
+    live_ids = {item.id for item in specification.features}
+    issues: list[str] = []
+    for exclusion in specification.exclusions:
+        unknown = sorted(set(exclusion.source_feature_ids) - analysis_ids)
+        if unknown:
+            issues.append(f"exclusion {exclusion.feature_id} references unknown analysis features: {', '.join(unknown)}")
+        if exclusion.feature_id in live_ids:
+            issues.append(f"exclusion {exclusion.feature_id} still names a live feature")
+        if not exclusion.reason.strip():
+            issues.append(f"exclusion {exclusion.feature_id} requires a reason")
+    return issues
+
+
+def resolve_dimension_values(specification: DraftSpecification) -> tuple[Dict[str, float], List[str]]:
+    """Resolve every safely evaluable numeric dimension without raising."""
+    values: Dict[str, float] = {}
+    unresolved: set[str] = set()
+    pending: Dict[str, str] = {}
+    for dimension in specification.dimensions:
+        if dimension.critical and dimension.status in {"needs_input", "conflicted"}:
+            unresolved.add(dimension.id)
+        elif dimension.status == "assumed":
+            unresolved.add(dimension.id)
+        elif dimension.expression:
+            pending[dimension.id] = dimension.expression
+        elif isinstance(dimension.value, (int, float)) and not isinstance(dimension.value, bool) and math.isfinite(float(dimension.value)):
+            values[dimension.id] = float(dimension.value)
+        else:
+            unresolved.add(dimension.id)
+    while pending:
+        progressed = False
+        for field_id, expression in list(pending.items()):
+            try:
+                value = evaluate_expression(expression, values)
+            except Exception:
+                continue
+            if math.isfinite(value):
+                values[field_id] = value
+                del pending[field_id]
+                progressed = True
+        if not progressed:
+            unresolved.update(pending)
+            break
+    return values, sorted(unresolved)
+
+
 def validate_specification(specification: DraftSpecification) -> Dict[str, float]:
     field_ids: List[str] = []
     messages: List[str] = []
@@ -173,6 +237,9 @@ def validate_specification(specification: DraftSpecification) -> Dict[str, float
             messages.append(f"{assumption.id} must be accepted or replaced")
     known_features = set()
     for feature in specification.features:
+        if feature.status == "unsupported":
+            known_features.add(feature.id)
+            continue
         if feature.status in {"needs_input", "conflicted", "assumed"}:
             field_ids.append(feature.id)
             messages.append(f"{feature.id} requires input")
@@ -297,6 +364,8 @@ def project_from_specification(specification: DraftSpecification) -> CADProject:
     operations = []
     summaries = []
     for feature in specification.features:
+        if feature.status == "unsupported":
+            continue
         placement_model = FeaturePlacement.model_validate(feature.placement)
         placement = placement_model if placement_model.model_dump(exclude_none=True) else None
         operations.append(
@@ -310,7 +379,7 @@ def project_from_specification(specification: DraftSpecification) -> CADProject:
                 profile=feature.profile,
                 placement=placement,
                 pattern=feature.pattern,
-                source_feature_ids=[feature.id],
+                source_feature_ids=feature.source_feature_ids or [feature.id],
                 confidence=feature.confidence,
                 status="implemented",
                 implementation=feature.id,
@@ -326,7 +395,7 @@ def project_from_specification(specification: DraftSpecification) -> CADProject:
         parameters=parameters,
         feature_graph=FeatureGraph(operations=operations),
         feature_coverage=FeatureCoverageReport(
-            entries=[FeatureCoverageEntry(feature_id=item.id, operation_ids=[item.id], status="implemented", confidence=item.confidence) for item in specification.features]
+            entries=[FeatureCoverageEntry(feature_id=item.id, operation_ids=[] if item.status == "unsupported" else [item.id], status="unsupported" if item.status == "unsupported" else "implemented", confidence=item.confidence, explanation=item.label if item.status == "unsupported" else None) for item in specification.features]
         ),
         feature_summary=summaries,
         assumptions=[item.rationale for item in specification.assumptions if item.status == "confirmed"],

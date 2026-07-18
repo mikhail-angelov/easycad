@@ -1,5 +1,5 @@
 import { create } from 'zustand'
-import type { ApiError, DraftSpecification, Project } from './types'
+import type { ApiError, DraftSpecification, LintResult, Project, ReviewPlanItem } from './types'
 
 type RequestState = 'idle' | 'analyzing' | 'validating' | 'building' | 'exporting'
 
@@ -15,6 +15,8 @@ interface AppState {
   requestState: RequestState
   validationPassed: boolean
   error: ApiError | null
+  lint: LintResult
+  reviewPlan: ReviewPlanItem[]
   setSpecification: (specification: DraftSpecification) => void
   setSourceUrl: (sourceUrl: string | null) => void
   setDraftValue: (id: string, value: number | string) => void
@@ -26,6 +28,7 @@ interface AppState {
   setError: (error: ApiError | null) => void
   setValidationPassed: (validationPassed: boolean) => void
   setProject: (project: Project | null) => void
+  setReviewData: (lint?: LintResult, reviewPlan?: ReviewPlanItem[]) => void
   reset: () => void
 }
 
@@ -41,6 +44,8 @@ export const useAppStore = create<AppState>((set) => ({
   requestState: 'idle',
   validationPassed: false,
   error: null,
+  lint: { issues: [], unevaluated_feature_ids: [] },
+  reviewPlan: [],
   setSpecification: (specification) => set({ specification, project: null, draftValues: {}, acceptedFeatureIds: [], acceptedAssumptionIds: [], validationPassed: false, error: null }),
   setSourceUrl: (sourceUrl) => set({ sourceUrl }),
   setDraftValue: (id, value) => set((state) => ({ draftValues: { ...state.draftValues, [id]: value }, project: null, validationPassed: false })),
@@ -64,5 +69,6 @@ export const useAppStore = create<AppState>((set) => ({
   setError: (error) => set({ error }),
   setValidationPassed: (validationPassed) => set({ validationPassed }),
   setProject: (project) => set({ project }),
-  reset: () => set({ specification: null, project: null, sourceUrl: null, draftValues: {}, acceptedFeatureIds: [], acceptedAssumptionIds: [], selectedId: null, clarifications: {}, requestState: 'idle', validationPassed: false, error: null }),
+  setReviewData: (lint = { issues: [], unevaluated_feature_ids: [] }, reviewPlan = []) => set({ lint, reviewPlan }),
+  reset: () => set({ specification: null, project: null, sourceUrl: null, draftValues: {}, acceptedFeatureIds: [], acceptedAssumptionIds: [], selectedId: null, clarifications: {}, requestState: 'idle', validationPassed: false, error: null, lint: { issues: [], unevaluated_feature_ids: [] }, reviewPlan: [] }),
 }))

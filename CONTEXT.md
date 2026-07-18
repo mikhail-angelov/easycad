@@ -83,3 +83,23 @@ _Avoid_: Automatic approval threshold, build authority
 **Geometry dimension**:
 A named editable numeric CAD input recorded in `dimensions[]`. Features reference its ID rather than owning a separate numeric field definition.
 _Avoid_: Feature-local numeric field, duplicated dimension metadata
+
+**Lint issue**:
+A deterministic pre-build finding about a DraftSpecification, tied to specific feature IDs and classified as an error or warning.
+_Avoid_: Provider geometry opinion, unnamed validation failure
+
+**Review plan**:
+The server-computed ordering of unresolved review items by build impact.
+_Avoid_: UI-only sorting, cosmetic ordering
+
+**Locked item**:
+A confirmed or user-accepted specification item that incremental replan cannot change without a superseding clarification or exclusion.
+_Avoid_: Prompt-only preservation request
+
+**Item identity**:
+The typed pair `{item_type, id}` used when IDs are only unique inside their specification collection.
+_Avoid_: Ambiguous bare ID across collections
+
+**Draft preview**:
+A rendered build artifact created with semantic post-build gates skipped. It is informational and cannot be exported.
+_Avoid_: Validated build, printable artifact

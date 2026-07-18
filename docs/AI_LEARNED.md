@@ -434,3 +434,205 @@ Test-only compatibility code in the application module leaves obsolete direct-pl
 ### Ruled-out approaches
 
 - Kept test projects on `project_from_plan`; rejected because that preserved the entire legacy adapter chain in runtime code.
+
+## 2026-07-17 — Lint follows the explicit feature target
+
+### Goal
+
+Keep pre-build extent lint aligned with the draft specification's explicit feature graph.
+
+### Golden path
+
+1. Resolve primitive extents in feature order.
+2. Evaluate an additive or cut feature against the primitive extent named by its `target`.
+3. Point a cut at the additive feature whose material it actually intersects; for example, the L-bracket top groove targets `upright`.
+4. Check `negative_origin` against the resolved placement origin rather than the primitive bounding box.
+5. Replay `tests.test_l_bracket_groove_replay` and run the provider-free draft-lint tests.
+
+### Verification
+
+On 2026-07-17, `tests.test_draft_lint` and `tests.test_l_bracket_groove_replay` passed, including a sibling-overlap regression and the YZ top-groove cut targeting the additive upright.
+
+### Failure pattern avoided
+
+Using the accumulated union of sibling features can hide an incorrect `target`: a feature may intersect a sibling while missing the primitive it explicitly names.
+
+### Ruled-out approaches
+
+- Tried comparing against the accumulated connected-body union; rejected because sibling overlap made disconnected features appear connected and obscured incorrect targets.
+- Tried targeting the L-bracket groove at `base_body`; failed because the groove intersects the upright primitive, not the base primitive.
+
+## 2026-07-17 — Stop full-replan alias loops early
+
+### Goal
+
+Prevent a planner from spending the full turn budget creating `feature_vN` aliases after a confirmed feature must be restored with its original ID.
+
+### Golden path
+
+1. On a full-replan `finish_draft` rejection, retain the expected source-feature IDs for each changed confirmed feature.
+2. Reject a later `add_*` call that uses those same source IDs under a different feature ID, and state the exact replacement ID.
+3. Stop the run as `planner_stopped` after three identical `finish_draft` rejections.
+
+### Verification
+
+`tests.test_run_metrics.RunMetricsTests.test_full_replan_stops_alias_loop_without_waiting_for_turn_cap` replays the alias pattern and stops after three turns; `make test` passed with 172 tests and fixture smoke generation.
+
+### Failure pattern avoided
+
+The planner repeatedly created `central_bore_feat_vN` while `complete_replan` required a replacement of `central_bore_feat`, consuming 21 turns and 20 tool errors.
+
+### Ruled-out approaches
+
+- Relied on the 48-turn global cap; rejected because it only terminates the loop after unnecessary provider calls.
+- Tried deriving `negative_origin` from the feature bounding-box minimum; failed because centered circular profiles legitimately extend below their placement origin on an in-plane axis.
+
+## 2026-07-17 — Real-provider freeform model revision E2E
+
+### Goal
+
+Verify that freeform text edits the currently rendered body and reaches a printable STL through the actual LLM provider.
+
+### Golden path
+
+1. Run `make test-e2e-freeform-real` with the configured provider credentials.
+2. The test starts from the stable `minimal_body` fallback plate and sends the freeform instruction through `/api/specifications/validate`.
+3. It requires two edge cutouts and a centred through-hole, then applies a second freeform request for a 10 x 10 x 10 centred top boss.
+4. It requires the box origin `[25, 15, 10]`, renders a draft preview, completes a semantic build, and exports `artifacts/real-freeform-delta/model.stl`.
+
+### Verification
+
+On 2026-07-17, the real Gemini planner created two `pocket` cuts and a 10 mm central through-hole, then created `boss_half_size`, `boss_origin_x`, and `boss_origin_y` before adding the centred boss. The test completed the CAD build and STL export successfully.
+
+### Failure pattern avoided
+
+A provider-mocked test can only replay a chosen tool sequence; it cannot prove that the configured LLM follows freeform instructions or that its actual response is renderable.
+
+### Ruled-out approaches
+
+- Tried `FreeformCutoutsE2ETests` with a mocked `httpx.AsyncClient`; rejected because it was not an E2E test and could not validate the live provider.
+- Tried exporting directly from `mode=draft`; rejected by the API because export correctly requires a semantically validated build.
+
+## 2026-07-17 — Filter lint-invalid features before a draft preview
+
+### Goal
+
+Keep the first draft preview renderable even when the planner returns a confirmed feature with an invalid target placement.
+
+### Golden path
+
+1. Build the structural minimal model from confirmed supported features.
+2. Run deterministic draft lint on that model.
+3. Omit the feature reported first by each lint error, then omit any feature whose target is no longer present.
+4. Use the fallback box only if no confirmed additive body remains.
+
+### Verification
+
+`tests.test_minimal_model` reproduces a top pocket located at Z=30..45 but targeting a base at Z=0..10; the pocket is omitted. `tests.test_spec7_api` verifies that `build?mode=draft` then returns `draft_preview` and calls the renderer.
+
+### Failure pattern avoided
+
+Checking only feature contracts and target IDs allows a confirmed cut that never intersects its target to reach the build lint gate, producing a 422 before draft fallback can run.
+
+### Ruled-out approaches
+
+- Tried leaving lint errors for `build?mode=draft` to handle; rejected because that endpoint intentionally returns 422 before entering its CAD-worker fallback path.
+
+## 2026-07-17 — Preserve CAD coordinates in the interactive viewer
+
+### Goal
+
+Let users position a rendered model against an explicit CAD coordinate reference instead of an arbitrary viewer-centred mesh.
+
+### Golden path
+
+1. Do not call `geometry.center()` after loading an STL in `ModelViewer`.
+2. Translate only its visual Z minimum to zero, then render a Z-up camera, XY grid, X/Y/Z arrows, and millimetre tick labels in the same Three.js scene.
+3. Frame the isometric camera around the positioned mesh and coordinate guides.
+
+### Verification
+
+`npm run build` passed and `tests.test_static_ui` verifies the built UI exposes the `XY plane at Z=0` coordinate-ruler contract.
+
+### Failure pattern avoided
+
+`geometry.center()` destroys the CAD origin, so a user cannot tell how the visible model relates to X, Y, or the Z=0 build plane.
+
+### Ruled-out approaches
+
+- Kept the generic Three.js grid helper in its default XZ/Y-up orientation; rejected because EasyCAD coordinates use XY as the ground plane and Z as vertical.
+
+## 2026-07-17 — Reject cuts that do not enter material
+
+### Goal
+
+Ensure a visually requested cut reaches the CAD solid instead of merely touching an outside face or using a degenerate slot profile.
+
+### Golden path
+
+1. Treat `placement.origin` as the start of the positive cutting extrusion; lint requires a non-zero overlap with the target along that extrusion axis.
+2. Reject a slot whose length is not greater than its width, because it has no straight section in CadQuery.
+3. Return the deterministic lint error to the incremental planner so it can choose a valid supported primitive before rendering.
+
+### Verification
+
+The real `test_combined_edge_cutouts_and_boss_render_from_one_freeform_instruction` first produced two degenerate slots, then received the lint error and replaced them with pockets in its second real planner turn. The semantic build and `artifacts/real-freeform-delta/combined-model.stl` export succeeded.
+
+### Failure pattern avoided
+
+A positive cut beginning on a target's top face extrudes away from the material, while a `slot2D` with equal length and width makes CadQuery fail with `BRep_API: command not done`.
+
+### Ruled-out approaches
+
+- Accepted boundary contact as cut intersection; rejected because it can render no removed material.
+- Allowed an equal-length-and-width slot; rejected because CadQuery treats it as a failed degenerate operation.
+
+## 2026-07-17 — Preserve and fuse raised Unicode text
+
+### Goal
+
+Render freeform raised text on an exterior CAD plane as part of one printable solid.
+
+### Golden path
+
+1. Preserve the confirmed string dimension referenced by a `text` feature's `content` parameter when creating the minimal reliable draft.
+2. Generate text with left/bottom alignment so its declared origin is the visible text start.
+3. For additive text, add a 0.01 mm opposite-direction overlap before the final boolean union; translate the complete primitive expression.
+4. Run `tests.e2e_real_freeform_delta.RealFreeformDeltaE2E.test_outward_text_on_xz_surface_is_preserved_and_rendered` against the configured provider.
+
+### Verification
+
+On 2026-07-17, the real Gemini planner returned an additive `Привет` text feature on XZ at X=10/Z=10 with 10 mm size and 1 mm depth. The E2E semantic build succeeded and exported `artifacts/real-freeform-delta/text-model.stl`.
+
+### Failure pattern avoided
+
+Numeric-only dimension filtering silently removed text content, and face-tangent glyphs could remain separate solids even though the text was visibly touching the base.
+
+### Ruled-out approaches
+
+- Used CadQuery's `glue=True` union; rejected because it left Cyrillic glyphs as separate solids.
+- Translated a composed text expression without parentheses; rejected because only the final anchor operand moved.
+
+## 2026-07-17 — Make engraved text enter an exterior face
+
+### Goal
+
+Ensure a freeform text cut removes material when the named exterior surface has either workplane-normal direction.
+
+### Golden path
+
+1. Compile every `text` feature with `operation=cut` as the union of equal positive and negative depth text volumes around its supporting plane.
+2. Subtract that symmetric volume from the target; the half that enters the target removes the requested depth.
+3. Verify both depth signs in `tests.test_feature_compiler` and run the real-provider `test_inset_text_on_xz_surface_removes_material` E2E.
+
+### Verification
+
+On 2026-07-17, the real planner produced `operation=cut`, XZ placement at X=10/Z=10, and positive 1 mm depth for `2Привет`. The semantic build passed, recorded a negative text volume delta, and exported `artifacts/real-freeform-delta/text-cut-model.stl`.
+
+### Failure pattern avoided
+
+CadQuery's XZ normal sent a positive text extrusion away from the Y=0 exterior face, so subtracting it visibly changed nothing.
+
+### Ruled-out approaches
+
+- Required the LLM to choose a plane-specific depth sign; rejected because the actual planner correctly understood “вдави” but emitted a conventional positive depth.

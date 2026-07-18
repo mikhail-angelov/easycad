@@ -385,16 +385,33 @@ def _compile_primitive(operation: FeatureOperation, parameter_ids: Set[str]) -> 
         content = _required_value(operation, "content", parameter_ids)
         size = _required_value(operation, "size", parameter_ids)
         distance = _required_value(operation, "distance", parameter_ids)
-        expression = (
-            f'cq.Workplane("{_plane(operation)}").text({content}, {size}, {distance}, combine=False)'
-        )
+        workplane = f'cq.Workplane("{_plane(operation)}")'
+        text_shape = f'{workplane}.text({content}, {size}, {distance}, combine=False, halign="left", valign="bottom")'
+        if operation.operation == "add":
+            # CadQuery text only touches its supporting face at zero depth. A
+            # tiny opposite-direction anchor gives every glyph a material
+            # overlap with the target so boolean union yields one solid.
+            anchor = f'{workplane}.text({content}, {size}, -0.01, combine=False, halign="left", valign="bottom")'
+            expression = f"({text_shape}).union({anchor})"
+        elif operation.operation == "cut":
+            # The placement plane is the exterior supporting face. CadQuery's
+            # workplane normal differs by plane orientation, so retain both
+            # depth directions: exactly one enters the target, regardless of
+            # which exterior face the planner chose.
+            opposite = f'{workplane}.text({content}, {size}, -({distance}), combine=False, halign="left", valign="bottom")'
+            expression = f"({text_shape}).union({opposite})"
+        else:
+            expression = text_shape
     else:
         raise CompilerError(operation.id, f"unsupported primitive type '{operation.type}'")
 
     origin = operation.placement.origin if operation.placement else None
     if origin:
         coordinates = ", ".join(_value(item, parameter_ids, operation.id) for item in origin)
-        expression += f".translate(({coordinates}))"
+        # A primitive may already be a boolean expression (for example the
+        # overlapping text anchor below). Translate the complete result, not
+        # only the final operand in that expression.
+        expression = f"({expression}).translate(({coordinates}))"
     return [expression]
 
 
