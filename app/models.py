@@ -61,11 +61,8 @@ class CADParameter(BaseModel):
 class SourceInfo(BaseModel):
     filename: str = ""
     mime_type: str = ""
-    image_ref: Optional[str] = None
-    image_sha256: Optional[str] = None
     width: Optional[int] = None
     height: Optional[int] = None
-    image_data: Optional[str] = None
 
 
 class DrawingAnalysis(BaseModel):
@@ -224,16 +221,6 @@ class DraftSpecification(BaseModel):
         return self
 
 
-class SpecificationEditRequest(BaseModel):
-    specification: DraftSpecification
-    dimension_values: Dict[str, ParameterValue] = Field(default_factory=dict)
-    accepted_feature_ids: List[str] = Field(default_factory=list)
-    accepted_assumption_ids: List[str] = Field(default_factory=list)
-    clarifications: Dict[str, str] = Field(default_factory=dict)
-    excluded_feature_ids: List[str] = Field(default_factory=list)
-    feature_field_edits: Dict[str, Dict[str, float]] = Field(default_factory=dict)
-
-
 class FeatureEvidence(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
@@ -342,30 +329,6 @@ class CADSource(BaseModel):
     generation_attempt: int = 1
 
 
-class RenderArtifact(BaseModel):
-    view: Literal["front", "top", "right", "isometric"]
-    mime_type: str = "image/png"
-    image_data: str
-    sha256: str
-    width: int
-    height: int
-
-
-class VisualIssue(BaseModel):
-    issue_type: Literal["missing", "extra", "misplaced", "dimension_mismatch", "other"]
-    severity: Literal["low", "medium", "high"]
-    description: str
-    feature_id: Optional[str] = None
-    view: Optional[str] = None
-    confidence: float = Field(default=0.5, ge=0, le=1)
-
-
-class VisualComparison(BaseModel):
-    status: Literal["not_run", "advisory", "failed"] = "not_run"
-    match_score: Optional[float] = Field(default=None, ge=0, le=1)
-    issues: List[VisualIssue] = Field(default_factory=list)
-
-
 class GenerationResult(BaseModel):
     status: str = "new"
     syntax_status: Literal["not_run", "success", "failed"] = "not_run"
@@ -377,8 +340,6 @@ class GenerationResult(BaseModel):
     volume_mm3: Optional[float] = None
     solid_count: Optional[int] = None
     feature_measurements: Dict[str, Dict[str, Any]] = Field(default_factory=dict)
-    render_artifacts: Dict[str, RenderArtifact] = Field(default_factory=dict)
-    visual_comparison: VisualComparison = Field(default_factory=VisualComparison)
     error: Optional[Dict[str, Any]] = None
 
 
@@ -398,12 +359,3 @@ class CADProject(BaseModel):
     generation: GenerationResult = Field(default_factory=GenerationResult)
     created_at: str = Field(default_factory=lambda: datetime.utcnow().isoformat() + "Z")
     updated_at: str = Field(default_factory=lambda: datetime.utcnow().isoformat() + "Z")
-
-
-class PreviewRequest(BaseModel):
-    project: CADProject
-    parameters: Dict[str, ParameterValue] = Field(default_factory=dict)
-
-
-class CompareRequest(BaseModel):
-    project: CADProject

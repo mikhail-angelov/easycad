@@ -2,7 +2,6 @@ from __future__ import annotations
 
 import json
 import os
-import re
 import signal
 import subprocess
 import sys
@@ -10,8 +9,6 @@ import tempfile
 import time
 from pathlib import Path
 from typing import Dict, Optional
-
-from PIL import Image, ImageDraw
 
 from .expressions import evaluate_expression
 from .models import CADProject
@@ -89,7 +86,6 @@ def run_project(
     project: CADProject,
     overrides: Dict[str, object],
     fmt: str = "stl",
-    render_views: bool = False,
 ) -> Dict[str, object]:
     if fmt not in {"stl", "step"}:
         raise RunnerError("export", "Format must be stl or step")
@@ -109,7 +105,6 @@ def run_project(
                     "source": source,
                     "format": fmt,
                     "feature_graph": project.feature_graph.model_dump(),
-                    "render_views": render_views,
                 }
             ),
             encoding="utf-8",
@@ -148,16 +143,6 @@ def run_project(
         if not artifact.exists():
             raise RunnerError("export", f"Worker did not produce {artifact.name}")
         result["artifact_bytes"] = artifact.read_bytes()
-        if render_views:
-            render_artifacts = {}
-            for view in ("front", "top", "right", "isometric"):
-                svg_path = job_dir / f"render_{view}.svg"
-                render_path = job_dir / f"render_{view}.png"
-                if not svg_path.exists():
-                    raise RunnerError("render", f"Worker did not produce {svg_path.name}")
-                _rasterize_svg(svg_path, render_path)
-                render_artifacts[view] = render_path.read_bytes()
-            result["render_artifacts"] = render_artifacts
         return result
 
 
@@ -191,33 +176,3 @@ def _worker_environment() -> Dict[str, str]:
         }
     )
     return env
-
-
-def _rasterize_svg(svg_path: Path, png_path: Path) -> None:
-    svg_text = svg_path.read_text(encoding="utf-8")
-    width_match = re.search(r'width="([0-9.]+)"', svg_text)
-    height_match = re.search(r'height="([0-9.]+)"', svg_text)
-    transform_match = re.search(
-        r'transform="scale\(([-0-9.eE]+),\s*([-0-9.eE]+)\)\s+translate\(([-0-9.eE]+),([-0-9.eE]+)\)"',
-        svg_text,
-    )
-    if not width_match or not height_match or not transform_match:
-        raise RunnerError("render", "CadQuery SVG is missing dimensions or projection transform")
-    width = int(float(width_match.group(1)))
-    height = int(float(height_match.group(1)))
-    scale_x, scale_y, translate_x, translate_y = map(float, transform_match.groups())
-    image = Image.new("RGB", (width, height), "white")
-    draw = ImageDraw.Draw(image)
-    path_count = 0
-    for path_data in re.findall(r'<path d="([^"]*)"', svg_text):
-        points = []
-        for _, x_text, y_text in re.findall(r'([ML])\s*([-0-9.eE]+),([-0-9.eE]+)', path_data):
-            x = scale_x * (float(x_text) + translate_x)
-            y = scale_y * (float(y_text) + translate_y)
-            points.append((x, y))
-        if len(points) >= 2:
-            draw.line(points, fill=(25, 30, 35), width=2)
-            path_count += 1
-    if path_count == 0:
-        raise RunnerError("render", "CadQuery SVG contains no drawable projection paths")
-    image.save(png_path, format="PNG")

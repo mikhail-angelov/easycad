@@ -636,3 +636,27 @@ CadQuery's XZ normal sent a positive text extrusion away from the Y=0 exterior f
 ### Ruled-out approaches
 
 - Required the LLM to choose a plane-specific depth sign; rejected because the actual planner correctly understood “вдави” but emitted a conventional positive depth.
+
+## 2026-07-18 — Three-action model API smoke path
+
+### Goal
+
+Verify the simplified interactive flow: image upload, freeform model change, then STL download.
+
+### Golden path
+
+1. POST an image to `/api/model/image`; use the returned `description`, `specification`, and base64 `model_stl` to display the model.
+2. POST that specification and a freeform prompt to `/api/model/refine`; replace both the displayed text and STL with the response.
+3. POST the latest specification to `/api/model/stl` to download the printable STL.
+
+### Verification
+
+On 2026-07-18, a live run using `fixtures/3.png` returned all four fields from image and refinement (`description`, `specification`, `model`, `model_stl`) and returned a non-empty `model/stl` response from export.
+
+### Failure pattern avoided
+
+The previous UI required separate validate, schematic, draft-build, preview, full-build, and export calls, so it could show a stale or missing 3D model while a user was editing.
+
+### Ruled-out approaches
+
+- Kept a separate preview endpoint; rejected because the first two actions can return the exact STL consumed by the viewer.

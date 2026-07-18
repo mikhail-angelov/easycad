@@ -16,13 +16,10 @@ from uuid import uuid4
 import httpx
 from fastapi import HTTPException
 from PIL import Image, UnidentifiedImageError
-from pydantic import ValidationError as PydanticValidationError
 
 from .models import (
-    CADProject,
     DraftSpecification,
     SourceInfo,
-    VisualComparison,
 )
 from .feature_compiler import (
     OPERATION_CONTRACTS,
@@ -30,7 +27,6 @@ from .feature_compiler import (
     draft_specification_operation_types,
 )
 from .draft_geometry_rules import draft_geometry_rules
-from .source_images import get_source_image, store_source_image
 from .draft_builder import DraftBuilder
 from .minimal_model import minimal_reliable_draft
 
@@ -104,66 +100,13 @@ async def generate_draft_specification_from_image(
     analysis = await analyze_drawing(data, image_info["mime_type"], instructions, openrouter_key)
     draft = await plan_draft_specification(analysis, instructions, deepseek_key)
     draft = minimal_reliable_draft(draft)
-    image_ref, image_sha256 = store_source_image(data)
     draft.source = SourceInfo(
         filename=image_info.get("filename", ""),
         mime_type=image_info.get("mime_type", ""),
         width=image_info.get("width"),
         height=image_info.get("height"),
-        image_ref=image_ref,
-        image_sha256=image_sha256,
     )
     return draft
-
-
-async def compare_project_renders(project: CADProject, api_key: str) -> VisualComparison:
-    source_data = get_source_image(project.source.image_ref or "")
-    if source_data is None and project.source.image_data:
-        try:
-            source_data = base64.b64decode(project.source.image_data.split(",", 1)[1])
-        except (IndexError, ValueError) as exc:
-            raise GenerationError("visual_comparison", "Saved source image data is invalid") from exc
-    if source_data is None:
-        raise GenerationError("visual_comparison", "Source drawing is no longer available in memory")
-    if len(project.generation.render_artifacts) != 4:
-        raise GenerationError("visual_comparison", "Four generated render views are required")
-
-    feature_ids = [operation.id for operation in project.feature_graph.operations]
-    prompt = (
-        "Compare the source mechanical drawing with the generated CAD renders. Return only one JSON object with "
-        "match_score from 0 to 1 and issues as an array. Each issue must contain issue_type (missing, extra, misplaced, "
-        "dimension_mismatch, or other), severity (low, medium, high), description, feature_id, view, and confidence. "
-        "Use only these feature IDs when applicable: "
-        + json.dumps(feature_ids)
-        + ". Do not propose code and do not invent hidden geometry."
-    )
-    content = [
-        {"type": "text", "text": prompt},
-        {
-            "type": "image_url",
-            "image_url": {
-                "url": f"data:{project.source.mime_type};base64,{base64.b64encode(source_data).decode('ascii')}"
-            },
-        },
-    ]
-    for view in ("front", "top", "right", "isometric"):
-        artifact = project.generation.render_artifacts[view]
-        content.append({"type": "text", "text": f"Generated {view} view:"})
-        content.append({"type": "image_url", "image_url": {"url": artifact.image_data}})
-    payload = {
-        "model": normalize_model_id(os.environ.get("OPEN_ROUTER_MODEL", "google/gemini-3-flash-preview")),
-        "messages": [{"role": "user", "content": content}],
-        "temperature": 0.1,
-        "max_tokens": 2500,
-        "response_format": {"type": "json_object"},
-    }
-    raw = await _chat_json(OPENROUTER_URL, api_key, payload, "visual_comparison")
-    try:
-        return VisualComparison.model_validate(
-            {"status": "advisory", "match_score": raw.get("match_score"), "issues": raw.get("issues", [])}
-        )
-    except PydanticValidationError as exc:
-        raise GenerationError("visual_comparison", f"Invalid visual comparison: {exc.errors()[0]['msg']}") from exc
 
 
 async def analyze_drawing(data: bytes, mime_type: str, instructions: str, api_key: str) -> Dict[str, Any]:
@@ -458,18 +401,6 @@ def _confirmed_replan_snapshots(
         "preserved_features": features,
         "preserved_assumptions": assumptions,
     }
-
-
-def draft_specification_tool_schema() -> Dict[str, Any]:
-    """Return the provider schema for a complete, buildable draft response."""
-    schema = DraftSpecification.model_json_schema()
-    schema["properties"] = {
-        key: schema["properties"][key]
-        for key in ("title", "units", "dimensions", "features", "assumptions", "questions", "annotations")
-    }
-    schema["properties"]["features"]["minItems"] = 1
-    schema["$defs"]["SpecificationFeature"] = _draft_feature_schema()
-    return schema
 
 
 def _draft_feature_schema() -> Dict[str, Any]:
@@ -933,30 +864,6 @@ def _safe_response_diagnostics(response: httpx.Response, provider_url: str) -> D
         "response_content_length": len(body),
         "response_prefix_hex": body[:64].hex(),
     }
-
-
-def submit_draft_specification_tool_schema() -> Dict[str, Any]:
-    """Strict function-call arguments for a complete draft, separate from UI defaults."""
-    draft_schema = draft_specification_tool_schema()
-    _forbid_schema_extras(draft_schema)
-    draft_schema["required"] = ["title", "units", "dimensions", "features", "assumptions", "questions", "annotations"]
-    return {
-        "type": "object",
-        "additionalProperties": False,
-        "required": ["specification"],
-        "properties": {"specification": draft_schema},
-    }
-
-
-def _forbid_schema_extras(schema: Any) -> None:
-    if isinstance(schema, dict):
-        if schema.get("type") == "object" and "properties" in schema:
-            schema["additionalProperties"] = False
-        for value in schema.values():
-            _forbid_schema_extras(value)
-    elif isinstance(schema, list):
-        for value in schema:
-            _forbid_schema_extras(value)
 
 
 def _normalize_dict_items(raw: Any, item_type: str) -> List[Dict[str, Any]]:
