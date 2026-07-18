@@ -1,10 +1,8 @@
 from __future__ import annotations
 
 import ast
-import re
-from typing import List, Set
+from typing import List
 
-from .expressions import ExpressionError, evaluate_expression
 
 
 FORBIDDEN_NODES = (
@@ -153,93 +151,3 @@ def validate_source(source: str) -> None:
 
     if errors:
         raise ValidationError("; ".join(sorted(set(errors))))
-
-
-def validate_project(project) -> None:
-    errors: List[str] = []
-    parameter_ids = set(project.parameters)
-    values = {}
-
-    for key, param in project.parameters.items():
-        if not re.match(r"^[a-z][a-z0-9_]*$", key):
-            errors.append(f"Parameter '{key}' must be snake_case and start with a letter")
-        if param.type == "number":
-            if param.min is not None and param.max is not None and param.min > param.max:
-                errors.append(f"Parameter '{key}' minimum is greater than maximum")
-            if param.value is not None and param.min is not None and param.value < param.min:
-                errors.append(f"Parameter '{key}' value is below minimum {param.min}")
-            if param.value is not None and param.max is not None and param.value > param.max:
-                errors.append(f"Parameter '{key}' value is above maximum {param.max}")
-            if param.value is not None:
-                values[key] = float(param.value)
-
-    pending = {
-        key: param.expression
-        for key, param in project.parameters.items()
-        if param.type == "expression" and param.expression
-    }
-    while pending:
-        progressed = False
-        for key, expression in list(pending.items()):
-            try:
-                values[key] = evaluate_expression(expression, values)
-            except ExpressionError:
-                continue
-            except Exception as exc:
-                errors.append(f"Parameter '{key}' expression is invalid: {exc}")
-                del pending[key]
-                progressed = True
-                continue
-            del pending[key]
-            progressed = True
-        if not progressed:
-            unresolved = ", ".join(sorted(pending))
-            errors.append(f"Could not resolve derived parameters: {unresolved}")
-            break
-
-    coverage_by_feature = {}
-    for operation in project.feature_graph.operations:
-        for feature_id in operation.source_feature_ids:
-            coverage_by_feature.setdefault(feature_id, []).append(operation)
-    for feature in project.analysis.features:
-        try:
-            confidence = float(feature.get("confidence"))
-        except (TypeError, ValueError):
-            continue
-        if confidence < 0.8:
-            continue
-        feature_id = str(feature.get("id") or "")
-        if not feature_id:
-            continue
-        coverage = coverage_by_feature.get(feature_id, [])
-        if not coverage:
-            errors.append(f"High-confidence feature '{feature_id}' has no Feature Graph coverage")
-        elif all(operation.status == "planned" for operation in coverage):
-            errors.append(f"High-confidence feature '{feature_id}' has no final coverage state")
-
-    if errors:
-        raise ValidationError("; ".join(errors))
-
-
-def parameter_references(source: str) -> Set[str]:
-    try:
-        tree = ast.parse(source)
-    except SyntaxError:
-        return set()
-
-    refs: Set[str] = set()
-    for node in ast.walk(tree):
-        if not isinstance(node, ast.Subscript):
-            continue
-        target = node.value
-        if isinstance(target, ast.Name) and target.id in {"PARAMETERS", "p"}:
-            key = _literal_subscript_key(node.slice)
-            if key:
-                refs.add(key)
-    return refs
-
-
-def _literal_subscript_key(node: ast.AST) -> str:
-    if isinstance(node, ast.Constant) and isinstance(node.value, str):
-        return node.value
-    return ""

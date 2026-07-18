@@ -90,10 +90,6 @@ OPERATION_CONTRACTS: Dict[str, OperationContract] = {
 DRAFT_SPECIFICATION_OPERATION_KINDS = tuple(OPERATION_CONTRACTS)
 
 
-def planner_operation_types() -> str:
-    return ", ".join(COMPILER_OPERATION_KINDS)
-
-
 def draft_specification_operation_types() -> str:
     return ", ".join(DRAFT_SPECIFICATION_OPERATION_KINDS)
 
@@ -180,10 +176,6 @@ def _profile_contract_issues(feature: FeatureOperation | SpecificationFeature, p
     return []
 
 
-def compiler_operation_types() -> frozenset[str]:
-    return frozenset(alias for aliases in COMPILER_OPERATION_TYPES.values() for alias in aliases)
-
-
 def canonical_operation_type(value: str) -> str:
     normalized = value.strip().lower()
     for canonical, aliases in COMPILER_OPERATION_TYPES.items():
@@ -213,22 +205,6 @@ def compile_project_feature_graph(project: CADProject) -> CADProject:
             operation.status = "implemented"
             operation.implementation = operation.id
     return compiled
-
-
-def pattern_instance_offsets(operation: FeatureOperation, values: Dict[str, object]) -> list[float]:
-    pattern = operation.pattern
-    if pattern is None or pattern.type != "linear":
-        raise CompilerError(operation.id, "instance offsets currently require a linear pattern")
-    count = int(_concrete_feature_value(pattern.count, values, operation.id))
-    pitch = float(_concrete_feature_value(pattern.pitch, values, operation.id))
-    margin = (
-        float(_concrete_feature_value(pattern.start_margin, values, operation.id))
-        if pattern.start_margin is not None
-        else 0.0
-    )
-    if count < 1:
-        raise CompilerError(operation.id, "pattern count must be positive")
-    return [margin + index * pitch for index in range(count)]
 
 
 def compile_feature_graph(graph: FeatureGraph, parameter_ids: Iterable[str]) -> str:
