@@ -2,9 +2,11 @@
   "name": "easycad-ui",
   "private": true,
   "version": "0.0.0",
+  "type": "module",
   "scripts": {
     "dev": "vite",
-    "build": "tsc --noEmit && vite build"
+    "build": "tsc --noEmit && vite build",
+    "test": "node --test frontend/src/*.test.ts"
   },
   "dependencies": {
     "preact": "^10.26.4",

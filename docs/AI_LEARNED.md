@@ -685,3 +685,276 @@ On 2026-07-18, the real provider run `02b2b94f6244` completed in six turns after
 ### Ruled-out approaches
 
 - Added a special case for `add_box`; rejected because any feature can use the same provider spelling variants.
+
+## 2026-07-18 — Restore caret position with useLayoutEffect, not requestAnimationFrame
+
+### Goal
+
+Let a user pick a feature from the `@mention` dropdown (SPEC 9 Part D) and
+keep typing immediately without corrupting the freeform instruction text.
+
+### Golden path
+
+1. On mention selection, update the controlled `<textarea>`'s `value` via
+   `setPrompt` and stash the target caret offset in a ref instead of calling
+   `setSelectionRange` inline.
+2. Restore focus and the caret position inside a dependency-free
+   `useLayoutEffect`, which Preact runs synchronously right after the new
+   `value` is committed to the DOM and strictly before the browser can
+   process any subsequently queued input event.
+3. Verified with a Playwright script that types the next word immediately
+   (1-5ms per keystroke) after clicking a mention — the adversarial case a
+   human fast-typer or any automated driver will hit.
+
+### Verification
+
+On 2026-07-18, `verify_mention_fix.py` (real browser, real upload) asserted
+the post-type textarea value equals the expected clean string
+(`"@A make it 5mm taller"`); the full `verify_spec9.py` end-to-end pass
+(real provider calls) also produced clean prompt text and a correct
+scoped-refine round trip, with zero console errors.
+
+### Failure pattern avoided
+
+Deferring `setSelectionRange` with `requestAnimationFrame` while calling
+`.focus()` synchronously raced the browser's real input event queue: the
+first keystroke landed correctly, the rAF callback then fired and reset the
+caret mid-word, and every following keystroke inserted before the
+already-typed character instead of after it — e.g. typing "make it 5mm
+taller" landed as "ake it 5mm tallerm". A human typing at normal speed
+right after a click could hit this on a slow or busy frame, not only fast
+synthetic input.
+
+### Ruled-out approaches
+
+- Deferred the caret restore with `requestAnimationFrame`; rejected because
+  it runs after paint, with no guarantee it beats the next real input event.
+
+## 2026-07-18 — A real worker failure must never reach the user as an error
+
+### Goal
+
+Guarantee `/api/model/image`, `/api/model/refine`, and `/api/model/stl` never
+return a build error, especially on the first upload — `minimal_reliable_draft`
+only proved a draft was schema-valid, not that the real CadQuery worker could
+build it.
+
+### Golden path
+
+1. Extract the existing "reduce everything to the fallback box" branch out of
+   `minimal_reliable_draft` into a public `fallback_draft(draft)`
+   (`app/minimal_model.py`) so a caller outside that function can invoke the
+   same guaranteed-safe reduction.
+2. Add `_build_or_fallback(draft)` (`app/main.py`): attempt the real
+   `project_from_specification` + `run_project` build once; on `RunnerError`
+   or `SpecificationValidationError`, reduce via `fallback_draft` and retry
+   exactly once before ever raising. Every endpoint that builds
+   (`/api/model/image`, `/api/model/refine`, `/api/model/stl`) routes through
+   this instead of calling `run_project` directly.
+3. Move `_description()` computation inside `_model_response`, computed from
+   the *final* draft (post-sanitization, post-fallback) instead of a
+   pre-computed string passed in — otherwise a recovered response would
+   describe features that got traded away for the fallback box, and the
+   pre-existing `/api/model/refine` path was already describing the
+   unsanitized draft.
+4. Drop the now-redundant `minimal_reliable_draft` call inside
+   `generate_draft_specification_from_image` (`app/ai_generation.py`) —
+   `_model_response` already guarantees sanitization, so the old call only
+   paid for a second schema check on every upload.
+
+### Verification
+
+`tests/test_build_fallback.py`: a mocked first-attempt `RunnerError` recovers
+on retry without raising (asserting the fragile feature became `unsupported`
+with a reason and `minimal_body` is present); a first-try success never
+retries; two consecutive failures still raise. Confirmed the recovery path
+builds for real (no mocks) — `fallback_draft` on a deliberately broken
+feature, run through the actual `project_from_specification` + `run_project`,
+produced valid non-empty STL bytes. Four consecutive real-provider uploads of
+`fixtures/3.png` all returned HTTP 200.
+
+### Failure pattern avoided
+
+A real session (2026-07-18) got a 422 on `/api/model/image` when the planner
+chose an `add_fillet` construction that passed `minimal_reliable_draft`'s
+schema-level `_compiles()` check but failed the actual CadQuery kernel build
+— exactly the first-upload experience this app exists to guarantee never
+happens.
+
+### Ruled-out approaches
+
+- Made `_compiles()` itself call the real worker instead of only
+  `project_from_specification`; rejected because that pays the full build
+  cost twice on every single successful request (the overwhelming majority)
+  to guard a rare failure — retrying only after a real failure keeps the
+  success path at one build.
+
+## 2026-07-18 — A stale `minimal_body` id can silently defeat its own fallback
+
+### Goal
+
+Make the "guaranteed-safe fallback" in `fallback_draft`/`minimal_reliable_draft`
+(`app/minimal_model.py`) actually unconditional, closing a gap found by manual
+review of the fallback-retry fix above.
+
+### Golden path
+
+1. Never special-case "does a feature with id `minimal_body` already exist" as
+   a reason to skip inserting a fresh one — its *status* is what matters, and
+   a `minimal_body`-id feature omitted by an earlier, unrelated pass (or
+   echoed back by the planner from a previous round's fallback, since a
+   confirmed fallback box becomes part of `previous_specification`) is not
+   safe to keep.
+2. `_insert_fallback_box` strips any existing `minimal_body`-id feature first,
+   then unconditionally inserts a fresh, confirmed one — one call site,
+   reused by all three places `minimal_reliable_draft`/`fallback_draft`
+   used to insert the fallback box ad hoc.
+
+### Verification
+
+`tests/test_build_fallback.py::FallbackDraftReentrancyTests` feeds
+`fallback_draft` a draft whose only features are an already-`unsupported`
+`minimal_body` and one other feature; asserts exactly one `minimal_body`
+survives and it is `confirmed`. Confirmed this fails against the prior
+logic (`if not any(item.id == "minimal_body"...)` finds the stale one and
+skips the insert, leaving zero confirmed features — the exact guarantee
+this module exists to uphold).
+
+### Failure pattern avoided
+
+`if feature.id != "minimal_body": _omit(...)` explicitly skipped omitting a
+`minimal_body`-id feature regardless of its status, and the guard before
+inserting a fresh one only checked *presence*, not *confirmed status* — so a
+draft could reach the end of the guaranteed-safe reduction with zero
+confirmed features, exactly the class of bug this function exists to
+prevent.
+
+### Ruled-out approaches
+
+- Patching only `fallback_draft`'s check to also require `status ==
+  "confirmed"`; rejected because the identical unguarded pattern
+  (`result.features.insert(0, _fallback_box())`) appears twice more in
+  `minimal_reliable_draft` itself — fixing the insertion helper once removes
+  the whole class of bug instead of one instance of it.
+
+## 2026-07-18 — Alias hygiene: filter by the live roster, not the alias map
+
+### Goal
+
+Close two gaps a manual review found in SPEC 9 Part D's `@mention` handling:
+a hand-typed `@<alias>` referencing a feature id from a superseded round
+could resolve to a dead id, and the literal `@<alias>` syntax reaching the
+LLM in the freeform prompt text was needless.
+
+### Golden path
+
+1. `resolveMentions` (`frontend/src/main.tsx`) now checks resolved ids
+   against `state.features` (the current roster) in addition to
+   `featureAliases` (which is deliberately sticky and never shrinks, per
+   Part B) — an alias for a feature no longer in the roster no longer
+   resolves, even if a user types it by hand outside the dropdown.
+2. The same pass replaces each resolved `@<alias>` token with the feature's
+   real label before the prompt is sent — the user still sees and edits
+   `@A` in the textarea, but the wire payload and the LLM only ever see
+   natural language plus the separately-carried `referenced_feature_ids`.
+3. Extracted the alias generator into a dependency-free `frontend/src/alias.ts`
+   so it can be unit-tested with Node's built-in test runner
+   (`frontend/src/alias.test.ts`, `npm test`) without dragging in `zustand`'s
+   React-path resolution (which only resolves under Vite's Preact-compat
+   aliasing, not plain Node).
+4. Added the real-provider E2E `tests/test_e2e_scoped_refine.py` that
+   spec9.md's own Verification section called for but the original
+   implementation pass substituted with an unrecorded, one-off Playwright
+   script — opt-in via `EASYCAD_RUN_REAL_E2E=1` so the fast suite stays
+   network-free.
+
+### Verification
+
+`npm test` (3/3). Live Playwright check confirmed the wire payload:
+typing `@A please make it 5mm taller` in the textarea sent
+`"prompt":"Base Plate Main Body please make it 5mm taller"` with
+`"referenced_feature_ids":["base_box"]`. `EASYCAD_RUN_REAL_E2E=1 .venv/bin/python
+-m unittest tests.test_e2e_scoped_refine` passed against the real provider in
+~55s, and the planner's second call visibly touched only the referenced
+feature's dimension.
+
+### Failure pattern avoided
+
+`resolveReferencedFeatureIds` only checked `featureAliases`, which by Part
+B's own design keeps every alias ever assigned in the session — a user
+typing a remembered letter for a feature two rounds ago would silently
+resolve to a dead id (correctly dropped server-side, but with zero
+client-side signal that the reference did nothing).
+
+## 2026-07-19 — Multi-panel dimension triangulation, promoted from a spike
+
+### Goal
+
+Reduce single-photo geometric ambiguity for sketches that already draw
+multiple orthographic views on one page, without adding any cost or risk to
+the far more common single-view upload.
+
+### Golden path
+
+1. `app/multiview_triangulation.py:detect_panel_layout` — one cheap vision
+   call classifies the upload as single- or multi-panel and, if multi-panel,
+   returns rough (left, top, right, bottom) fractions per panel. Returns
+   `None` (normal path, zero extra cost) for an ordinary photo.
+2. Each detected panel gets its own dimension-reading vision call (never a
+   holistic read of the flattened image) plus an independent Tesseract OCR
+   pass (`ocr_panel_dimensions`, digit-only whitelist) on the same pixels.
+3. `reconcile()` — pure Python, no LLM — groups all readings (from every
+   panel and both reading methods) by numeric value; a dimension counts as
+   verified only when 2+ different `(panel, method)` sources agree.
+4. The verified facts are formatted as plain grounding text and passed as
+   `instructions` into the existing, unmodified
+   `generate_draft_specification_from_image` — no new tool, no change to
+   the compiler.
+5. Wired into `POST /api/model/image` (`app/main.py`) inside a function that
+   never raises (`build_grounding_instructions`): any failure — no
+   multi-panel layout, missing tesseract binary, a malformed vision
+   response — degrades to `""` and the upload proceeds exactly as before.
+
+### Verification
+
+Real run on `fixtures/a3b.jpg` (a genuine 4-panel hand sketch):
+`detect_panel_layout` correctly classified it and named its own panels
+(`front`/`bottom`/`side`/`top`); reconciliation cross-verified 5 dimensions,
+including one (30mm) confirmed by an LLM read **and** an independent OCR
+read on the same crop — two unrelated reading methods agreeing, not just
+two views. `POST /api/model/image` (real endpoint, `TestClient`, no
+handwritten orchestration) built 6 confirmed features and a valid STL.
+A same-session real upload of the unrelated single-view `fixtures/3.png`
+produced the identical 4-feature L-bracket result seen throughout this
+project's history — confirming the new gate adds nothing to that path but
+one cheap classification call. `tests/test_multiview_triangulation.py`
+(13 tests, `_chat_json` mocked) covers the gating logic without network
+access; `tests/test_e2e_multiview_triangulation.py` is the opt-in
+real-provider proof above.
+
+### Failure pattern avoided
+
+The first version of `detect_panel_layout` used a row/column mean-brightness
+gap heuristic instead of a vision call. It failed its own unit test the day
+it was written: false-positived on `fixtures/3.png` (uniformly bright
+end-to-end — a lot of blank margin around one small drawing, no real panel
+gap, but every band still cleared an absolute brightness threshold) and
+false-negatived on `fixtures/a3b.jpg` itself (a camera photo, not a scan —
+lighting falloff keeps even the genuine inter-panel gaps below a
+scan-calibrated brightness floor). Absolute brightness isn't comparable
+across a phone photo and a clean scan.
+
+### Ruled-out approaches
+
+- Pixel-brightness gap detection for panel-layout classification (see
+  above) — replaced with one cheap vision call, which is the right tool for
+  a holistic "one drawing or several panels" judgment.
+- Classical arrowhead detection (OpenCV `HoughLinesP` + wedge-angle
+  junctions) to mechanically separate dimension-line pixels from
+  object-line pixels before either reading channel sees them: fires on
+  every square corner and every hatching crossing as readily as on a real
+  arrowhead on this hand sketch (38 candidates on one panel, real arrowheads
+  buried in false positives) — not a usable filter without real shape/
+  template matching or a trained detector. Replaced with an explicit prompt
+  instruction telling the per-panel vision call to distinguish object lines
+  from dimension/leader lines itself.

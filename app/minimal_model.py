@@ -42,20 +42,53 @@ def minimal_reliable_draft(draft: DraftSpecification) -> DraftSpecification:
             _omit(feature, "Insufficient reliable dimensions or placement for deterministic geometry")
 
     if not known_features:
-        result.features.insert(0, _fallback_box())
+        _insert_fallback_box(result)
     _omit_lint_failures(result)
     _omit_orphans(result)
     if not any(item.status == "confirmed" and item.operation == "add" for item in result.features):
-        result.features.insert(0, _fallback_box())
+        _insert_fallback_box(result)
     _cover_unmodeled_analysis(result)
     if not _compiles(result):
-        for feature in result.features:
-            if feature.id != "minimal_body":
-                _omit(feature, "Omitted because it prevented a deterministic first preview")
-        if not any(item.id == "minimal_body" for item in result.features):
-            result.features.insert(0, _fallback_box())
-        _cover_unmodeled_analysis(result)
+        result = fallback_draft(result)
     return result
+
+
+def fallback_draft(draft: DraftSpecification) -> DraftSpecification:
+    """The guaranteed-safe reduction: everything omitted except a fresh fallback box.
+
+    Callers use this to recover when even a schema-valid `minimal_reliable_draft`
+    result fails the real worker build (`run_project`) — a class of geometric
+    failure (e.g. an infeasible fillet) that `_compiles`'s schema-level check
+    cannot see. A user should never receive a build error; this is the backstop.
+
+    Dimensions are dropped entirely, not just features: `_fallback_box` is pure
+    literals and references none, but a dimension left over from an omitted
+    feature (e.g. one that failed a positivity check) is still independently
+    validated by `validate_specification` regardless of which features survive
+    — an orphaned bad dimension would otherwise keep failing this exact "safe"
+    path on every retry.
+    """
+    result = draft.model_copy(deep=True)
+    for feature in result.features:
+        _omit(feature, "Omitted because it prevented a deterministic first preview")
+    _insert_fallback_box(result)
+    result.dimensions = []
+    _cover_unmodeled_analysis(result)
+    return result
+
+
+def _insert_fallback_box(draft: DraftSpecification) -> None:
+    """Insert one fresh, confirmed fallback box — never a second `minimal_body` id.
+
+    A prior round's fallback box (or an echo of it from a seeded replan) can already
+    carry the `minimal_body` id while `unsupported` (omitted by an earlier, unrelated
+    pass in this same function). Blindly checking "does a minimal_body id already
+    exist" then skipping the insert leaves zero confirmed features — the one
+    guarantee this module exists to uphold. Dropping any stale same-id feature before
+    inserting a fresh one makes the insert unconditionally safe.
+    """
+    draft.features = [item for item in draft.features if item.id != "minimal_body"]
+    draft.features.insert(0, _fallback_box())
 
 
 def _references(feature: SpecificationFeature) -> set[str]:
@@ -65,7 +98,7 @@ def _references(feature: SpecificationFeature) -> set[str]:
 
 def _omit(feature: SpecificationFeature, reason: str) -> None:
     feature.status = "unsupported"
-    feature.label = f"{feature.label} — omitted: {reason}"
+    feature.omission_reason = reason
 
 
 def _omit_lint_failures(draft: DraftSpecification) -> None:
@@ -118,8 +151,9 @@ def _cover_unmodeled_analysis(draft: DraftSpecification) -> None:
         source_id = str(item.get("id", ""))
         if source_id and source_id not in covered:
             draft.features.append(SpecificationFeature(
-                id=f"omitted_feature_{index}", label=f"{source_id} — omitted: no deterministic geometry", type="freeform",
+                id=f"omitted_feature_{index}", label=source_id, type="freeform",
                 operation="add", status="unsupported", source_feature_ids=[source_id],
+                omission_reason="no deterministic geometry",
             ))
 
 

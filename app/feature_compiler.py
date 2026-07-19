@@ -68,8 +68,8 @@ _SOLID_BOOLEAN_OPERATIONS = ("add", "cut", "intersect")
 OPERATION_CONTRACTS: Dict[str, OperationContract] = {
     "box": OperationContract(_SOLID_BOOLEAN_OPERATIONS, ("length", "width", "height")),
     "cylinder": OperationContract(_SOLID_BOOLEAN_OPERATIONS, ("radius", "height")),
-    "extrude": OperationContract(_SOLID_BOOLEAN_OPERATIONS, ("distance",), profile_types=("rectangle", "circle", "polyline")),
-    "revolve": OperationContract(_SOLID_BOOLEAN_OPERATIONS, optional_parameters=("angle_deg",), profile_types=("rectangle", "circle", "polyline")),
+    "extrude": OperationContract(_SOLID_BOOLEAN_OPERATIONS, ("distance",), profile_types=("rectangle", "circle", "polyline", "polygon")),
+    "revolve": OperationContract(_SOLID_BOOLEAN_OPERATIONS, optional_parameters=("angle_deg",), profile_types=("rectangle", "circle", "polyline", "polygon")),
     "hole": OperationContract(("cut",), ("diameter", "depth")),
     "through_hole": OperationContract(("cut",), ("diameter", "depth")),
     "counterbore": OperationContract(("cut",), ("diameter", "depth", "bore_diameter", "bore_depth")),
@@ -164,6 +164,7 @@ def _profile_contract_issues(feature: FeatureOperation | SpecificationFeature, p
         "rectangle": ("width", "height"),
         "circle": ("diameter",),
         "slot": ("length", "width"),
+        "polygon": ("sides", "across_flats"),
     }.get(profile_type, ())
     missing = [key for key in required_dimensions if key not in profile.dimensions]
     if missing:
@@ -173,6 +174,10 @@ def _profile_contract_issues(feature: FeatureOperation | SpecificationFeature, p
         return [f"profile has unsupported dimension(s): {', '.join(unexpected)}"]
     if profile_type == "polyline" and len(profile.points) < 3:
         return ["polyline profile requires at least three points"]
+    if profile_type == "polygon":
+        sides = profile.dimensions.get("sides")
+        if isinstance(sides, (int, float)) and sides < 3:
+            return ["polygon profile requires at least three sides"]
     return []
 
 
@@ -339,15 +344,21 @@ def _compile_primitive(operation: FeatureOperation, parameter_ids: Set[str]) -> 
             f".workplane(offset={sink_depth}).circle({diameter} / 2).loft(combine=True))"
         )
     elif feature_type == "slot":
+        # slot2D has no centered=False option (unlike box/rect); shift the drawn slot by
+        # half its own size first so its origin means the same corner/base anchor as
+        # every other primitive, then the generic origin-translate below applies on top.
         length = _required_value(operation, "length", parameter_ids)
         width = _required_value(operation, "width", parameter_ids)
         depth = _required_value(operation, "depth", parameter_ids)
-        expression = f'cq.Workplane("{_plane(operation)}").slot2D({length}, {width}).extrude({depth})'
+        expression = (
+            f'(cq.Workplane("{_plane(operation)}").slot2D({length}, {width}).extrude({depth}))'
+            f".translate(({length} / 2, {width} / 2, 0))"
+        )
     elif feature_type == "pocket":
         length = _required_value(operation, "length", parameter_ids)
         width = _required_value(operation, "width", parameter_ids)
         depth = _required_value(operation, "depth", parameter_ids)
-        expression = f'cq.Workplane("{_plane(operation)}").rect({length}, {width}).extrude({depth})'
+        expression = f'cq.Workplane("{_plane(operation)}").rect({length}, {width}, centered=False).extrude({depth})'
     elif feature_type == "rib":
         length = _required_value(operation, "length", parameter_ids)
         thickness = _required_value(operation, "thickness", parameter_ids)
@@ -403,9 +414,12 @@ def _compile_modifier(operation: FeatureOperation, target_shape: str, parameter_
         edges = f".edges({json.dumps(selector)})" if selector else ".edges()"
         return f"{target_shape}{edges}.chamfer({distance})"
     if feature_type == "shell":
+        # CadQuery's shell() offsets outward for a positive thickness, growing the solid past
+        # its original envelope; "wall thickness" always means hollow inward, keeping the
+        # outer dimensions the planner (and the user) already specified.
         thickness = _required_value(operation, "thickness", parameter_ids)
         faces = f".faces({json.dumps(selector)})" if selector else ".faces()"
-        return f"{target_shape}{faces}.shell({thickness})"
+        return f"{target_shape}{faces}.shell(-({thickness}))"
     if feature_type == "mirror":
         plane = operation.placement.plane if operation.placement and operation.placement.plane else "YZ"
         return f"{target_shape}.mirror(mirrorPlane={json.dumps(plane)}, union=True)"
@@ -506,6 +520,12 @@ def _compile_profile(operation: FeatureOperation, parameter_ids: Set[str]) -> st
         for point in profile.points[1:]:
             calls += f".lineTo({_value(point[0], parameter_ids, operation.id)}, {_value(point[1], parameter_ids, operation.id)})"
         return calls + ".close()"
+    if profile_type == "polygon":
+        # circumscribed=True makes `diameter` the flat-to-flat width (the drawing's usual
+        # "across flats" callout for a hex head/nut), not the corner-to-corner circumdiameter.
+        sides = _profile_value(operation, "sides", parameter_ids)
+        across_flats = _profile_value(operation, "across_flats", parameter_ids)
+        return f".polygon(int({sides}), {across_flats}, circumscribed=True)"
     raise CompilerError(operation.id, f"unsupported profile type '{profile.type}'")
 
 

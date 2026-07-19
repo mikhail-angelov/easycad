@@ -27,7 +27,6 @@ from .feature_compiler import (
     draft_specification_operation_types,
 )
 from .draft_builder import DraftBuilder
-from .minimal_model import minimal_reliable_draft
 
 
 MAX_UPLOAD_BYTES = 20 * 1024 * 1024
@@ -97,7 +96,6 @@ async def generate_draft_specification_from_image(
         raise GenerationError("draft_specification", "DEEP_SEEK_KEY is not configured")
     analysis = await analyze_drawing(data, image_info["mime_type"], instructions, openrouter_key)
     draft = await plan_draft_specification(analysis, instructions, deepseek_key)
-    draft = minimal_reliable_draft(draft)
     draft.source = SourceInfo(
         filename=image_info.get("filename", ""),
         mime_type=image_info.get("mime_type", ""),
@@ -187,6 +185,9 @@ async def plan_draft_specification(
         "A drawing label that says a hole is through/сквозное is a confirmed instruction to cut through its target thickness; do not ask about it again. "
         "countersink needs diameter, depth, sink_diameter, sink_depth; slot/pocket need length, width, depth; "
         "rib needs length, thickness, height; fillet needs radius; chamfer needs distance; shell needs thickness. "
+        "extrude/revolve profile type polygon needs sides (an integer) and across_flats (the flat-to-flat width, exactly as a drawing usually "
+        "dimensions a hex head, hex nut, or other regular-polygon part); use this profile instead of approximating a hexagonal or other "
+        "regular-polygon body as a box or a cylinder. "
         "For text, engraved, recessed, or inset means operation=cut; embossed, raised, protruding, or outward text means operation=add. "
         "Place raised text so its extrusion leaves the named exterior face while still touching the target body. "
         "Build one connected solid: the first feature is the only root; every additive feature after the first MUST set target to the existing root body, and every cut MUST target that same connected body. "
@@ -195,6 +196,18 @@ async def plan_draft_specification(
         "never a feature ID. Omit reference when the selected edges are not known. "
         "Use origin as exactly three numeric values or dimension IDs for translation, never expressions; never use offset, center, position, depth, or centered_on_width. "
         "Write constant origin coordinates as plain numbers: use 0 directly and never declare a dimension for the constant zero. "
+        "Origin is the minimum corner for box, rib, pocket, and slot, extending in the positive X/Y/Z direction from there; "
+        "for cylinder, hole, and through_hole, origin is the center of the circular cross-section at its base. "
+        "A pocket meant to sit inset by a wall thickness inside a corner-anchored target uses that same wall thickness as its own origin offset on each axis "
+        "(for example origin [wall_thickness, wall_thickness, bottom_thickness] to sit inside a box starting at [0, 0, 0]). "
+        "A corner-anchored feature (box, rib, pocket, slot) that must share a rotational axis with a center-anchored feature (cylinder, hole) at the same "
+        "position needs its own origin offset by half its own size on the two axes perpendicular to that axis, never origin 0 on those axes: for a box of "
+        "width W (Y) and height H (Z) centered on a cylinder whose axis sits at y=0, z=0, declare negative dimensions equal to -W/2 and -H/2 and use them as "
+        "origin [x, -W/2, -H/2]; leaving origin at [x, 0, 0] instead places the box's corner, not its center, on the cylinder's axis and makes the two "
+        "features overlap off-axis instead of forming one straight coaxial body. "
+        "For extrude and revolve, a rectangle, circle, or polygon profile is always centered on the workplane's local origin (the same "
+        "center-anchored convention as cylinder), regardless of feature type; only a polyline profile sits wherever its own declared points "
+        "place it. Apply the coaxial-alignment rule above when centering these against a cylinder or hole. "
         "Use millimetres for every measurement. Build a minimal reliable model, not a complete interpretation: include only geometry with "
         "unambiguous dimensions, position, target, and direction. Never ask questions in this pass. If a detail is incomplete, contradictory, "
         "or unsupported, return it as status unsupported with its source_feature_ids and a short omission reason in its label. Do not invent "
@@ -211,6 +224,15 @@ async def plan_draft_specification(
         prompt += f"\nUser instructions: {instructions.strip()}"
     if freeform_instruction:
         prompt += f"\nFreeform model-change instruction: {freeform_instruction}"
+    referenced_feature_ids = [str(item) for item in (user_inputs or {}).get("referenced_feature_ids", []) if str(item).strip()]
+    if referenced_feature_ids and previous_specification is not None:
+        labels = {item.id: item.label for item in previous_specification.features}
+        named = ", ".join(f"{item_id} ({labels[item_id]})" if item_id in labels else item_id for item_id in referenced_feature_ids)
+        prompt += (
+            f"\nThe user's instruction specifically concerns feature id(s) {', '.join(referenced_feature_ids)} "
+            f"(labels: {named}). Prefer editing only these unless the instruction clearly names a different "
+            "feature or a dependent feature must change to keep the model valid."
+        )
     previous_payload: object = previous_specification.model_dump(mode="json") if previous_specification else None
     payload = {
         "model": model,
@@ -287,7 +309,13 @@ def _parameter_schema(required: tuple[str, ...], optional: tuple[str, ...], valu
 
 
 def _profile_schema(profile_types: tuple[str, ...], value_schema: Dict[str, Any]) -> Dict[str, Any]:
-    dimensions = {"rectangle": ("width", "height"), "circle": ("diameter",), "slot": ("length", "width"), "polyline": ()}
+    dimensions = {
+        "rectangle": ("width", "height"),
+        "circle": ("diameter",),
+        "slot": ("length", "width"),
+        "polyline": (),
+        "polygon": ("sides", "across_flats"),
+    }
     variants = []
     for profile_type in profile_types:
         dimension_names = dimensions[profile_type]

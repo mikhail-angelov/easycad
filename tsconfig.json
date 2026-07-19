@@ -16,5 +16,6 @@
     "jsx": "react-jsx",
     "jsxImportSource": "preact"
   },
-  "include": ["frontend"]
+  "include": ["frontend"],
+  "exclude": ["frontend/src/**/*.test.ts"]
 }

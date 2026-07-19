@@ -49,6 +49,7 @@ class DraftBuilder:
 
     def add_feature(self, payload: dict[str, Any]) -> dict[str, Any]:
         _normalize_placement(payload)
+        _normalize_profile(payload)
         if str(payload.get("target", "")).strip().lower() in {"", "none", "null"}:
             payload["target"] = None
         try:
@@ -84,30 +85,33 @@ def _store(items: list, item: Any, key: str) -> dict[str, Any]:
 
 def _normalize_placement(payload: dict[str, Any]) -> None:
     value = payload.get("placement")
-    if not isinstance(value, str):
-        return
-    try:
-        decoded = json.loads(value)
-    except json.JSONDecodeError:
-        decoded = None
-    if isinstance(decoded, dict):
-        payload["placement"] = decoded
-        return
-    match = re.fullmatch(r"\s*(XY|XZ|YZ)\s*(?:\(\s*(.*?)\s*\))?\s*", value, re.IGNORECASE)
-    if not match:
-        match = re.fullmatch(
-            r"\s*(?:(XY|XZ|YZ)\s*[;,]?)?\s*origin\s*[:=]\s*\[\s*(.*?)\s*\]\s*",
-            value,
-            re.IGNORECASE,
-        )
-        if not match:
-            return
-    origin_text = match.group(2)
-    origin = [_placement_value(part) for part in origin_text.split(",")] if origin_text else None
-    placement = {"origin": origin} if origin and len(origin) == 3 else {}
-    if match.group(1):
-        placement["plane"] = match.group(1).upper()
-    payload["placement"] = placement
+    if isinstance(value, str):
+        try:
+            decoded = json.loads(value)
+        except json.JSONDecodeError:
+            decoded = None
+        if not isinstance(decoded, dict):
+            match = re.fullmatch(r"\s*(XY|XZ|YZ)\s*(?:\(\s*(.*?)\s*\))?\s*", value, re.IGNORECASE)
+            if not match:
+                match = re.fullmatch(
+                    r"\s*(?:plane\s*[:=]\s*)?(?:(XY|XZ|YZ)\s*[;,]?)?\s*origin\s*[:=]\s*\[\s*(.*?)\s*\]\s*",
+                    value,
+                    re.IGNORECASE,
+                )
+            if not match:
+                return
+            origin_text = match.group(2)
+            origin = [_placement_value(part) for part in origin_text.split(",")] if origin_text else None
+            decoded = {"origin": origin} if origin and len(origin) == 3 else {}
+            if match.group(1):
+                decoded["plane"] = match.group(1).upper()
+        value = decoded
+        payload["placement"] = value
+    if isinstance(value, dict) and not isinstance(value.get("direction"), (str, type(None))):
+        # `direction` is accepted but never read downstream (feature_compiler ignores it); a
+        # provider that sends a vector like [1, 0, 0] instead of the expected axis string
+        # should not block an otherwise fully-dimensioned, valid feature from compiling.
+        value.pop("direction", None)
 
 
 def _placement_value(value: str) -> int | float | str:
@@ -117,6 +121,36 @@ def _placement_value(value: str) -> int | float | str:
     if re.fullmatch(r"[+-]?(?:\d+\.\d*|\.\d+)", value):
         return float(value)
     return value
+
+
+def _normalize_profile(payload: dict[str, Any]) -> None:
+    """Repair the same JSON-as-string habit `_normalize_placement` already works around, plus a
+    second, profile-specific habit observed in production: dimension keys (sides, across_flats,
+    width, height, ...) sent flattened alongside "type" instead of nested under "dimensions"."""
+    value = payload.get("profile")
+    if isinstance(value, str):
+        try:
+            decoded = json.loads(value)
+        except json.JSONDecodeError:
+            decoded = None
+        if not isinstance(decoded, dict):
+            match = re.fullmatch(r"\s*([a-zA-Z_]+)\s*:\s*(.*)", value)
+            if not match:
+                return
+            dimensions: dict[str, Any] = {}
+            for part in match.group(2).split(","):
+                if "=" not in part:
+                    continue
+                key, _, raw = part.partition("=")
+                dimensions[key.strip()] = _placement_value(raw.strip())
+            decoded = {"type": match.group(1).strip().lower(), "dimensions": dimensions}
+        value = decoded
+        payload["profile"] = value
+    if not isinstance(value, dict):
+        return
+    stray = {key: value.pop(key) for key in list(value) if key not in {"type", "dimensions", "points"}}
+    if stray:
+        value.setdefault("dimensions", {}).update(stray)
 
 
 def _references(feature: SpecificationFeature) -> list[str]:

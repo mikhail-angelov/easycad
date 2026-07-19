@@ -166,6 +166,7 @@ class SpecificationFeature(BaseModel):
     evidence: List[str] = Field(default_factory=list)
     alternatives: Dict[str, List[FeatureValue]] = Field(default_factory=dict)
     source_feature_ids: List[str] = Field(default_factory=list)
+    omission_reason: Optional[str] = None
 
 
 class DraftSpecification(BaseModel):

@@ -69,8 +69,28 @@ A generic feature record with a supported kind, operation, target, parameters, a
 _Avoid_: Ad-hoc feature shape, parallel feature hierarchy
 
 **Omitted feature**:
-A detected feature that the supported compiler cannot model. It is automatically excluded from the build and displayed as a review warning, never substituted or silently dropped.
+A specification feature excluded from the rendered model because it cannot be compiled reliably. It remains visible and addressable in the feature roster, never substituted or silently dropped.
 _Avoid_: Unsupported approximation, hidden omission
+
+**Feature roster**:
+The ordered presentation list of every specification feature, including rendered and omitted features, with its status, omission reason, and optional spatial extent.
+_Avoid_: Build input, feature graph
+
+**Feature alias**:
+A short browser-session display name assigned to one feature ID for roster navigation. It is UI-only and never leaves the browser; it expires when that feature ID disappears.
+_Avoid_: Feature ID, server identifier
+
+**Scoped refinement**:
+A freeform model-change instruction accompanied by selected feature IDs. The client creates that selection only through `@` feature completion; the roster and 3D overlays are inspection-only. The client filters selections against the current roster and the server silently ignores stale IDs; omitted features may be selected even when they have no spatial overlay. Scope is advisory: the planner may also alter dependencies required for a valid model.
+_Avoid_: Constraint solver, review gate
+
+**Feature identity preservation**:
+The planner should normally retain a changed feature's ID, but this is not required for refinement correctness. If an ID changes, the client assigns the replacement feature a new alias rather than guessing identity from label or geometry.
+_Avoid_: Required ID lock, matching features by label or geometry
+
+**Refinement scope lifetime**:
+Feature chips selected through `@` completion apply to one submitted instruction only. A successful refinement clears both the instruction and its selected feature IDs.
+_Avoid_: Persistent selection, implicit scope for the next instruction
 
 **Reviewed specification**:
 The supported, user-reviewed portion of a DraftSpecification that is compiled and checked for semantic completeness. Omitted features remain visible warnings but are outside its required geometry.

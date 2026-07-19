@@ -5,3 +5,7 @@ pydantic
 pillow
 httpx
 socksio
+pytesseract
+# pytesseract needs the tesseract-ocr system binary (e.g. `brew install tesseract` /
+# `apt-get install tesseract-ocr`) to actually do anything; app/multiview_triangulation.py
+# degrades gracefully (skips OCR cross-checking) if it isn't on PATH.

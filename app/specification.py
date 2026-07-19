@@ -77,7 +77,9 @@ def validate_specification(specification: DraftSpecification) -> Dict[str, float
         for feature in specification.features
         if feature.type == "text" and feature.operation == "cut" and isinstance(feature.parameters.get("distance"), str)
     }
-    # Sizes (parameters, profile, pattern) must be positive; placement-origin coordinates may be zero.
+    # Sizes (parameters, profile, pattern) must be positive; placement-origin coordinates may be
+    # zero or negative (a coordinate frame has legitimate negative regions, e.g. a rim placed to
+    # the left of an object's origin) unless the same dimension id also does double duty as a size.
     positive_value_ids = {
         parameter_id
         for feature in specification.features
@@ -88,6 +90,14 @@ def validate_specification(specification: DraftSpecification) -> Dict[str, float
             and parameter_id == feature.parameters.get("distance")
         )
     }
+    origin_value_ids = {
+        parameter_id
+        for feature in specification.features
+        for parameter_id in _feature_origin_references(feature)
+    }
+    # Ids allowed to be negative: signed text-cut distances, plus any dimension used only as a
+    # placement-origin coordinate (never also as a size, which must stay strictly positive).
+    signed_value_ids = (signed_text_distance_ids | origin_value_ids) - positive_value_ids
     pending = {}
     for dimension in specification.dimensions:
         if dimension.critical and dimension.status in {"needs_input", "conflicted"}:
@@ -109,7 +119,7 @@ def validate_specification(specification: DraftSpecification) -> Dict[str, float
             text_value_ids.add(dimension.id)
             continue
         value = float(dimension.value)
-        allows_signed_value = dimension.id in signed_text_distance_ids - positive_value_ids
+        allows_signed_value = dimension.id in signed_value_ids
         allows_zero_value = dimension.id not in positive_value_ids
         if not math.isfinite(value) or (value == 0 and not allows_zero_value) or (value < 0 and not allows_signed_value):
             field_ids.append(dimension.id)
@@ -135,7 +145,7 @@ def validate_specification(specification: DraftSpecification) -> Dict[str, float
                 del pending[field_id]
                 progressed = True
                 continue
-            if not math.isfinite(value) or value < 0 or (value == 0 and field_id in positive_value_ids):
+            if not math.isfinite(value) or (value < 0 and field_id not in signed_value_ids) or (value == 0 and field_id in positive_value_ids):
                 field_ids.append(field_id)
                 messages.append(f"{field_id} expression must resolve to a positive value")
             else:
@@ -239,15 +249,15 @@ def _feature_size_references(feature: SpecificationFeature) -> List[str]:
     return references
 
 
+def _feature_origin_references(feature: SpecificationFeature) -> List[str]:
+    """Dimension IDs used as placement-origin coordinates; may legitimately be zero or negative."""
+    placement = FeaturePlacement.model_validate(feature.placement)
+    return [value for value in (placement.origin or []) if isinstance(value, str)]
+
+
 def _feature_parameter_references(feature: SpecificationFeature) -> List[str]:
     """Strings in executable geometry are dimension IDs, never free-form CAD expressions."""
-    references = _feature_size_references(feature)
-    placement = FeaturePlacement.model_validate(feature.placement)
-    if placement.origin:
-        for value in placement.origin:
-            if isinstance(value, str):
-                references.append(value)
-    return references
+    return _feature_size_references(feature) + _feature_origin_references(feature)
 
 
 def project_from_specification(specification: DraftSpecification) -> CADProject:

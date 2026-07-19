@@ -99,11 +99,14 @@ def resolved_feature_extent(feature: SpecificationFeature, values: dict[str, flo
         return None
     plane = feature.placement.plane or "XY"
     parameters = feature.parameters
-    if feature.type == "box":
-        length, width, height = (_number(parameters.get(name), values) for name in ("length", "width", "height"))
-        if None in (length, width, height) or plane != "XY":
+    if feature.type in {"box", "rib"}:
+        # rib compiles to the same axis-aligned box(length, <second>, height, centered=False)
+        # shape as box; only the parameter name for the second dimension differs.
+        second_name = "width" if feature.type == "box" else "thickness"
+        length, second, height = (_number(parameters.get(name), values) for name in ("length", second_name, "height"))
+        if None in (length, second, height) or plane != "XY":
             return None
-        return _oriented_extent(origin, plane, (0, float(length)), (0, float(width)), float(height))
+        return _oriented_extent(origin, plane, (0, float(length)), (0, float(second)), float(height))
     if feature.type == "cylinder":
         radius, height = (_number(parameters.get(name), values) for name in ("radius", "height"))
         if radius is None or height is None:
@@ -119,8 +122,9 @@ def resolved_feature_extent(feature: SpecificationFeature, values: dict[str, flo
         length, width, depth = (_number(parameters.get(name), values) for name in ("length", "width", "depth"))
         if None in (length, width, depth):
             return None
-        # CadQuery rect/slot profiles are centered in their workplane.
-        return _oriented_extent(origin, plane, (-float(length) / 2, float(length) / 2), (-float(width) / 2, float(width) / 2), float(depth))
+        # Corner/base-anchored like every other primitive (app/feature_compiler.py compensates
+        # for slot2D's lack of a centered=False option with an equivalent half-size translate).
+        return _oriented_extent(origin, plane, (0, float(length)), (0, float(width)), float(depth))
     return None
 
 
@@ -158,10 +162,25 @@ def lint_draft(draft: DraftSpecification) -> LintResult:
         if feature.status == "unsupported":
             continue
         extent = resolved_feature_extent(feature, values)
-        if extent is None and feature.type in {"box", "cylinder", "hole", "through_hole", "pocket", "slot"}:
+        if extent is None and feature.type in {"box", "rib", "cylinder", "hole", "through_hole", "pocket", "slot"}:
             unevaluated.append(feature.id)
         elif extent is not None:
             extents[feature.id] = extent
+
+    # A feature centered on a sibling's axis (for example a corner-anchored box whose origin is
+    # offset by -width/2, -height/2 to share a cylinder's centerline) legitimately has a negative
+    # origin coordinate. The target relationship can be declared by either side -- the root body
+    # never has a target itself -- so a verified connection exempts both feature ids, not just
+    # whichever one happens to declare `target`.
+    connected_ids: set[str] = set()
+    for feature in draft.features:
+        if feature.status == "unsupported" or not feature.target:
+            continue
+        extent = extents.get(feature.id)
+        target = extents.get(feature.target)
+        if extent is not None and target is not None and _intersection(extent, target) is not None:
+            connected_ids.add(feature.id)
+            connected_ids.add(feature.target)
 
     issues: list[LintIssue] = []
     for feature in draft.features:
@@ -178,12 +197,13 @@ def lint_draft(draft: DraftSpecification) -> LintResult:
                     "slot_degenerate", "error", [feature.id],
                     f"{feature.id} has no straight slot section: length must exceed width",
                 ))
+        target = extents.get(feature.target) if feature.target else None
         origin = _origin(feature, values)
-        for index, (axis, coordinate) in enumerate(zip("xyz", origin or (0, 0, 0))):
-            if coordinate < -TOLERANCE_MM:
-                issues.append(LintIssue("negative_origin", "error", [feature.id], f"{feature.id} has a negative {axis.upper()} origin", axis, LintSuggestion(feature.id, f"placement.origin[{index}]", 0)))
-        if feature.target and feature.target in extents:
-            target = extents[feature.target]
+        if feature.id not in connected_ids:
+            for index, (axis, coordinate) in enumerate(zip("xyz", origin or (0, 0, 0))):
+                if coordinate < -TOLERANCE_MM:
+                    issues.append(LintIssue("negative_origin", "error", [feature.id], f"{feature.id} has a negative {axis.upper()} origin", axis, LintSuggestion(feature.id, f"placement.origin[{index}]", 0)))
+        if target is not None:
             if feature.operation == "cut":
                 if _intersection(extent, target) is None or not _cut_penetrates_target(extent, target, feature.placement.plane or "XY"):
                     issues.append(LintIssue("cut_misses_target", "error", [feature.id, feature.target], f"{feature.id} does not intersect target {feature.target}"))
