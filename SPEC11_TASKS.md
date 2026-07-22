@@ -84,6 +84,14 @@ with `npm run build` after UI edits). New source is uncommitted (not asked to co
   as-designed; "New model" starts fresh. (Consider: surface which session resumed.)
 - Tip: for already-precise prompts, the `refine` toggle OFF = exact Phase-1 direct generation.
 
+## Text-only project format (no binary)
+
+`store.to_project()` now excludes `stl_base64` — the project/autosave file is pure text
+(prompts + code + geometry_info), small and git-diffable. The STL is regenerated from each
+step's code on demand via `_ensure_step_stl()` (called in `_session_payload`, `get_step`,
+`export_step`), so resume/revert/export still work without persisting binary. Verified:
+autosave ~1.5KB, 0 stl_base64, resume regenerates the current model. Test asserts no stl in file.
+
 ## Triage redesign (replaces always-refine)
 
 `app/refiner.py` is now `triage()` — one LLM call returns a verdict:

@@ -115,8 +115,23 @@ def _ensure_initial() -> None:
     _create_initial()
 
 
+def _ensure_step_stl(step) -> None:
+    """Lazily regenerate a step's STL from its code (STL isn't persisted).
+
+    No-op if the STL is already in memory, or the step failed / has no code.
+    """
+    if step is None or step.stl_base64 or not step.success or not step.code:
+        return
+    res = execute(step.code)
+    if res.success:
+        step.stl_base64 = res.stl_base64
+        if res.geometry_info:
+            step.geometry_info = res.geometry_info
+
+
 def _session_payload() -> dict:
     current = store.current()
+    _ensure_step_stl(current)
     return {
         "current_id": store.current_id,
         "current": current.to_public() if current else None,
@@ -154,6 +169,7 @@ def get_step(step_id: int) -> dict:
     step = store.get(step_id)
     if step is None:
         raise HTTPException(404, f"Step {step_id} not found")
+    _ensure_step_stl(step)
     return step.to_public()
 
 
@@ -410,6 +426,8 @@ def import_project(project: dict) -> dict:
 @app.get("/api/export/{step_id}")
 def export_step(step_id: int) -> Response:
     step = store.get(step_id)
+    if step is not None:
+        _ensure_step_stl(step)
     if step is None or not step.stl_base64:
         raise HTTPException(404, f"No STL available for step {step_id}")
     data = base64.b64decode(step.stl_base64)

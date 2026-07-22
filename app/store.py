@@ -99,12 +99,17 @@ class SessionStore:
     PROJECT_VERSION = 1
 
     def to_project(self) -> dict:
-        """Serialize the whole session (steps incl. STL) to a JSON-able dict."""
+        """Serialize the session to a JSON-able dict.
+
+        Text-only: the STL is NOT stored — it is regenerated from each step's
+        code on demand. This keeps the project file small, human-readable, and
+        diff/git-friendly.
+        """
         return {
             "format": self.PROJECT_FORMAT,
             "version": self.PROJECT_VERSION,
             "current_id": self.current_id,
-            "steps": [s.to_public(include_stl=True) for s in self.all()],
+            "steps": [s.to_public(include_stl=False) for s in self.all()],
         }
 
     def load_project(self, data: dict) -> None:

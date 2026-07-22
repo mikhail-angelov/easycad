@@ -45,6 +45,10 @@ def test_export_then_import_roundtrip():
     assert proj["format"] == "easycad-cadquery-chat"
     n_steps = len(proj["steps"])
     assert n_steps == 2
+    # Text-only: no binary STL is persisted in the project file.
+    for st in proj["steps"]:
+        assert "stl_base64" not in st
+        assert "code" in st
 
     store.reset()
     imported = client.post("/api/project/import", json=proj).json()

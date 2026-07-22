@@ -1,4 +1,4 @@
-import { useRef, useState } from 'preact/hooks'
+import { useEffect, useRef, useState } from 'preact/hooks'
 import { useStore } from '../store'
 
 export function Chat() {
@@ -30,6 +30,13 @@ export function Chat() {
 
   const [text, setText] = useState('')
   const proposalRef = useRef<HTMLTextAreaElement>(null)
+  const logRef = useRef<HTMLDivElement>(null)
+
+  // Keep the latest message/prompt/proposal in view, like a normal chat.
+  useEffect(() => {
+    const el = logRef.current
+    if (el) el.scrollTop = el.scrollHeight
+  }, [chatLog, pending, proposal, invalidNotice, variations, busy])
 
   const submit = () => {
     const t = text.trim()
@@ -85,7 +92,7 @@ export function Chat() {
         </div>
       </header>
 
-      <div class="chat-log">
+      <div class="chat-log" ref={logRef}>
         {chatLog.length === 0 && !pending && (
           <p class="hint">Describe one change at a time — e.g. “сделай бортик по верхней кромке”.</p>
         )}
