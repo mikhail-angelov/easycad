@@ -105,6 +105,24 @@ async def generate_draft_specification_from_image(
     return draft
 
 
+async def generate_draft_specification_from_text(instructions: str) -> DraftSpecification:
+    """No drawing at all: the planner builds straight from a free-text description, with an
+    empty (fully optional -- DrawingAnalysis defaults every field to []) drawing_analysis. Skips
+    analyze_drawing entirely, so this needs only whichever key plan_draft_specification's own
+    routing actually calls (OPEN_ROUTER_KEY when OPEN_ROUTER_PLANNER_MODEL is set, DeepSeek
+    otherwise) -- not vision analysis's OPEN_ROUTER_KEY requirement."""
+    if not instructions.strip():
+        raise GenerationError("draft_specification", "Describe the part you want to build")
+    deepseek_key = os.environ.get("DEEP_SEEK_KEY")
+    if not os.environ.get("OPEN_ROUTER_PLANNER_MODEL") and not deepseek_key:
+        raise GenerationError("draft_specification", "DEEP_SEEK_KEY is not configured")
+    if os.environ.get("OPEN_ROUTER_PLANNER_MODEL") and not os.environ.get("OPEN_ROUTER_KEY"):
+        raise GenerationError("draft_specification", "OPEN_ROUTER_KEY is not configured")
+    draft = await plan_draft_specification({}, instructions, deepseek_key)
+    draft.source = SourceInfo()
+    return draft
+
+
 async def analyze_drawing(data: bytes, mime_type: str, instructions: str, api_key: str) -> Dict[str, Any]:
     model = normalize_model_id(os.environ.get("OPEN_ROUTER_MODEL", "google/gemini-3-flash-preview"))
     data_url = f"data:{mime_type};base64,{base64.b64encode(data).decode('ascii')}"

@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import json
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Dict, Iterable, Set
 
 from .models import CADProject, FeatureGraph, FeatureOperation, FeatureValue, SpecificationFeature
@@ -47,6 +47,13 @@ class OperationContract:
     optional_parameters: tuple[str, ...] = ()
     profile_types: tuple[str, ...] = ()
     pattern_types: tuple[str, ...] = ()
+    literal_parameters: Dict[str, tuple[str, ...]] = field(default_factory=dict)
+    # parameter name -> its fixed set of allowed literal string values, e.g.
+    # {"open_side": ("none", "-x", "+x", "-y", "+y")}. Unlike every other parameter value
+    # (always a numeric dimension id -- see _value()), a literal parameter is never a
+    # measurement, so it is never looked up in PARAMETERS; the compiler emits it as a plain
+    # quoted string and the draft schema restricts it to this exact enum instead of the
+    # generic string/number value shape every other parameter gets.
 
     @property
     def requires_profile(self) -> bool:
@@ -402,9 +409,18 @@ def _compile_primitive(operation: FeatureOperation, parameter_ids: Set[str]) -> 
     return [expression]
 
 
+_SELECT_EVERYTHING_WORDS = {"all", "any", "every", "everything", "*"}
+
+
 def _compile_modifier(operation: FeatureOperation, target_shape: str, parameter_ids: Set[str]) -> str:
     feature_type = canonical_operation_type(operation.type)
-    selector = operation.placement.reference if operation.placement else None
+    raw_selector = operation.placement.reference if operation.placement else None
+    # CadQuery's selector-string grammar has no "all"/"every" keyword -- the correct way to
+    # select every edge/face is to omit the selector and call .edges()/.faces() with no
+    # argument. The planner sometimes writes the plain-English word instead (observed: "all"),
+    # which CadQuery's own selector parser then rejects outright ("Expected 'not' operations,
+    # found 'all'"). Treat that word as "no selector" rather than a malformed real selector.
+    selector = None if raw_selector and raw_selector.strip().lower() in _SELECT_EVERYTHING_WORDS else raw_selector
     if feature_type == "fillet":
         radius = _required_value(operation, "radius", parameter_ids)
         edges = f".edges({json.dumps(selector)})" if selector else ".edges()"
@@ -417,9 +433,16 @@ def _compile_modifier(operation: FeatureOperation, target_shape: str, parameter_
         # CadQuery's shell() offsets outward for a positive thickness, growing the solid past
         # its original envelope; "wall thickness" always means hollow inward, keeping the
         # outer dimensions the planner (and the user) already specified.
+        #
+        # `.faces(selector)` marks the SELECTED faces as openings to remove, not as the faces
+        # to offset -- `.faces()` with no selector at all selects every face as an opening,
+        # which is a no-op (confirmed: volume stays exactly the original solid's volume, no
+        # cavity at all). A face selector is only correct when the part should have an actual
+        # open face (e.g. an open-top container); the common "fully enclosed, hollow" case must
+        # call `.shell()` directly on the solid with no `.faces()` at all.
         thickness = _required_value(operation, "thickness", parameter_ids)
-        faces = f".faces({json.dumps(selector)})" if selector else ".faces()"
-        return f"{target_shape}{faces}.shell(-({thickness}))"
+        target = f"{target_shape}.faces({json.dumps(selector)})" if selector else target_shape
+        return f"{target}.shell(-({thickness}))"
     if feature_type == "mirror":
         plane = operation.placement.plane if operation.placement and operation.placement.plane else "YZ"
         return f"{target_shape}.mirror(mirrorPlane={json.dumps(plane)}, union=True)"

@@ -3,7 +3,7 @@ import { useEffect, useLayoutEffect, useRef, useState } from 'preact/hooks'
 import * as THREE from 'three'
 import { OrbitControls } from 'three/examples/jsm/controls/OrbitControls.js'
 import { STLLoader } from 'three/examples/jsm/loaders/STLLoader.js'
-import { useAppStore } from './store'
+import { useAppStore, type AppState } from './store'
 import type { ApiError, FeatureRosterEntry, ModelResponse } from './types'
 import './styles.css'
 import './model-viewer.css'
@@ -23,21 +23,34 @@ async function requestJson<T>(url: string, init: RequestInit): Promise<T> {
   return payload as T
 }
 
+async function uploadImage(state: AppState, file: File): Promise<void> {
+  state.setRequestState('working')
+  try {
+    const form = new FormData()
+    form.append('file', file)
+    state.setModelResponse(await requestJson<ModelResponse>('/api/model/image', { method: 'POST', body: form }))
+  } catch (error) { state.setError(error as ApiError) }
+  finally { state.setRequestState('idle') }
+}
+
+async function generateFromText(state: AppState, instructions: string): Promise<void> {
+  state.setRequestState('working')
+  try {
+    state.setModelResponse(await requestJson<ModelResponse>('/api/model/text', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ instructions }),
+    }))
+  } catch (error) { state.setError(error as ApiError) }
+  finally { state.setRequestState('idle') }
+}
+
 function UploadScreen() {
   const input = useRef<HTMLInputElement>(null)
   const state = useAppStore()
-  const upload = async (file: File) => {
-    state.setRequestState('working')
-    try {
-      const form = new FormData()
-      form.append('file', file)
-      state.setModelResponse(await requestJson<ModelResponse>('/api/model/image', { method: 'POST', body: form }))
-    } catch (error) { state.setError(error as ApiError) }
-    finally { state.setRequestState('idle') }
-  }
+  const [description, setDescription] = useState('')
+  const working = state.requestState === 'working'
   const change = (event: TargetedEvent<HTMLInputElement, Event>) => {
     const file = event.currentTarget.files?.[0]
-    if (file) void upload(file)
+    if (file) void uploadImage(state, file)
   }
   return <main class="upload-page"><div class="upload-card">
     <div class="brand"><span class="brand-mark" aria-hidden="true" /> EasyCAD</div>
@@ -45,34 +58,91 @@ function UploadScreen() {
     <h1>Upload a drawing.</h1>
     <p class="intro">EasyCAD returns a minimal reliable model immediately. You can then describe changes in plain text.</p>
     <input ref={input} class="sr-only" type="file" accept="image/png,image/jpeg,image/webp" onChange={change} />
-    <button class="upload-target" type="button" disabled={state.requestState === 'working'} onClick={() => input.current?.click()}>
-      {state.requestState === 'working' ? <><span class="spinner" /><span><strong>Building your model…</strong><small>Reading the drawing and rendering 3D geometry.</small></span></> : <><strong>Choose a drawing</strong><span>PNG, JPEG, or WebP</span></>}
+    <button class="upload-target" type="button" disabled={working} onClick={() => input.current?.click()}>
+      {working ? <><span class="spinner" /><span><strong>Building your model…</strong><small>Reading the drawing and rendering 3D geometry.</small></span></> : <><strong>Choose a drawing</strong><span>PNG, JPEG, or WebP</span></>}
+    </button>
+    <div class="or-divider"><span>or describe it in text</span></div>
+    <label class="question-clarification">No drawing? Describe the part
+      <textarea
+        value={description}
+        disabled={working}
+        placeholder={'For example: "A box 100 x 50 x 30 mm with rounded edges and 2 mm wall thickness."'}
+        onInput={(event: TargetedEvent<HTMLTextAreaElement, Event>) => setDescription(event.currentTarget.value)}
+      />
+    </label>
+    <button class="text-generate" type="button" disabled={working || !description.trim()} onClick={() => void generateFromText(state, description)}>
+      Generate from text
     </button>
     {state.error && <p class="field-error">{state.error.message}</p>}
+    <div class="how-it-works">
+      <div><span class="how-step">1</span>Upload a sketch, or describe the part in text</div>
+      <div><span class="how-step">2</span>AI reads (or reasons out) the dimensions and features</div>
+      <div><span class="how-step">3</span>Get an editable, printable 3D model</div>
+    </div>
   </div></main>
+}
+
+function ConfirmDialog({ title, message, confirmLabel, onConfirm, onCancel }: {
+  title: string; message: string; confirmLabel: string; onConfirm: () => void; onCancel: () => void
+}) {
+  return <div class="modal-overlay" role="presentation" onClick={onCancel}>
+    <div class="modal-card" role="dialog" aria-modal="true" aria-label={title} onClick={(event: Event) => event.stopPropagation()}>
+      <h2>{title}</h2>
+      <p>{message}</p>
+      <div class="modal-actions">
+        <button type="button" onClick={onCancel}>Cancel</button>
+        <button type="button" class="danger" onClick={onConfirm}>{confirmLabel}</button>
+      </div>
+    </div>
+  </div>
+}
+
+function FallbackBanner() {
+  const state = useAppStore()
+  const total = state.features.length
+  const confirmed = state.features.filter((feature) => feature.status === 'confirmed').length
+  if (total === 0 || confirmed > total / 2) return null
+  return <div class="fallback-banner" role="status">
+    <strong>Only {confirmed} of {total} detected features could be built reliably.</strong>
+    <span>Try a clearer photo, or describe the missing parts below.</span>
+  </div>
+}
+
+function formatExtent(extent: FeatureRosterEntry['extent']): string | null {
+  if (!extent) return null
+  const round = (value: number) => Math.round(value * 10) / 10
+  const [minX, minY, minZ] = extent.minimum
+  const [maxX, maxY, maxZ] = extent.maximum
+  return `${round(maxX - minX)} × ${round(maxY - minY)} × ${round(maxZ - minZ)} mm`
 }
 
 function FeatureRoster() {
   const state = useAppStore()
   if (!state.features.length) return null
   const confirmed = state.features.filter((feature) => feature.status === 'confirmed').length
+  // Omitted features sink to the bottom so the confirmed, buildable ones are always the
+  // first thing scrolled into view; Array.prototype.sort is stable, so relative order within
+  // each group (server/planner order) is preserved.
+  const ordered = [...state.features].sort((a, b) => (a.status === 'unsupported' ? 1 : 0) - (b.status === 'unsupported' ? 1 : 0))
   return <section class="review-section feature-roster" aria-label="Features in this model">
     <header><h3>Features</h3><span>{confirmed} of {state.features.length}</span></header>
-    {state.features.map((feature) => (
-      <article
-        class={`review-row ${state.selectedId === feature.id ? 'selected' : ''}`}
-        key={feature.id}
-        data-feature-id={feature.id}
-        onMouseEnter={() => state.setSelectedId(feature.id)}
-        onClick={() => state.setSelectedId(feature.id)}
-      >
-        <span class={`number ${feature.status === 'unsupported' ? 'status-unsupported' : 'status-confirmed'}`}>{state.featureAliases[feature.id]}</span>
-        <div class="review-copy">
-          <strong>{feature.label}</strong>
-          {feature.status === 'unsupported' && <span>Omitted — {feature.omission_reason}</span>}
-        </div>
-      </article>
-    ))}
+    <div class="review-rows">
+      {ordered.map((feature) => (
+        <article
+          class={`review-row ${state.selectedId === feature.id ? 'selected' : ''}`}
+          key={feature.id}
+          data-feature-id={feature.id}
+          onMouseEnter={() => state.setSelectedId(feature.id)}
+          onClick={() => state.setSelectedId(feature.id)}
+        >
+          <span class={`number ${feature.status === 'unsupported' ? 'status-unsupported' : 'status-confirmed'}`}>{state.featureAliases[feature.id]}</span>
+          <div class="review-copy">
+            <div class="review-title"><strong>{feature.label}</strong>{formatExtent(feature.extent) && <span class="dims">{formatExtent(feature.extent)}</span>}</div>
+            {feature.status === 'unsupported' && <span>Omitted — {feature.omission_reason}</span>}
+          </div>
+        </article>
+      ))}
+    </div>
   </section>
 }
 
@@ -80,9 +150,17 @@ function Workspace() {
   const state = useAppStore()
   const [prompt, setPrompt] = useState('')
   const [mention, setMention] = useState<{ start: number; text: string } | null>(null)
+  const [confirmUploadOpen, setConfirmUploadOpen] = useState(false)
   const textareaRef = useRef<HTMLTextAreaElement>(null)
   const dropdownRef = useRef<HTMLUListElement>(null)
+  const newFileInput = useRef<HTMLInputElement>(null)
   const pending = state.requestState === 'working'
+
+  const handleNewFile = (event: TargetedEvent<HTMLInputElement, Event>) => {
+    const file = event.currentTarget.files?.[0]
+    event.currentTarget.value = ''
+    if (file) void uploadImage(state, file)
+  }
 
   useEffect(() => {
     const closeOnOutsideClick = (event: MouseEvent) => {
@@ -178,10 +256,15 @@ function Workspace() {
     } catch (error) { state.setError(error as ApiError) }
   }
   return <main class="app-shell">
-    <header class="topbar"><div class="brand"><span class="brand-mark" /> EasyCAD <span class="project-name">{state.specification?.title}</span></div><button class="text-button" type="button" onClick={state.reset}>Start over</button></header>
+    <header class="topbar">
+      <div class="brand"><span class="brand-mark" /> EasyCAD <span class="project-name">{state.specification?.title}</span></div>
+      <input ref={newFileInput} class="sr-only" type="file" accept="image/png,image/jpeg,image/webp" onChange={handleNewFile} />
+      <button class="text-button" type="button" onClick={() => setConfirmUploadOpen(true)}>Upload new drawing</button>
+    </header>
     <section class="headline"><p class="eyebrow">Current 3D model</p><h1>{state.description}</h1><p>The model stays visible while you refine it.</p></section>
     <div class="workspace"><section class="drawing-panel"><ModelViewer stl={state.modelStl!} features={state.features} selectedId={state.selectedId} onSelect={state.setSelectedId} /></section>
       <section class="review-panel"><div class="review-heading"><div><p class="eyebrow">Change the model</p><h2>Describe the next change</h2></div></div>
+        <FallbackBanner />
         <FeatureRoster />
         <div class="mention-host">
           <label class="question-clarification">Freeform instruction
@@ -196,12 +279,19 @@ function Workspace() {
           </ul>}
         </div>
         <button class="primary" type="button" disabled={pending || !prompt.trim()} onClick={() => void refine()}>{pending ? 'Updating model…' : 'Apply change'}</button>
-        <hr />
+        <div class="divider" />
         <p class="section-note">The displayed model is the exact STL returned by the latest image or prompt request.</p>
         <button type="button" disabled={pending} onClick={() => void download()}>Download STL</button>
       </section>
     </div>
     {state.error && <div class="notice" role="alert"><strong>Model issue</strong><span>{state.error.message}</span></div>}
+    {confirmUploadOpen && <ConfirmDialog
+      title="Upload a new drawing?"
+      message="Your current project and any changes you've made will be deleted. This cannot be undone."
+      confirmLabel="Delete and upload"
+      onCancel={() => setConfirmUploadOpen(false)}
+      onConfirm={() => { setConfirmUploadOpen(false); newFileInput.current?.click() }}
+    />}
   </main>
 }
 
@@ -213,7 +303,7 @@ function decodeStl(encoded: string): ArrayBuffer {
 }
 
 const OVERLAY_COLOR = 0x2a5c8a
-const OVERLAY_SELECTED_COLOR = 0xb96b1f
+const OVERLAY_SELECTED_COLOR = 0xff6a1a
 
 function ModelViewer({ stl, features, selectedId, onSelect }: {
   stl: string; features: FeatureRosterEntry[]; selectedId: string | null; onSelect: (id: string | null) => void

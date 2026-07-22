@@ -958,3 +958,71 @@ across a phone photo and a clean scan.
   template matching or a trained detector. Replaced with an explicit prompt
   instruction telling the per-panel vision call to distinguish object lines
   from dimension/leader lines itself.
+
+## 2026-07-20 — `shell` with no face reference was a silent no-op, plus a literal "all" selector
+
+### Goal
+
+Answer a user question ("why can't the program build a box with rounded
+edges and 2mm walls") honestly, by actually trying it end to end instead
+of reasoning about it in the abstract. Same investigation also motivated
+adding a genuine text-only entry point (`POST /api/model/text`,
+`generate_draft_specification_from_text`) — the user pointed out there was
+no way to even ask this question without first uploading an unrelated
+image, since `UploadScreen` had only a file input.
+
+### Golden path
+
+1. Drive `plan_draft_specification` directly with a hand-built drawing
+   analysis describing a box + fillet + shell, to isolate "can the planner
+   compose these three feature types" from "can vision correctly read
+   rounded corners from a photo" — it built the chain correctly on the
+   first turn.
+2. Run the resulting draft through the real compiler and worker rather
+   than trusting `status: confirmed`. bbox looked right (100x50x30); real
+   volume (146,304mm^3, barely under the 150,000mm^3 solid box) did not.
+3. Isolate further: box -> shell(-2) directly, no fillet, no `.faces()` at
+   all -> 35,184mm^3 (correct, matches hand-calculated wall material).
+   box -> `.faces()` (no selector) -> shell(-2) -> 150,000mm^3, i.e.
+   unchanged. `.faces()` with no argument selects *every* face as an
+   opening, which is a no-op, not "shell the whole solid closed".
+4. Fixed `_compile_modifier`'s shell branch (`app/feature_compiler.py`):
+   call `.shell(-(thickness))` directly on the target when there is no
+   explicit face reference; only call `.faces(selector)` first when a
+   specific face was actually named (e.g. an intentionally open-top box).
+5. Re-ran the same request through the new text-only path once the shell
+   fix landed and hit a second, unrelated real error: `Expected 'not'
+   operations, found 'all'`. The planner wrote `placement.reference: "all"`
+   for "fillet every edge"; the compiler passed it straight through as a
+   literal CadQuery selector string, but CadQuery's selector grammar has
+   no "all" keyword at all — selecting everything means omitting the
+   selector, not naming one. Fixed by normalizing `"all"`/`"any"`/
+   `"every"`/`"everything"`/`"*"` (case-insensitive) to "no selector" for
+   fillet/chamfer/shell before compiling, the same repair-common-LLM-
+   phrasing approach already used for `_normalize_placement`/
+   `_normalize_profile`.
+
+### Verification
+
+`tests/test_shell_and_rib_extent.py::test_shell_with_no_face_reference_actually_hollows_the_part`
+builds an 80x50x30 box with a 2mm shell and no face reference through the
+real worker CadQuery and asserts the resulting volume is well under half
+the solid box's volume — bbox alone (already asserted by the neighboring,
+pre-existing test) cannot distinguish a genuinely hollow part from an
+unmodified solid one. `SelectEverythingWordTests` (new, same file) covers
+`"all"`/`"every"` normalizing away for both fillet and shell, and that a
+real selector like `"|Z"` is left untouched. Full suite green (44 tests)
+after both fixes.
+
+### Failure pattern avoided
+
+The existing shell regression test (added earlier this session for the
+*direction* bug, `.shell(+x)` vs `.shell(-x)`) always passed an explicit
+`"reference": ">Z"`, which happens to take the one code path that was
+already correct. It never exercised the no-selector path — the more
+common one, since most freeform "N mm wall thickness" requests don't name
+a specific open face — so a second, more severe bug (no hollowing at all,
+not just wrong direction) shipped underneath a passing test suite. Lesson
+repeated from earlier this session: a green test for one fixed bug does
+not mean the neighboring, untested code path is fine, and bbox-only
+assertions cannot catch a no-op that happens to preserve the envelope.

@@ -9,7 +9,12 @@ from fastapi.responses import Response
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 
-from .ai_generation import GenerationError, generate_draft_specification_from_image, plan_draft_specification
+from .ai_generation import (
+    GenerationError,
+    generate_draft_specification_from_image,
+    generate_draft_specification_from_text,
+    plan_draft_specification,
+)
 from .feature_roster import feature_roster
 from .minimal_model import fallback_draft, minimal_reliable_draft
 from .models import CADProject, DraftSpecification
@@ -35,6 +40,10 @@ def load_env() -> None:
 
 load_env()
 app = FastAPI(title="EasyCAD")
+
+
+class TextRequest(BaseModel):
+    instructions: str
 
 
 class PromptRequest(BaseModel):
@@ -114,6 +123,15 @@ async def model_from_image(file: UploadFile = File(...), instructions: str = For
         draft = await generate_draft_specification_from_image(
             image_bytes, file.filename or "", file.content_type or "", combined_instructions
         )
+        return _model_response(draft, "Created model")
+    except (GenerationError, RunnerError, SpecificationValidationError) as exc:
+        raise _error(exc) from exc
+
+
+@app.post("/api/model/text")
+async def model_from_text(request: TextRequest):
+    try:
+        draft = await generate_draft_specification_from_text(request.instructions)
         return _model_response(draft, "Created model")
     except (GenerationError, RunnerError, SpecificationValidationError) as exc:
         raise _error(exc) from exc

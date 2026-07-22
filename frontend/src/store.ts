@@ -4,7 +4,7 @@ import type { ApiError, DraftSpecification, FeatureRosterEntry, ModelResponse, P
 
 type RequestState = 'idle' | 'working'
 
-interface AppState {
+export interface AppState {
   specification: DraftSpecification | null
   model: Project | null
   modelStl: string | null

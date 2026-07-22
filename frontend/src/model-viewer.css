@@ -2,11 +2,11 @@
 .panel-tabs button{border:0;border-bottom:2px solid transparent;background:none;padding:3px 2px;color:var(--soft);font:12px ui-monospace,monospace;cursor:pointer}
 .panel-tabs button.active{border-color:var(--blue);color:var(--ink)}
 .panel-tabs button:disabled{cursor:not-allowed}
-.model-stage{position:relative;height:420px;background:var(--paper)}
+.model-stage{position:relative;flex:1 1 auto;min-height:0;height:100%;background:var(--paper)}
 .model-canvas{width:100%;height:100%;touch-action:none}
 .model-canvas canvas{display:block;width:100%;height:100%}
 .model-help,.model-error{position:absolute;left:12px;bottom:10px;margin:0;padding:5px 7px;background:#fbfbf9d9;border-radius:4px;color:var(--soft);font:11px ui-monospace,monospace}
 .model-error{top:12px;bottom:auto;color:var(--rust);border:1px solid var(--rust)}
-@media(max-width:920px){.model-stage{height:340px}}
+@media(max-width:920px){.model-stage{height:340px;flex:none}}
 .confirmed-decision{display:grid;gap:3px;margin:0;padding:12px 16px;border-bottom:1px solid var(--grid);font-size:12px;color:var(--soft)}
 .confirmed-decision strong{font:10px ui-monospace,monospace;letter-spacing:.05em;text-transform:uppercase;color:var(--green)}
