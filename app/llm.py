@@ -106,8 +106,13 @@ def generate_code(
     prompt: str,
     provider: str = DEFAULT_PROVIDER,
     model: str | None = None,
+    temperature: float = 0.2,
 ) -> str:
-    """Ask the LLM to append the requested modification to `current_code`."""
+    """Ask the LLM to append the requested modification to `current_code`.
+
+    A higher `temperature` yields more varied output — used to generate several
+    distinct candidates for the retry-with-variations flow.
+    """
     client = make_client(provider)
     resolved = resolve_model(provider, model)
     user_msg = (
@@ -121,7 +126,7 @@ def generate_code(
                 {"role": "system", "content": SYSTEM_PROMPT},
                 {"role": "user", "content": user_msg},
             ],
-            temperature=0.2,
+            temperature=temperature,
             max_tokens=4096,
         )
     except Exception as exc:  # noqa: BLE001 — normalize SDK/transport errors

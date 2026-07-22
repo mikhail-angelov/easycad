@@ -92,3 +92,54 @@ class SessionStore:
             return None
         self.current_id = step_id
         return self._steps[step_id]
+
+    # ── Persistence ──────────────────────────────────────────────────────────
+
+    PROJECT_FORMAT = "easycad-cadquery-chat"
+    PROJECT_VERSION = 1
+
+    def to_project(self) -> dict:
+        """Serialize the whole session (steps incl. STL) to a JSON-able dict."""
+        return {
+            "format": self.PROJECT_FORMAT,
+            "version": self.PROJECT_VERSION,
+            "current_id": self.current_id,
+            "steps": [s.to_public(include_stl=True) for s in self.all()],
+        }
+
+    def load_project(self, data: dict) -> None:
+        """Replace the session with a previously serialized project.
+
+        Lenient about missing/extra keys; raises ValueError if the payload is
+        not a recognizable project (no steps list).
+        """
+        steps_data = data.get("steps")
+        if not isinstance(steps_data, list):
+            raise ValueError("project has no 'steps' list")
+
+        self.reset()
+        max_id = -1
+        for sd in steps_data:
+            step = Step(
+                id=int(sd["id"]),
+                kind=str(sd.get("kind", "chat")),
+                original_prompt=sd.get("original_prompt"),
+                refined_prompt=sd.get("refined_prompt"),
+                code=str(sd.get("code", "")),
+                stl_base64=sd.get("stl_base64"),
+                geometry_info=sd.get("geometry_info"),
+                success=bool(sd.get("success", False)),
+                error=sd.get("error"),
+                parent_id=sd.get("parent_id"),
+                created_at=float(sd.get("created_at", 0.0)),
+            )
+            self._steps[step.id] = step
+            self._order.append(step.id)
+            max_id = max(max_id, step.id)
+
+        self._ids = count(max_id + 1)
+        cid = data.get("current_id")
+        if cid in self._steps:
+            self.current_id = cid
+        else:
+            self.current_id = self._order[-1] if self._order else None

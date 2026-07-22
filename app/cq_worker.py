@@ -39,6 +39,20 @@ def _emit(payload: dict) -> None:
     sys.stdout.flush()
 
 
+def _describe(exc: Exception) -> str:
+    """Human-readable error, including the exception type.
+
+    Some CadQuery/generated-code failures carry an object (e.g. a Workplane) as
+    the exception message, whose str() is an unhelpful `<... object at 0x...>`.
+    Prefixing the type name keeps the message meaningful in those cases.
+    """
+    detail = str(exc).strip()
+    name = type(exc).__name__
+    if not detail or detail.startswith("<"):
+        return name
+    return f"{name}: {detail}"
+
+
 def main() -> None:
     job = json.load(sys.stdin)
     code = job["code"]
@@ -48,7 +62,7 @@ def main() -> None:
     try:
         exec(code, namespace)
     except Exception as exc:  # noqa: BLE001 — surface any user-code error verbatim
-        _emit({"success": False, "geometry_info": None, "error": f"Execution error: {exc}"})
+        _emit({"success": False, "geometry_info": None, "error": f"Execution error: {_describe(exc)}"})
         return
 
     result = namespace.get("result")
@@ -66,7 +80,7 @@ def main() -> None:
         cq.exporters.export(result, stl_path)
         info = get_geometry_info(result)
     except Exception as exc:  # noqa: BLE001
-        _emit({"success": False, "geometry_info": None, "error": f"Export error: {exc}"})
+        _emit({"success": False, "geometry_info": None, "error": f"Export error: {_describe(exc)}"})
         return
 
     _emit({"success": True, "geometry_info": info, "error": None})

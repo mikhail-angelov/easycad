@@ -83,6 +83,11 @@ body {
   opacity: 0.45;
   cursor: not-allowed;
 }
+.topbar-actions {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+}
 
 /* ── Workspace: three panels ─────────────────────────────── */
 .workspace {
@@ -175,6 +180,32 @@ body {
 }
 
 /* ── Chat ────────────────────────────────────────────────── */
+.chat-panel > header {
+  flex-wrap: wrap;
+  gap: 8px;
+}
+.chat-header-controls {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.model-input {
+  width: 118px;
+  font: 11px ui-monospace, monospace;
+  padding: 4px 6px;
+  border: 1px solid var(--grid-strong);
+  border-radius: 4px;
+  background: #fff;
+  color: var(--ink);
+}
+.refine-toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  font: 11px ui-monospace, monospace;
+  color: var(--soft);
+  cursor: pointer;
+}
 .chat-panel select {
   font: 11px ui-monospace, monospace;
   padding: 4px 6px;
@@ -182,6 +213,45 @@ body {
   border-radius: 4px;
   background: #fff;
   color: var(--ink);
+}
+.clarify {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+.clarify-q {
+  background: var(--amber-bg);
+  border: 1px solid var(--amber);
+  border-radius: 8px;
+  padding: 10px 12px;
+  display: grid;
+  gap: 8px;
+}
+.clarify-question {
+  font-size: 13px;
+  color: var(--ink);
+}
+.clarify-options {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+.clarify-option {
+  border: 1px solid var(--amber);
+  background: #fff;
+  color: var(--amber);
+  border-radius: 6px;
+  padding: 6px 10px;
+  font: 12px inherit;
+  cursor: pointer;
+}
+.clarify-option:hover:not(:disabled) {
+  background: var(--amber);
+  color: #fff;
+}
+.clarify-option:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
 }
 .chat-log {
   flex: 1 1 auto;
@@ -262,8 +332,14 @@ body {
   resize: vertical;
   font: 13px inherit;
 }
+.chat-send {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  align-self: stretch;
+}
 .chat-input .primary {
-  align-self: flex-end;
+  flex: 1 1 auto;
   border: 1px solid var(--ink);
   background: var(--ink);
   color: var(--panel);
@@ -273,6 +349,167 @@ body {
   cursor: pointer;
 }
 .chat-input .primary:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+.variations-btn {
+  border: 1px solid var(--grid-strong);
+  background: #fff;
+  color: var(--soft);
+  border-radius: 6px;
+  padding: 6px 10px;
+  font: 12px ui-monospace, monospace;
+  cursor: pointer;
+}
+.variations-btn:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+
+/* ── Refine proposal (confirm before generating) ─────────── */
+.proposal {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.proposal-head {
+  font-size: 12px;
+  color: var(--soft);
+}
+.proposal-text {
+  width: 100%;
+  min-height: 90px;
+  padding: 9px 11px;
+  border: 1px solid var(--blue);
+  border-radius: 8px;
+  background: var(--blue-bg);
+  color: var(--ink);
+  font: 13px/1.5 inherit;
+  resize: vertical;
+}
+.proposal-actions,
+.invalid-actions {
+  display: flex;
+  gap: 8px;
+}
+.proposal-actions .primary {
+  border: 1px solid var(--ink);
+  background: var(--ink);
+  color: var(--panel);
+  border-radius: 6px;
+  padding: 7px 14px;
+  font: inherit;
+  cursor: pointer;
+}
+.proposal-actions button:not(.primary),
+.invalid-actions button {
+  border: 1px solid var(--grid-strong);
+  background: #fff;
+  color: var(--soft);
+  border-radius: 6px;
+  padding: 7px 14px;
+  font: inherit;
+  cursor: pointer;
+}
+.proposal-actions button:disabled,
+.invalid-actions button:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+
+/* ── Invalid / contradictory request ─────────────────────── */
+.invalid {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.invalid-reason {
+  padding: 10px 12px;
+  background: var(--rust-bg);
+  border: 1px solid var(--rust);
+  border-radius: 8px;
+  color: var(--rust);
+  font-size: 13px;
+  line-height: 1.45;
+}
+
+/* ── Retry-with-variations picker ────────────────────────── */
+.variations {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.variations-head {
+  font-size: 12px;
+  color: var(--soft);
+}
+.variation-card {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  width: 100%;
+  text-align: left;
+  padding: 9px 11px;
+  border: 1px solid var(--grid-strong);
+  border-radius: 8px;
+  background: #fff;
+  cursor: pointer;
+  font: inherit;
+}
+.variation-card.selected {
+  border-color: var(--blue);
+  box-shadow: 0 0 0 3px var(--blue-bg);
+}
+.variation-card.failed {
+  border-color: var(--rust);
+  background: var(--rust-bg);
+  cursor: not-allowed;
+}
+.variation-card .v-index {
+  flex: 0 0 auto;
+  width: 22px;
+  height: 22px;
+  display: grid;
+  place-items: center;
+  border: 1px solid var(--grid-strong);
+  border-radius: 50%;
+  font: 11px ui-monospace, monospace;
+  color: var(--soft);
+}
+.variation-card.selected .v-index {
+  border-color: var(--blue);
+  color: var(--blue);
+}
+.variation-card .v-info {
+  font: 11px ui-monospace, monospace;
+  color: var(--ink);
+}
+.variation-card.failed .v-info {
+  color: var(--rust);
+}
+.variations-actions {
+  display: flex;
+  gap: 8px;
+}
+.variations-actions .primary {
+  border: 1px solid var(--ink);
+  background: var(--ink);
+  color: var(--panel);
+  border-radius: 6px;
+  padding: 7px 14px;
+  font: inherit;
+  cursor: pointer;
+}
+.variations-actions button:not(.primary) {
+  border: 1px solid var(--grid-strong);
+  background: #fff;
+  color: var(--soft);
+  border-radius: 6px;
+  padding: 7px 14px;
+  font: inherit;
+  cursor: pointer;
+}
+.variations-actions button:disabled {
   opacity: 0.45;
   cursor: not-allowed;
 }

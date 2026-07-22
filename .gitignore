@@ -5,6 +5,9 @@ logs/
 .cache/
 .uv-cache/
 .venv/
+.venv-poc/
+..pytest_cache/
 artifacts/
 __pycache__
 node_modules
+static
