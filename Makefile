@@ -1,6 +1,6 @@
 .PHONY: run
 
-PYTHON ?= .venv/bin/python
+PYTHON ?= .venv-poc/bin/python
 LOCAL_ENV = CADQUERY_WORKER_TIMEOUT_SECONDS=120 XDG_CACHE_HOME=$(CURDIR)/.cache PYTHONDONTWRITEBYTECODE=1
 
 run:

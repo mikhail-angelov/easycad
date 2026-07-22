@@ -1,11 +1,11 @@
+# SPEC11 CadQuery Chat backend.
+# Runtime venv (.venv-poc) also needs cadquery, which is heavy (OCP) and is
+# typically installed separately: `uv pip install cadquery`.
 fastapi
 uvicorn[standard]
-python-multipart
 pydantic
-pillow
-httpx
-socksio
-pytesseract
-# pytesseract needs the tesseract-ocr system binary (e.g. `brew install tesseract` /
-# `apt-get install tesseract-ocr`) to actually do anything; app/multiview_triangulation.py
-# degrades gracefully (skips OCR cross-checking) if it isn't on PATH.
+openai
+python-dotenv
+cadquery
+# dev
+pytest

@@ -9,6 +9,7 @@
     "test": "node --test frontend/src/*.test.ts"
   },
   "dependencies": {
+    "monaco-editor": "^0.54.0",
     "preact": "^10.26.4",
     "three": "^0.185.1",
     "zustand": "^5.0.3"
