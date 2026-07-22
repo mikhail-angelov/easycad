@@ -37,7 +37,9 @@ def _persist() -> None:
     """Best-effort autosave of the session; never break a request on failure."""
     try:
         AUTOSAVE.parent.mkdir(parents=True, exist_ok=True)
-        AUTOSAVE.write_text(json.dumps(store.to_project()), encoding="utf-8")
+        AUTOSAVE.write_text(
+            json.dumps(store.to_project(), ensure_ascii=False), encoding="utf-8"
+        )
     except Exception:
         pass
 
@@ -402,10 +404,10 @@ def api_commit(req: CommitRequest) -> dict:
 def export_project() -> Response:
     """Download the whole project (all steps) as a single JSON file."""
     _ensure_initial()
-    body = json.dumps(store.to_project(), indent=2)
+    body = json.dumps(store.to_project(), indent=2, ensure_ascii=False)
     return Response(
         content=body,
-        media_type="application/json",
+        media_type="application/json; charset=utf-8",
         headers={"Content-Disposition": 'attachment; filename="easycad-project.json"'},
     )
 

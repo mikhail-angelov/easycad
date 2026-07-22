@@ -30,6 +30,19 @@ export interface Variations {
   refined: string | null
 }
 
+// Rebuild the chat history from stored steps (used on load/resume).
+function chatLogFromSteps(steps: Step[]): ChatEntry[] {
+  return steps
+    .filter((s) => s.original_prompt)
+    .map((s) => ({
+      id: s.id,
+      prompt: s.original_prompt as string,
+      refined: s.refined_prompt,
+      ok: s.success,
+      error: s.error,
+    }))
+}
+
 interface State {
   steps: Step[]
   currentId: number | null
@@ -149,7 +162,7 @@ export const useStore = create<State>((set, get) => {
       try {
         const session = await api.session()
         applySession(session)
-        set({ provider: session.default_provider })
+        set({ provider: session.default_provider, chatLog: chatLogFromSteps(session.steps) })
       } catch (e) {
         set({ error: String(e) })
       } finally {
@@ -310,8 +323,16 @@ export const useStore = create<State>((set, get) => {
       set({ busy: true, error: null })
       try {
         const project = JSON.parse(text)
-        applySession(await api.importProject(project))
-        set({ chatLog: [], pending: null, variations: null, selectedVariation: null })
+        const session = await api.importProject(project)
+        applySession(session)
+        set({
+          chatLog: chatLogFromSteps(session.steps),
+          pending: null,
+          proposal: null,
+          invalidNotice: null,
+          variations: null,
+          selectedVariation: null,
+        })
       } catch (e) {
         set({ error: `Could not load project: ${e}` })
       } finally {
