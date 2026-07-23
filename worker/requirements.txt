@@ -1,0 +1,5 @@
+# EasyCAD CadQuery execution worker (SPEC12).
+fastapi
+uvicorn[standard]
+pydantic
+cadquery

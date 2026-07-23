@@ -1,0 +1,48 @@
+# EasyCAD hosted deployment (SPEC12).
+#
+# Two services: the app (HTTP, LLM, user data) and an isolated worker that runs
+# untrusted LLM-generated CadQuery code. The worker has no secrets and no
+# internet egress (private `internal` network). Local/desktop use does NOT need
+# this file — run the app without EASYCAD_WORKER_URL and it executes in-process.
+#
+#   DEEP_SEEK_KEY=... docker compose up --build
+#
+services:
+  app:
+    build: .
+    environment:
+      - DEEP_SEEK_KEY=${DEEP_SEEK_KEY}
+      - EASYCAD_WORKER_URL=http://worker:8853
+    ports:
+      - "8852:8852"
+    volumes:
+      - userdata:/data          # user settings / sessions live only here
+    networks: [egress, internal]
+    depends_on: [worker]
+
+  worker:
+    build:
+      context: .
+      dockerfile: worker/Dockerfile
+    networks: [internal]         # ONLY the private net → no internet egress
+    read_only: true
+    tmpfs:
+      - /tmp:size=256m
+    cap_drop: [ALL]
+    security_opt:
+      - no-new-privileges:true
+      - seccomp:default
+    mem_limit: 2g                # real memory cap (OCP/CadQuery needs headroom)
+    pids_limit: 128
+    cpus: "1.0"
+    user: "10001:10001"
+    # no secrets in env, no volumes, stateless
+    # runtime: runsc             # future: gVisor drop-in, no code change
+
+networks:
+  egress: {}                     # default bridge → internet (LLM) + published port
+  internal:
+    internal: true               # no route outside → worker cannot reach the net
+
+volumes:
+  userdata: {}

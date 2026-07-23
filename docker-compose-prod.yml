@@ -1,0 +1,64 @@
+services:
+  app:
+    container_name: easycad
+    image: ghcr.io/mikhail-angelov/easycad:latest
+    restart: unless-stopped
+    networks:
+      - proxy-net        # reachable by redoproxy + internet egress (LLM calls)
+      - internal         # private link to the worker
+    ports:
+      - "127.0.0.1:8852:8852"
+    env_file:
+      - ./.env
+    environment:
+      - EASYCAD_WORKER_URL=http://worker:8853
+      - EASYCAD_SESSION_FILE=/data/session.json
+    volumes:
+      - ./data:/data     # session autosave persists here
+    labels:
+      monic.enabled: "true"
+      monic.check: "http"
+      monic.check_http_url: "https://easycad.bconf.com"
+      monic.name: "easycad"
+      redoproxy.enabled: "true"
+      redoproxy.domain: "easycad.bconf.com"
+      redoproxy.port: 8852
+    depends_on:
+      - worker
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-file: "5"
+
+  worker:
+    container_name: easycad-worker
+    image: ghcr.io/mikhail-angelov/easycad-worker:latest
+    restart: unless-stopped
+    networks:
+      - internal         # ONLY the private net → no internet egress
+    read_only: true
+    tmpfs:
+      - /tmp:size=256m
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+      - seccomp:default
+    mem_limit: 2g
+    pids_limit: 128
+    cpus: "1.0"
+    user: "10001:10001"
+    # no secrets in env, no volumes, stateless
+    # runtime: runsc     # future: gVisor drop-in for kernel isolation, no code change
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-file: "5"
+
+networks:
+  proxy-net:
+    external: true
+  internal:
+    internal: true       # no route outside → worker cannot reach the network

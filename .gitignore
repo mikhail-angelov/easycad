@@ -1,5 +1,6 @@
 .DS_Store
 .env
+.env.prod
 old/
 logs/
 .cache/
@@ -11,3 +12,5 @@ artifacts/
 __pycache__
 node_modules
 static
+worker/cq_worker.py
+article*
