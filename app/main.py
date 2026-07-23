@@ -12,6 +12,7 @@ import base64
 import json
 import os
 import secrets
+import time
 from contextlib import asynccontextmanager
 from pathlib import Path
 
@@ -35,7 +36,12 @@ STATIC_DIR = ROOT / "static"
 SESSION_COOKIE = "easycad_session"
 AUTH_COOKIE = "auth_token"
 SECURE_COOKIES = os.getenv("EASYCAD_SECURE_COOKIES") == "1"
-COOKIE_MAX_AGE = 30 * 24 * 3600  # 30 days
+# Long-lived session, rolled forward on activity → users stay logged in ("once
+# logged in, always logged in"). Logout only happens after a full year idle.
+COOKIE_MAX_AGE = 365 * 24 * 3600  # 1 year
+# Re-issue the auth cookie at most once per this interval of activity (keeps the
+# rolling window fresh without setting a cookie on every single request).
+AUTH_REFRESH_AFTER = 24 * 3600  # 1 day
 MAGIC_TTL = 15 * 60  # 15 minutes
 REQUIRE_USER_KEY = os.getenv("EASYCAD_REQUIRE_USER_KEY") == "1"
 
@@ -88,6 +94,28 @@ async def _body_size_limit(request: Request, call_next):
     return await call_next(request)
 
 
+def _maybe_refresh_auth(request: Request, response) -> None:
+    """Rolling session: re-issue the auth cookie with a fresh 1-year expiry on
+    activity, so a returning user is never logged out (Facebook-style). Skips
+    endpoints that just set/cleared the cookie (login/logout/delete) and tokens
+    younger than AUTH_REFRESH_AFTER (avoids a Set-Cookie on every request)."""
+    token = request.cookies.get(AUTH_COOKIE)
+    if not token:
+        return
+    if any(k == b"set-cookie" and b"auth_token" in v for k, v in response.raw_headers):
+        return  # an endpoint is authoritative about the cookie this request
+    payload = jwt_utils.verify(token)
+    if not payload or not payload.get("user_id"):
+        return
+    if time.time() - float(payload.get("iat", 0)) < AUTH_REFRESH_AFTER:
+        return
+    fresh = jwt_utils.sign({"user_id": payload["user_id"], "email": payload["email"]}, COOKIE_MAX_AGE)
+    response.set_cookie(
+        AUTH_COOKIE, fresh, max_age=COOKIE_MAX_AGE,
+        httponly=True, samesite="lax", secure=SECURE_COOKIES,
+    )
+
+
 @app.middleware("http")
 async def _session_cookie(request: Request, call_next):
     sid = request.cookies.get(SESSION_COOKIE)
@@ -101,6 +129,7 @@ async def _session_cookie(request: Request, call_next):
             SESSION_COOKIE, sid, max_age=COOKIE_MAX_AGE,
             httponly=True, samesite="lax", secure=SECURE_COOKIES,
         )
+    _maybe_refresh_auth(request, response)
     return response
 
 

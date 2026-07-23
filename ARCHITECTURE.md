@@ -148,8 +148,11 @@ Defence in depth for untrusted, LLM-generated code (hosted mode):
 
 - **Magic link** (mirrors playground): `POST /api/auth/login {email}` → find-or-
   create user → email a short-lived (15 min) magic JWT link → `GET
-  /api/auth/callback` verifies it and sets a 30-day session JWT cookie. Stateless
-  (no token table). Login never reveals whether the account existed.
+  /api/auth/callback` verifies it and sets a session JWT cookie. Stateless (no
+  token table). Login never reveals whether the account existed.
+- **Rolling session ("stay logged in"):** the session cookie has a 1-year expiry
+  and is **re-issued on activity** (at most once/day) with a fresh expiry, so a
+  returning user is never logged out; only a full year of inactivity ends it.
 - **BYOK key resolution** per generation: session settings (anonymous) → user DB
   settings (authed) → server env fallback (disabled in SaaS via
   `EASYCAD_REQUIRE_USER_KEY`). The key is used by the app to call the LLM and is

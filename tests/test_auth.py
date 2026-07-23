@@ -86,6 +86,27 @@ def test_logout_clears_auth(monkeypatch):
     assert client.get("/api/auth/me").json()["authenticated"] is False
 
 
+def test_rolling_refresh_keeps_user_logged_in(monkeypatch):
+    # With the refresh interval at -1, any authenticated request re-issues the
+    # auth cookie → a returning user is never logged out.
+    monkeypatch.setattr(m, "AUTH_REFRESH_AFTER", -1)
+    client = TestClient(app)
+    _login(client, monkeypatch, "roll@example.com")
+    r = client.get("/api/session")
+    set_cookies = [v for k, v in r.headers.multi_items() if k.lower() == "set-cookie"]
+    assert any("auth_token" in c for c in set_cookies)  # cookie was rolled forward
+    assert client.get("/api/auth/me").json()["authenticated"] is True
+
+
+def test_logout_survives_rolling_refresh(monkeypatch):
+    # Even with refresh-on-every-request, logout must not be clobbered.
+    monkeypatch.setattr(m, "AUTH_REFRESH_AFTER", -1)
+    client = TestClient(app)
+    _login(client, monkeypatch, "out2@example.com")
+    client.post("/api/auth/logout")
+    assert client.get("/api/auth/me").json()["authenticated"] is False
+
+
 def test_delete_account(monkeypatch):
     client = TestClient(app)
     _login(client, monkeypatch, "gone@example.com")
