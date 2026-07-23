@@ -71,6 +71,19 @@ def test_failed_manual_step_does_not_advance_current():
     assert out["session"]["current_id"] == 0
 
 
+def test_oversize_prompt_is_rejected():
+    client = TestClient(app)
+    client.get("/api/session")
+    r = client.post("/api/chat", json={"prompt": "x" * 20_001})
+    assert r.status_code == 422  # exceeds MAX_PROMPT, rejected before generation
+
+
+def test_oversize_body_is_rejected():
+    client = TestClient(app)
+    r = client.post("/api/execute", json={"code": "x" * 2_100_000})
+    assert r.status_code == 413  # body-size middleware, before parsing
+
+
 def test_two_clients_have_independent_sessions():
     a = TestClient(app)
     b = TestClient(app)

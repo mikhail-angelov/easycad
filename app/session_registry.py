@@ -24,6 +24,9 @@ class Session:
         self.settings: dict = {}
         self.user_id: int | None = None
         self.last_access = time.time()
+        # Serializes mutating requests for this session so concurrent calls on
+        # one cookie can't race the read-then-append history update (review H1).
+        self.lock = threading.Lock()
 
     def touch(self) -> None:
         self.last_access = time.time()

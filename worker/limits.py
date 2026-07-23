@@ -36,7 +36,9 @@ CPU_SECONDS = int(os.getenv("EASYCAD_WORKER_CPU_SECONDS", str(TIMEOUT_SECONDS)))
 # value breaks CadQuery; the container `mem_limit` cgroup is the real memory
 # cap. Off by default (0); opt in only if you know your OCP build's footprint.
 AS_MB = int(os.getenv("EASYCAD_WORKER_AS_MB", "0"))
-NPROC = int(os.getenv("EASYCAD_WORKER_NPROC", "256"))
+# Keep at or below the container `pids_limit` (128 in docker-compose-prod.yml)
+# so the documented per-request budget matches the effective cgroup cap.
+NPROC = int(os.getenv("EASYCAD_WORKER_NPROC", "128"))
 FSIZE_MB = int(os.getenv("EASYCAD_WORKER_FSIZE_MB", "256"))
 
 _HERE = Path(__file__).resolve().parent

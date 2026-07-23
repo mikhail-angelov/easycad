@@ -16,6 +16,8 @@ services:
       - EASYCAD_SECURE_COOKIES=1
     volumes:
       - ./data:/data     # accounts DB persists here (CAD sessions are in-memory)
+    mem_limit: 1g        # bound app-tier memory against oversized payloads (review C1)
+    pids_limit: 512
     labels:
       monic.enabled: "true"
       monic.check: "http"

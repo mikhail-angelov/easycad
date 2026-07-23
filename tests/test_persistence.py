@@ -33,6 +33,26 @@ def test_load_project_rejects_garbage():
         SessionStore().load_project({"nope": 1})
 
 
+def test_load_project_rejects_unknown_format():
+    with pytest.raises(ValueError):
+        SessionStore().load_project({"format": "not-easycad", "steps": []})
+
+
+def test_load_project_rejects_future_version():
+    with pytest.raises(ValueError):
+        SessionStore().load_project({"version": 999, "steps": [{"id": 0, "code": "a"}]})
+
+
+def test_load_project_rejects_duplicate_ids():
+    with pytest.raises(ValueError):
+        SessionStore().load_project({"steps": [{"id": 0, "code": "a"}, {"id": 0, "code": "b"}]})
+
+
+def test_load_project_rejects_missing_parent():
+    with pytest.raises(ValueError):
+        SessionStore().load_project({"steps": [{"id": 1, "parent_id": 9, "code": "a"}]})
+
+
 def test_export_then_import_roundtrip():
     client = TestClient(app)
     client.get("/api/session")  # step 0

@@ -35,8 +35,14 @@ class Step:
 class SessionStore:
     """Holds the ordered steps of the current session and the current pointer."""
 
+    # Bounds the per-session step history (memory safety — SPEC13 / review C1).
+    MAX_STEPS = 1000
+
     def __init__(self) -> None:
         self.reset()
+
+    def at_capacity(self) -> bool:
+        return len(self._order) >= self.MAX_STEPS
 
     def reset(self) -> None:
         self._steps: dict[int, Step] = {}
@@ -115,29 +121,66 @@ class SessionStore:
     def load_project(self, data: dict) -> None:
         """Replace the session with a previously serialized project.
 
-        Lenient about missing/extra keys; raises ValueError if the payload is
-        not a recognizable project (no steps list).
+        Validates that the payload is a recognizable, coherent project before
+        replacing the current session (review M1): known format, compatible
+        version, a bounded list of steps with unique integer ids, valid parent
+        references, and well-typed fields. Raises ValueError otherwise.
         """
+        if not isinstance(data, dict):
+            raise ValueError("project must be a JSON object")
+
+        fmt = data.get("format")
+        if fmt is not None and fmt != self.PROJECT_FORMAT:
+            raise ValueError(f"unknown project format: {fmt!r}")
+        version = data.get("version")
+        if version is not None and (not isinstance(version, int) or version > self.PROJECT_VERSION):
+            raise ValueError(f"unsupported project version: {version!r}")
+
         steps_data = data.get("steps")
         if not isinstance(steps_data, list):
             raise ValueError("project has no 'steps' list")
+        if len(steps_data) > self.MAX_STEPS:
+            raise ValueError(f"project exceeds {self.MAX_STEPS} steps")
+
+        parsed: list[Step] = []
+        seen_ids: set[int] = set()
+        for sd in steps_data:
+            if not isinstance(sd, dict):
+                raise ValueError("each step must be an object")
+            try:
+                sid = int(sd["id"])
+            except (KeyError, TypeError, ValueError) as exc:
+                raise ValueError("step is missing a valid integer 'id'") from exc
+            if sid in seen_ids:
+                raise ValueError(f"duplicate step id: {sid}")
+            seen_ids.add(sid)
+            parent_id = sd.get("parent_id")
+            if parent_id is not None and not isinstance(parent_id, int):
+                raise ValueError(f"step {sid} has a non-integer parent_id")
+            parsed.append(
+                Step(
+                    id=sid,
+                    kind=str(sd.get("kind", "chat")),
+                    original_prompt=sd.get("original_prompt"),
+                    refined_prompt=sd.get("refined_prompt"),
+                    code=str(sd.get("code", "")),
+                    stl_base64=sd.get("stl_base64"),
+                    geometry_info=sd.get("geometry_info"),
+                    success=bool(sd.get("success", False)),
+                    error=sd.get("error"),
+                    parent_id=parent_id,
+                    created_at=float(sd.get("created_at", 0.0)),
+                )
+            )
+
+        # Parent references must point at a step in this project (or be None).
+        for step in parsed:
+            if step.parent_id is not None and step.parent_id not in seen_ids:
+                raise ValueError(f"step {step.id} references missing parent {step.parent_id}")
 
         self.reset()
         max_id = -1
-        for sd in steps_data:
-            step = Step(
-                id=int(sd["id"]),
-                kind=str(sd.get("kind", "chat")),
-                original_prompt=sd.get("original_prompt"),
-                refined_prompt=sd.get("refined_prompt"),
-                code=str(sd.get("code", "")),
-                stl_base64=sd.get("stl_base64"),
-                geometry_info=sd.get("geometry_info"),
-                success=bool(sd.get("success", False)),
-                error=sd.get("error"),
-                parent_id=sd.get("parent_id"),
-                created_at=float(sd.get("created_at", 0.0)),
-            )
+        for step in parsed:
             self._steps[step.id] = step
             self._order.append(step.id)
             max_id = max(max_id, step.id)

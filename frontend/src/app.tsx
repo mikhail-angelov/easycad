@@ -1,11 +1,15 @@
 import { useEffect, useRef } from 'preact/hooks'
+import { lazy, Suspense } from 'preact/compat'
 import { api } from './api'
 import { useStore } from './store'
-import { Editor } from './components/Editor'
-import { Viewer } from './components/Viewer'
 import { Chat } from './components/Chat'
 import { Timeline } from './components/Timeline'
 import { Account } from './components/Account'
+
+// Heavy panels (Monaco ~3 MB, three.js) are code-split into their own chunks so
+// they don't bloat the initial bundle (review L1).
+const Editor = lazy(() => import('./components/Editor').then((m) => ({ default: m.Editor })))
+const Viewer = lazy(() => import('./components/Viewer').then((m) => ({ default: m.Viewer })))
 
 export function App() {
   const init = useStore((s) => s.init)
@@ -55,8 +59,12 @@ export function App() {
         </div>
       </header>
       <div class="workspace">
-        <Editor />
-        <Viewer />
+        <Suspense fallback={<section class="panel">Loading editor…</section>}>
+          <Editor />
+        </Suspense>
+        <Suspense fallback={<section class="panel">Loading viewer…</section>}>
+          <Viewer />
+        </Suspense>
         <Chat />
       </div>
       <Timeline />

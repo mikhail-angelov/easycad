@@ -19,7 +19,7 @@ from dotenv import load_dotenv
 from fastapi import Depends, FastAPI, HTTPException, Request
 from fastapi.responses import FileResponse, JSONResponse, RedirectResponse, Response
 from fastapi.staticfiles import StaticFiles
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
 from . import db, jwt_utils
 from .cadquery_exec import execute
@@ -38,6 +38,13 @@ SECURE_COOKIES = os.getenv("EASYCAD_SECURE_COOKIES") == "1"
 COOKIE_MAX_AGE = 30 * 24 * 3600  # 30 days
 MAGIC_TTL = 15 * 60  # 15 minutes
 REQUIRE_USER_KEY = os.getenv("EASYCAD_REQUIRE_USER_KEY") == "1"
+
+# Input bounds (review C1) — reject oversized payloads before parsing/retention.
+MAX_BODY_BYTES = int(os.getenv("EASYCAD_MAX_BODY_BYTES", str(2_000_000)))  # 2 MB
+MAX_PROMPT = 20_000
+MAX_CODE = 200_000
+MAX_NAME = 500
+MAX_EMAIL = 320
 
 load_dotenv(ROOT / ".env")
 
@@ -69,6 +76,19 @@ app = FastAPI(title="EasyCAD — CadQuery Chat", lifespan=_lifespan)
 
 
 @app.middleware("http")
+async def _body_size_limit(request: Request, call_next):
+    """Reject grossly oversized bodies before JSON parsing/retention (review C1)."""
+    cl = request.headers.get("content-length")
+    if cl is not None:
+        try:
+            if int(cl) > MAX_BODY_BYTES:
+                return JSONResponse({"detail": "Request body too large."}, status_code=413)
+        except ValueError:
+            return JSONResponse({"detail": "Invalid Content-Length."}, status_code=400)
+    return await call_next(request)
+
+
+@app.middleware("http")
 async def _session_cookie(request: Request, call_next):
     sid = request.cookies.get(SESSION_COOKIE)
     new = sid is None
@@ -91,6 +111,21 @@ def current_session(request: Request) -> Session:
     payload = jwt_utils.verify(token) if token else None
     session.user_id = int(payload["user_id"]) if payload and payload.get("user_id") else None
     return session
+
+
+def locked_session(session: Session = Depends(current_session)):
+    """Session dependency that serializes mutating requests per session (H1).
+
+    The lock is held for the whole endpoint (generator dependency), so two
+    concurrent requests on one cookie can't interleave a read-then-append.
+    """
+    with session.lock:
+        yield session
+
+
+def _check_capacity(session: Session) -> None:
+    if session.store.at_capacity():
+        raise HTTPException(429, f"Session step limit reached ({session.store.MAX_STEPS}).")
 
 
 # ── Settings / auth helpers ───────────────────────────────────────────────────
@@ -159,48 +194,48 @@ def _gen_guard(session: Session) -> None:
 
 
 class ChatRequest(BaseModel):
-    prompt: str
-    current_code: str | None = None
-    provider: str = DEFAULT_PROVIDER
-    model: str | None = None
+    prompt: str = Field(max_length=MAX_PROMPT)
+    current_code: str | None = Field(default=None, max_length=MAX_CODE)
+    provider: str = Field(default=DEFAULT_PROVIDER, max_length=MAX_NAME)
+    model: str | None = Field(default=None, max_length=MAX_NAME)
     auto_refine: bool = True
-    refined_prompt: str | None = None
+    refined_prompt: str | None = Field(default=None, max_length=MAX_PROMPT)
 
 
 class RefineRequest(BaseModel):
-    prompt: str
-    current_code: str | None = None
-    provider: str = DEFAULT_PROVIDER
-    model: str | None = None
+    prompt: str = Field(max_length=MAX_PROMPT)
+    current_code: str | None = Field(default=None, max_length=MAX_CODE)
+    provider: str = Field(default=DEFAULT_PROVIDER, max_length=MAX_NAME)
+    model: str | None = Field(default=None, max_length=MAX_NAME)
 
 
 class VariationsRequest(BaseModel):
-    prompt: str
-    current_code: str | None = None
-    provider: str = DEFAULT_PROVIDER
-    model: str | None = None
+    prompt: str = Field(max_length=MAX_PROMPT)
+    current_code: str | None = Field(default=None, max_length=MAX_CODE)
+    provider: str = Field(default=DEFAULT_PROVIDER, max_length=MAX_NAME)
+    model: str | None = Field(default=None, max_length=MAX_NAME)
     auto_refine: bool = True
-    count: int = 3
+    count: int = Field(default=3, ge=1, le=4)
 
 
 class CommitRequest(BaseModel):
-    code: str
-    original_prompt: str | None = None
-    refined_prompt: str | None = None
+    code: str = Field(max_length=MAX_CODE)
+    original_prompt: str | None = Field(default=None, max_length=MAX_PROMPT)
+    refined_prompt: str | None = Field(default=None, max_length=MAX_PROMPT)
 
 
 class ExecuteRequest(BaseModel):
-    code: str
+    code: str = Field(max_length=MAX_CODE)
 
 
 class LoginRequest(BaseModel):
-    email: str
+    email: str = Field(max_length=MAX_EMAIL)
 
 
 class SettingsRequest(BaseModel):
-    provider: str | None = None
-    model: str | None = None
-    key: str | None = None
+    provider: str | None = Field(default=None, max_length=MAX_NAME)
+    model: str | None = Field(default=None, max_length=MAX_NAME)
+    key: str | None = Field(default=None, max_length=MAX_NAME)
 
 
 # ── CAD session helpers ───────────────────────────────────────────────────────
@@ -350,7 +385,7 @@ def get_session(session: Session = Depends(current_session)) -> dict:
 
 
 @app.post("/api/session/reset")
-def reset_session(session: Session = Depends(current_session)) -> dict:
+def reset_session(session: Session = Depends(locked_session)) -> dict:
     session.store.reset()
     _create_initial(session.store)
     return _session_payload(session)
@@ -372,7 +407,7 @@ def get_step(step_id: int, session: Session = Depends(current_session)) -> dict:
 
 
 @app.post("/api/steps/{step_id}/revert")
-def revert_step(step_id: int, session: Session = Depends(current_session)) -> dict:
+def revert_step(step_id: int, session: Session = Depends(locked_session)) -> dict:
     if session.store.revert(step_id) is None:
         raise HTTPException(404, f"Step {step_id} not found")
     return _session_payload(session)
@@ -392,8 +427,9 @@ def api_execute(req: ExecuteRequest, session: Session = Depends(current_session)
 
 
 @app.post("/api/execute-manual")
-def api_execute_manual(req: ExecuteRequest, session: Session = Depends(current_session)) -> dict:
+def api_execute_manual(req: ExecuteRequest, session: Session = Depends(locked_session)) -> dict:
     _gen_guard(session)
+    _check_capacity(session)
     res = execute(req.code)
     step = session.store.add(
         kind="manual",
@@ -477,8 +513,9 @@ def _no_step(session: Session, action: str, original_prompt: str, **extra) -> di
 
 
 @app.post("/api/chat")
-def api_chat(req: ChatRequest, session: Session = Depends(current_session)) -> dict:
+def api_chat(req: ChatRequest, session: Session = Depends(locked_session)) -> dict:
     _gen_guard(session)
+    _check_capacity(session)
     _ensure_initial(session.store)
     base_code = _base_code(session.store, req.current_code)
     provider, model, api_key = _resolve_llm(session, req.provider, req.model)
@@ -558,8 +595,9 @@ def api_variations(req: VariationsRequest, session: Session = Depends(current_se
 
 
 @app.post("/api/commit")
-def api_commit(req: CommitRequest, session: Session = Depends(current_session)) -> dict:
+def api_commit(req: CommitRequest, session: Session = Depends(locked_session)) -> dict:
     _gen_guard(session)
+    _check_capacity(session)
     res = execute(req.code)
     step = session.store.add(
         kind="chat",
@@ -587,7 +625,7 @@ def export_project(session: Session = Depends(current_session)) -> Response:
 
 
 @app.post("/api/project/import")
-def import_project(project: dict, session: Session = Depends(current_session)) -> dict:
+def import_project(project: dict, session: Session = Depends(locked_session)) -> dict:
     try:
         session.store.load_project(project)
     except Exception as exc:  # noqa: BLE001

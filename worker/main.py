@@ -13,8 +13,9 @@ heavy request from starving the shared worker.
 import asyncio
 import os
 
-from fastapi import FastAPI
-from pydantic import BaseModel
+from fastapi import FastAPI, Request
+from fastapi.responses import JSONResponse
+from pydantic import BaseModel, Field
 
 import code_guard
 import limits
@@ -24,9 +25,25 @@ app = FastAPI(title="EasyCAD CadQuery Worker")
 _CONCURRENCY = int(os.getenv("EASYCAD_WORKER_CONCURRENCY", "2"))
 _sem = asyncio.Semaphore(_CONCURRENCY)
 
+# Reject oversized bodies before parsing/execution (review C1).
+MAX_BODY_BYTES = int(os.getenv("EASYCAD_WORKER_MAX_BODY_BYTES", str(500_000)))
+MAX_CODE = 200_000
+
+
+@app.middleware("http")
+async def _body_size_limit(request: Request, call_next):
+    cl = request.headers.get("content-length")
+    if cl is not None:
+        try:
+            if int(cl) > MAX_BODY_BYTES:
+                return JSONResponse({"detail": "Request body too large."}, status_code=413)
+        except ValueError:
+            return JSONResponse({"detail": "Invalid Content-Length."}, status_code=400)
+    return await call_next(request)
+
 
 class ExecRequest(BaseModel):
-    code: str
+    code: str = Field(max_length=MAX_CODE)
 
 
 @app.get("/healthz")

@@ -104,6 +104,13 @@ Defence in depth for untrusted, LLM-generated code (hosted mode):
   before exec (not the security boundary).
 - Future one-line upgrade: `runtime: runsc` (gVisor) on the worker service.
 
+> ⚠ **Local mode is a trusted-user boundary.** `LocalExecutor` runs arbitrary
+> Python on the host with normal builtins and **no isolation** — the guard is
+> off unless `EASYCAD_LOCAL_GUARD=1`. This is safe only because `make run` binds
+> to `127.0.0.1` (loopback) for a single trusted user. **Never bind local mode to
+> a non-loopback address without the worker or, at minimum, `EASYCAD_LOCAL_GUARD=1`.**
+> Multi-tenant/public serving must use the hosted worker path (SPEC12).
+
 ---
 
 ## 5. Frontend components (`frontend/src/`) — Preact + Vite + Zustand
@@ -273,6 +280,10 @@ Components: cadquery_exec(RemoteExecutor), worker/main, code_guard, worker/limit
   durable path. No working state on the server.
 - **Untrusted code, layered isolation** — container + per-request rlimits + AST
   guard; the guard is defence-in-depth, the container is the boundary.
+- **Local mode is trusted-user only** — arbitrary Python, no isolation, loopback
+  bind (see the warning in §4). Anything public/multi-tenant must use the worker.
+- **Input bounds** — HTTP body-size middleware + per-field `max_length` +
+  per-session step cap protect app and worker memory before parsing/retention.
 - **BYOK, key never in the worker** — the worker runs geometry only, offline.
 - **Single app instance** — in-memory sessions + rate limits assume one app
   container (sticky/one-node); horizontal scale would need a shared store (Redis).
