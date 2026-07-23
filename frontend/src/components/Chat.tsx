@@ -94,7 +94,7 @@ export function Chat() {
 
       <div class="chat-log" ref={logRef}>
         {chatLog.length === 0 && !pending && (
-          <p class="hint">Describe one change at a time — e.g. “сделай бортик по верхней кромке”.</p>
+          <p class="hint">Describe one change at a time — e.g. “add a 2 mm rim along the top edge”.</p>
         )}
         {chatLog.map((e) => (
           <div class={`chat-entry ${e.ok ? 'ok' : 'fail'}`} key={e.id}>
@@ -135,7 +135,7 @@ export function Chat() {
         {proposal && (
           <div class="proposal">
             <div class="bubble user">{proposal.originalPrompt}</div>
-            <div class="proposal-head">Уточнённая формулировка — подтверди или поправь:</div>
+            <div class="proposal-head">Refined instruction — confirm or edit:</div>
             <textarea
               key={proposal.originalPrompt}
               ref={proposalRef}
@@ -149,10 +149,10 @@ export function Chat() {
                 disabled={busy}
                 onClick={() => confirmProposal(proposalRef.current?.value)}
               >
-                Использовать
+                Use
               </button>
               <button disabled={busy} onClick={() => dismissProposal()}>
-                Отмена
+                Cancel
               </button>
             </div>
           </div>
@@ -164,10 +164,10 @@ export function Chat() {
             <div class="invalid-reason">{invalidNotice.reason}</div>
             <div class="invalid-actions">
               <button disabled={busy} onClick={() => proceedInvalid()}>
-                Всё равно сгенерировать
+                Generate anyway
               </button>
               <button disabled={busy} onClick={() => dismissInvalid()}>
-                Отмена
+                Cancel
               </button>
             </div>
           </div>

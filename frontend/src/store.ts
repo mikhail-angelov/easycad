@@ -193,7 +193,7 @@ export const useStore = create<State>((set, get) => {
       set({ busy: true, error: null, authMessage: null })
       try {
         await api.login(email)
-        set({ authMessage: 'Мы отправили ссылку для входа на ' + email })
+        set({ authMessage: 'We sent a sign-in link to ' + email })
       } catch (e) {
         set({ error: String(e) })
       } finally {

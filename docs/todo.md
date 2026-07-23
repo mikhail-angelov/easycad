@@ -1,9 +1,20 @@
-# EasyCAD — Proposed Improvements (not yet implemented)
+# EasyCAD — TODO / backlog (not yet implemented)
 
 A running backlog of improvements suggested during development but **not built
 yet**. Grouped by origin. Status of what IS done lives in `SPEC11_TASKS.md`.
 
 Legend — rough effort: **S** small (~<1h), **M** medium (a few hours), **L** large (a day+).
+
+---
+
+## UI / i18n
+
+### Bilingual UI (ru/en)  · M
+The UI chrome is currently English-only. Add a language toggle (ru/en) with an
+i18n string table, detect the initial language from the browser
+(`Accept-Language`), and persist the choice (per session; per user when signed
+in). The LLM already replies in the language of the user's prompt, so this is
+purely the static interface text (buttons, tooltips, panel labels, hints).
 
 ---
 

@@ -134,6 +134,71 @@ body {
   color: var(--rust, #b4462f);
 }
 
+/* ── Icon buttons (header) ───────────────────────────────── */
+.icon-button {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 34px;
+  height: 34px;
+  padding: 0;
+  border: 1px solid transparent;
+  border-radius: 8px;
+  background: transparent;
+  color: inherit;
+  cursor: pointer;
+}
+.icon-button:hover:not(:disabled) {
+  background: rgba(0, 0, 0, 0.06);
+}
+.icon-button:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+}
+.key-dot {
+  position: absolute;
+  top: 5px;
+  right: 5px;
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: #2e9e5b;
+}
+
+/* Text-style buttons inside the account panel */
+.text-link {
+  background: none;
+  border: none;
+  padding: 0;
+  text-align: left;
+  color: inherit;
+  cursor: pointer;
+  text-decoration: underline;
+  font: inherit;
+}
+.text-link.danger {
+  color: var(--rust, #b4462f);
+}
+
+/* ── Timeline meta (© + GitHub, right side of the Steps bar) ── */
+.timeline-meta {
+  margin-left: auto;
+  display: inline-flex;
+  align-items: center;
+  gap: 10px;
+  font-size: 12px;
+  opacity: 0.6;
+  white-space: nowrap;
+}
+.timeline-gh {
+  display: inline-flex;
+  color: inherit;
+}
+.timeline-gh:hover {
+  opacity: 0.7;
+}
+
 /* ── Workspace: three panels ─────────────────────────────── */
 .workspace {
   flex: 1 1 auto;

@@ -5,6 +5,7 @@ import { useStore } from './store'
 import { Chat } from './components/Chat'
 import { Timeline } from './components/Timeline'
 import { Account } from './components/Account'
+import { IconSave, IconLoad, IconNew } from './components/Icons'
 
 // Heavy panels (Monaco ~3 MB, three.js) are code-split into their own chunks so
 // they don't bloat the initial bundle (review L1).
@@ -39,14 +40,19 @@ export function App() {
           <span class="project-name">cadquery chat</span>
         </div>
         <div class="topbar-actions">
-          <a class="text-button" href={api.exportProjectUrl()} download>
-            Save project
+          <a class="icon-button" href={api.exportProjectUrl()} download title="Save project">
+            <IconSave />
           </a>
-          <button class="text-button" onClick={() => fileRef.current?.click()} disabled={busy}>
-            Load project
+          <button
+            class="icon-button"
+            onClick={() => fileRef.current?.click()}
+            disabled={busy}
+            title="Load project"
+          >
+            <IconLoad />
           </button>
-          <button class="text-button" onClick={() => reset()} disabled={busy}>
-            New model
+          <button class="icon-button" onClick={() => reset()} disabled={busy} title="New model">
+            <IconNew />
           </button>
           <input
             ref={fileRef}

@@ -1,4 +1,7 @@
 import { useStore } from '../store'
+import { IconGithub } from './Icons'
+
+const REPO_URL = 'https://github.com/mikhail-angelov/easycad'
 
 export function Timeline() {
   const steps = useStore((s) => s.steps)
@@ -20,6 +23,18 @@ export function Timeline() {
           {s.id}
         </button>
       ))}
+      <span class="timeline-meta">
+        <span class="timeline-copy">© 2026 Mikhail Angelov</span>
+        <a
+          class="timeline-gh"
+          href={REPO_URL}
+          target="_blank"
+          rel="noopener noreferrer"
+          title="View on GitHub"
+        >
+          <IconGithub size={16} />
+        </a>
+      </span>
     </div>
   )
 }
