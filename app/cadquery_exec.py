@@ -82,6 +82,16 @@ class LocalExecutor:
     def execute(self, code: str) -> ExecResult:
         import tempfile
 
+        # Level 0 guard is off by default locally (preserves pre-SPEC12
+        # behaviour); opt in with EASYCAD_LOCAL_GUARD=1. The worker always runs
+        # it — see app/code_guard.py.
+        if os.getenv("EASYCAD_LOCAL_GUARD") == "1":
+            from . import code_guard
+
+            ok, reason = code_guard.check(code)
+            if not ok:
+                return ExecResult(False, error=f"Code rejected by guard: {reason}")
+
         # Read TIMEOUT_SECONDS as a live module global (tests monkeypatch it).
         timeout = TIMEOUT_SECONDS
         with tempfile.TemporaryDirectory() as tmp:

@@ -19,10 +19,11 @@ WORKDIR /app
 COPY worker/requirements.txt ./requirements.txt
 RUN pip install --no-cache-dir -r requirements.txt
 
-# Shared execution core — single source of truth with local mode.
+# Shared code — single source of truth with local mode (execution core + guard).
 COPY app/cq_worker.py ./cq_worker.py
+COPY app/code_guard.py ./code_guard.py
 # Worker service code.
-COPY worker/main.py worker/code_guard.py worker/limits.py ./
+COPY worker/main.py worker/limits.py ./
 
 # Non-root, matching the compose `user:` and a fixed uid for tmpfs ownership.
 RUN useradd --uid 10001 --create-home appuser

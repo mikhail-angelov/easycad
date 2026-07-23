@@ -1,9 +1,12 @@
 """Level 0 static code guard (SPEC12).
 
-An AST allowlist run in the worker before every `exec`. It is defence-in-depth,
-NOT the security boundary — the hardened container is. It stops casual and
-accidental abuse cheaply (stray `import os`, obvious sandbox-escape idioms)
-before any code runs.
+An AST allowlist. It is defence-in-depth, NOT the security boundary — the
+hardened container is. It stops casual and accidental abuse cheaply (stray
+`import os`, obvious sandbox-escape idioms) before any code runs.
+
+Single source of truth shared by both execution paths: the worker always runs it
+(vendored into the worker image via `worker/Dockerfile`), and local mode runs it
+when `EASYCAD_LOCAL_GUARD=1` (see `app/cadquery_exec.py`).
 
 `check(code) -> (ok, reason)`.
 """

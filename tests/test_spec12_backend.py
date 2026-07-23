@@ -4,15 +4,8 @@ These tests need neither cadquery nor a running worker — they exercise backend
 selection (which class `execute` dispatches to) and the standalone AST guard.
 """
 
-import sys
-from pathlib import Path
-
-from app import cadquery_exec
+from app import cadquery_exec, code_guard
 from app.cadquery_exec import LocalExecutor, RemoteExecutor, _select_backend
-
-# The worker guard is a standalone module under worker/.
-sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "worker"))
-import code_guard  # noqa: E402
 
 
 # ── Backend selection ────────────────────────────────────────────────────────
@@ -84,3 +77,27 @@ def test_guard_rejects_syntax_error():
     ok, reason = code_guard.check("result = (1 +")  # genuinely unparseable
     assert not ok
     assert "syntax" in reason.lower()
+
+
+# ── Local-mode guard opt-in (EASYCAD_LOCAL_GUARD) ─────────────────────────────
+
+def test_local_guard_off_by_default(monkeypatch):
+    # Without the flag, LocalExecutor does not gate on the guard (a forbidden
+    # import fails at exec time, not with a guard message).
+    monkeypatch.delenv("EASYCAD_LOCAL_GUARD", raising=False)
+    res = LocalExecutor().execute("import os\nresult = os.getcwd()\n")
+    assert not res.success
+    assert "guard" not in (res.error or "").lower()
+
+
+def test_local_guard_blocks_when_enabled(monkeypatch):
+    monkeypatch.setenv("EASYCAD_LOCAL_GUARD", "1")
+    res = LocalExecutor().execute("import os\nresult = os.getcwd()\n")
+    assert not res.success
+    assert "rejected by guard" in (res.error or "").lower()
+
+
+def test_local_guard_allows_valid_code_when_enabled(monkeypatch):
+    monkeypatch.setenv("EASYCAD_LOCAL_GUARD", "1")
+    res = LocalExecutor().execute("import cadquery as cq\nresult = cq.Workplane('XY').box(10, 10, 10)\n")
+    assert res.success, res.error
