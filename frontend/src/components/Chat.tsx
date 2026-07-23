@@ -63,6 +63,12 @@ export function Chat() {
 
   return (
     <section class="panel chat-panel">
+      {busy && (
+        <div class="chat-overlay" aria-live="polite">
+          <span class="spinner" />
+          <span class="chat-overlay-label">Working…</span>
+        </div>
+      )}
       <header>
         <h2>Chat</h2>
         <div class="chat-header-controls">

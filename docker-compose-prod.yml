@@ -47,7 +47,7 @@ services:
       - ALL
     security_opt:
       - no-new-privileges:true
-      - seccomp:default
+      # Docker applies its default seccomp profile automatically when not overridden.
     mem_limit: 1g
     pids_limit: 128
     cpus: "1.0"

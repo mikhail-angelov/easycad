@@ -208,8 +208,7 @@ services:
     tmpfs: ["/tmp:size=256m"]
     cap_drop: ["ALL"]
     security_opt:
-      - no-new-privileges:true
-      - seccomp:default
+      - no-new-privileges:true   # default seccomp profile applies automatically
     mem_limit: 512m
     pids_limit: 128
     cpus: "1.0"

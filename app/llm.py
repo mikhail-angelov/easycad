@@ -38,8 +38,13 @@ DEFAULT_PROVIDER = "deepseek"
 INITIAL_CODE = textwrap.dedent("""\
     import cadquery as cq
 
+    # ── Parameters (edit these to resize the model) ──
+    WIDTH = 50   # X, mm
+    DEPTH = 80   # Y, mm
+    HEIGHT = 30  # Z, mm
+
     # Starting solid — describe a change in the chat to evolve it.
-    result = cq.Workplane("XY").box(50, 80, 30)
+    result = cq.Workplane("XY").box(WIDTH, DEPTH, HEIGHT)
 """)
 
 # ── Stage 2 system prompt (proven in POC) ────────────────────────────────────
@@ -53,12 +58,22 @@ SYSTEM_PROMPT = textwrap.dedent("""\
     2. The script must define a variable `result` of type `cadquery.Workplane`
        (this is what gets exported to STL).
     3. Always `import cadquery as cq` at the top.
-    4. DO NOT modify, reorder, or rewrite any existing code. Copy all existing
-       code exactly as-is and only APPEND new code at the end (before the
-       Geometry info comment). The only exception is if the user explicitly
-       asks to change existing code.
-    5. Use millimeters as units.
-    6. Write clean, readable code with comments for each logical step.
+    4. PARAMETERS BLOCK. Keep a block of UPPER_CASE named constants at the top
+       of the script, right after the imports (a "# ── Parameters ──" comment),
+       holding EVERY primary dimension: sizes, thicknesses, wall widths, offsets,
+       gaps, hole diameters, radii, fillet/chamfer sizes, counts, and positions.
+       The build code below MUST reference these constants — never write a
+       primary dimension as a bare magic number inside an operation. When a new
+       feature needs a dimension, ADD a new named constant (with a short unit
+       comment) to this block and use it. Derive dependent values from the
+       constants (e.g. `WIDTH / 2`) rather than hard-coding.
+    5. APPEND-ONLY elsewhere. The Parameters block is the ONLY region you may
+       edit (to add constants). Do NOT modify, reorder, or rewrite any other
+       existing code — copy it exactly and add new operations at the end, before
+       the Geometry info comment. Exception: the user explicitly asks to change
+       existing code.
+    6. Use millimeters as units.
+    7. Write clean, readable code with a short comment for each logical step.
 
     Important:
     - The code will have a "Geometry info" comment block at the end with the

@@ -31,7 +31,7 @@ services:
     cap_drop: [ALL]
     security_opt:
       - no-new-privileges:true
-      - seccomp:default
+      # Docker applies its default seccomp profile automatically when not overridden.
     mem_limit: 2g                # real memory cap (OCP/CadQuery needs headroom)
     pids_limit: 128
     cpus: "1.0"

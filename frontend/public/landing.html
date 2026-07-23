@@ -1,0 +1,603 @@
+<!doctype html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>EasyCAD — Опиши. Напечатай.</title>
+<meta name="description" content="EasyCAD превращает фразу в печатаемую 3D-модель: опиши изменение простыми словами — он пишет CadQuery, исполняет его и показывает результат. Параметрический CAD для 3D-печати.">
+<link rel="canonical" href="https://easycad.bconf.com/">
+<link rel="icon" href="/favicon.svg" type="image/svg+xml">
+<meta name="theme-color" content="#ECEAE4" media="(prefers-color-scheme: light)">
+<meta name="theme-color" content="#0F1114" media="(prefers-color-scheme: dark)">
+<meta property="og:type" content="website">
+<meta property="og:site_name" content="EasyCAD">
+<meta property="og:title" content="EasyCAD — Опиши. Напечатай.">
+<meta property="og:description" content="Фраза → печатаемая 3D-модель. Параметрический CAD простыми словами, по одному изменению за раз.">
+<meta property="og:url" content="https://easycad.bconf.com/">
+<meta property="og:image" content="https://easycad.bconf.com/og-image.png">
+<meta property="og:image:width" content="1200">
+<meta property="og:image:height" content="630">
+<meta property="og:image:alt" content="EasyCAD — изометрический чертёж коробки с размерами">
+<meta property="og:locale" content="ru_RU">
+<meta property="og:locale:alternate" content="en_US">
+<meta name="twitter:card" content="summary_large_image">
+<meta name="twitter:title" content="EasyCAD — Опиши. Напечатай.">
+<meta name="twitter:description" content="Фраза → печатаемая 3D-модель. Параметрический CAD простыми словами.">
+<meta name="twitter:image" content="https://easycad.bconf.com/og-image.png">
+<style>
+  :root {
+    --paper: #ECEAE4;
+    --panel: #F4F2EC;
+    --ink: #191A1D;
+    --line: #6F7680;
+    --grid: #DFDACF;
+    --muted: #5C6069;
+    --accent: #C24A2A;
+    --accent-ink: #FFFFFF;
+    --mono: ui-monospace, "SF Mono", "JetBrains Mono", Menlo, Consolas, monospace;
+    --sans: -apple-system, BlinkMacSystemFont, "Segoe UI", system-ui, sans-serif;
+    --maxw: 1080px;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --paper: #0F1114; --panel: #14171B; --ink: #E9E7E2; --line: #4C525C;
+      --grid: #191D23; --muted: #9AA0A8; --accent: #E4693D; --accent-ink: #14110E;
+    }
+  }
+  :root[data-theme="light"] {
+    --paper: #ECEAE4; --panel: #F4F2EC; --ink: #191A1D; --line: #6F7680;
+    --grid: #DFDACF; --muted: #5C6069; --accent: #C24A2A; --accent-ink: #FFFFFF;
+  }
+  :root[data-theme="dark"] {
+    --paper: #0F1114; --panel: #14171B; --ink: #E9E7E2; --line: #4C525C;
+    --grid: #191D23; --muted: #9AA0A8; --accent: #E4693D; --accent-ink: #14110E;
+  }
+
+  * { box-sizing: border-box; }
+  html { scroll-behavior: smooth; -webkit-text-size-adjust: 100%; }
+  @media (prefers-reduced-motion: reduce) { html { scroll-behavior: auto; } }
+
+  body {
+    margin: 0;
+    color: var(--ink);
+    background-color: var(--paper);
+    background-image:
+      linear-gradient(var(--grid) 1px, transparent 1px),
+      linear-gradient(90deg, var(--grid) 1px, transparent 1px);
+    background-size: 30px 30px;
+    font-family: var(--sans);
+    font-size: 17px;
+    line-height: 1.6;
+    -webkit-font-smoothing: antialiased;
+    overflow-x: hidden;
+  }
+
+  .wrap { max-width: var(--maxw); margin: 0 auto; padding: 0 24px; }
+
+  .eyebrow {
+    font-family: var(--mono); font-size: 12px; letter-spacing: 0.2em;
+    text-transform: uppercase; color: var(--accent);
+    display: inline-flex; align-items: center; gap: 10px; margin: 0 0 20px;
+  }
+  .eyebrow::before { content: ""; width: 26px; height: 1px; background: var(--accent); flex: 0 0 auto; }
+  h1, h2, h3 {
+    font-family: var(--mono); font-weight: 700; text-transform: uppercase;
+    text-wrap: balance; letter-spacing: 0.01em; margin: 0;
+  }
+  h1 { font-size: clamp(2.2rem, 7vw, 5rem); line-height: 1.0; letter-spacing: -0.01em; }
+  h2 { font-size: clamp(1.55rem, 3.6vw, 2.7rem); line-height: 1.08; }
+  h3 { font-size: 1.02rem; letter-spacing: 0.03em; }
+  p { margin: 0 0 1em; max-width: 62ch; }
+  .lead { font-size: clamp(1.02rem, 1.7vw, 1.28rem); }
+  .muted { color: var(--muted); }
+  a { color: inherit; }
+
+  section { padding: clamp(56px, 10vh, 128px) 0; position: relative; }
+  .rule { border: 0; height: 1px; background: var(--line); opacity: 0.4; max-width: var(--maxw); margin: 0 auto; }
+
+  .reveal { opacity: 0; transform: translateY(18px); transition: opacity .7s ease, transform .7s ease; }
+  .reveal.in { opacity: 1; transform: none; }
+  @media (prefers-reduced-motion: reduce) { .reveal { opacity: 1; transform: none; transition: none; } }
+
+  /* ── Language toggle ────────────────────────────── */
+  .lang {
+    position: fixed; top: 12px; right: 12px; z-index: 50;
+    display: inline-flex; border: 1px solid var(--line);
+    background: color-mix(in srgb, var(--paper) 82%, transparent);
+    backdrop-filter: blur(6px);
+  }
+  .lang-btn {
+    font-family: var(--mono); font-size: 12px; letter-spacing: 0.08em;
+    padding: 7px 11px; border: 0; background: transparent; color: var(--muted);
+    cursor: pointer;
+  }
+  .lang-btn[data-active="true"] { background: var(--accent); color: var(--accent-ink); }
+  .lang-btn:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+
+  /* ── Hero ───────────────────────────────────────── */
+  .hero { padding-top: clamp(64px, 12vh, 150px); padding-bottom: clamp(44px, 8vh, 96px); }
+  .hero-grid { display: grid; grid-template-columns: 1.05fr 0.95fr; gap: 48px; align-items: center; }
+  .hero h1 .b { color: var(--accent); }
+  .dimframe { display: inline-block; padding: 2px 0 6px; border-bottom: 1px solid var(--line); }
+  .hero .lead { margin-top: 22px; color: var(--muted); }
+  .lead b { color: var(--ink); font-weight: 600; }
+  .cta-row { display: flex; flex-wrap: wrap; gap: 14px; margin-top: 30px; }
+  .btn {
+    font-family: var(--mono); font-size: 13px; letter-spacing: 0.06em;
+    text-transform: uppercase; text-decoration: none; padding: 13px 20px;
+    border: 1px solid var(--ink); display: inline-flex; align-items: center; justify-content: center; gap: 9px;
+    transition: transform .15s ease, background .15s ease, color .15s ease;
+  }
+  .btn.primary { background: var(--accent); border-color: var(--accent); color: var(--accent-ink); }
+  .btn:hover { transform: translateY(-2px); }
+  .btn.primary:hover { filter: brightness(1.05); }
+  .btn.ghost:hover { background: var(--ink); color: var(--paper); }
+  .btn:focus-visible { outline: 2px solid var(--accent); outline-offset: 3px; }
+
+  .stage {
+    background: var(--panel); border: 1px solid var(--line); position: relative;
+    aspect-ratio: 1 / 0.92; overflow: hidden;
+  }
+  .stage canvas { width: 100%; height: 100%; display: block; }
+  .stage .tag {
+    position: absolute; left: 12px; top: 10px; font-family: var(--mono);
+    font-size: 10.5px; letter-spacing: 0.13em; text-transform: uppercase; color: var(--muted);
+  }
+  .stage .tag.br { left: auto; right: 12px; top: auto; bottom: 10px; }
+
+  .cards { display: grid; grid-template-columns: repeat(3, 1fr); gap: 18px; margin-top: 40px; }
+  .card { border: 1px solid var(--line); background: var(--panel); padding: 22px 20px 24px; }
+  .card .n { font-family: var(--mono); font-size: 11px; letter-spacing: 0.13em; color: var(--accent); text-transform: uppercase; }
+  .card h3 { margin: 12px 0 8px; }
+  .card p { font-size: 0.95rem; color: var(--muted); margin: 0; }
+
+  .steps { display: flex; flex-direction: column; margin-top: 40px; }
+  .step { display: grid; grid-template-columns: 84px 1fr; gap: 22px; padding: 20px 0; border-top: 1px solid var(--line); align-items: baseline; }
+  .step:last-child { border-bottom: 1px solid var(--line); }
+  .step .idx { font-family: var(--mono); font-weight: 700; font-size: 13px; letter-spacing: 0.1em; color: var(--accent); display: flex; align-items: center; gap: 9px; }
+  .step .idx::after { content: ""; flex: 0 0 auto; width: 8px; height: 8px; border: 1.5px solid var(--accent); border-radius: 50%; }
+  .step .prompt { font-family: var(--mono); font-size: 0.96rem; color: var(--ink); }
+  .step .cap { color: var(--muted); font-size: 0.9rem; margin-top: 5px; }
+
+  .param-grid { display: grid; grid-template-columns: 0.95fr 1.05fr; gap: 40px; align-items: center; margin-top: 40px; }
+  .controls { display: flex; flex-direction: column; gap: 22px; }
+  .control label { display: flex; justify-content: space-between; align-items: baseline; font-family: var(--mono); font-size: 12px; letter-spacing: 0.09em; text-transform: uppercase; color: var(--muted); margin-bottom: 10px; }
+  .control label b { color: var(--accent); font-size: 15px; font-variant-numeric: tabular-nums; }
+  input[type="range"] { -webkit-appearance: none; appearance: none; width: 100%; height: 3px; background: var(--line); outline: none; cursor: pointer; border-radius: 2px; }
+  input[type="range"]::-webkit-slider-thumb { -webkit-appearance: none; appearance: none; width: 22px; height: 22px; background: var(--accent); border: 3px solid var(--paper); border-radius: 50%; }
+  input[type="range"]::-moz-range-thumb { width: 22px; height: 22px; background: var(--accent); border: 3px solid var(--paper); border-radius: 50%; }
+  input[type="range"]:focus-visible { outline: 2px solid var(--accent); outline-offset: 6px; }
+  .lead.muted { color: var(--muted); }
+  .codeblock { font-family: var(--mono); font-size: 13px; line-height: 1.7; background: var(--panel); border: 1px solid var(--line); padding: 16px 18px; margin-top: 26px; overflow-x: auto; white-space: pre; }
+  .codeblock .c { color: var(--muted); }
+  .codeblock .k { color: var(--accent); }
+
+  .diagram { margin-top: 44px; border: 1px solid var(--line); background: var(--panel); padding: 18px 10px; overflow-x: auto; }
+  .diagram svg { width: 100%; min-width: 520px; height: auto; display: block; }
+  .diagram .dg rect { fill: var(--panel); stroke: var(--line); }
+  .diagram .dg line, .diagram .dg path { stroke: var(--line); fill: none; }
+  .diagram .dg .accent { stroke: var(--accent); }
+  .diagram text { font-family: var(--mono); fill: var(--ink); }
+  .diagram text.m { fill: var(--muted); }
+  .diagram text.a { fill: var(--accent); }
+  .draw rect, .draw line, .draw path { stroke-dasharray: 1400; stroke-dashoffset: 1400; transition: stroke-dashoffset 1.1s ease; }
+  .draw.in rect, .draw.in line, .draw.in path { stroke-dashoffset: 0; }
+  @media (prefers-reduced-motion: reduce) { .draw rect, .draw line, .draw path { stroke-dashoffset: 0; transition: none; } }
+
+  .close { text-align: center; }
+  .close h2 { margin-bottom: 26px; }
+  .close .cta-row { justify-content: center; }
+  footer { border-top: 1px solid var(--line); padding: 26px 0 40px; font-family: var(--mono); font-size: 12px; letter-spacing: 0.03em; color: var(--muted); display: flex; flex-wrap: wrap; gap: 8px 20px; justify-content: space-between; align-items: center; }
+  footer a { text-decoration: none; }
+  footer a:hover { color: var(--accent); }
+
+  /* ── Responsive ─────────────────────────────────── */
+  @media (max-width: 860px) {
+    .hero-grid { grid-template-columns: 1fr; gap: 30px; }
+    .cards { grid-template-columns: 1fr; }
+    .param-grid { grid-template-columns: 1fr; gap: 28px; }
+  }
+  @media (max-width: 520px) {
+    body { font-size: 16px; }
+    .wrap { padding: 0 18px; }
+    section { padding: 50px 0; }
+    .hero { padding-top: 76px; }
+    h1 { font-size: clamp(2rem, 12vw, 2.9rem); }
+    .cta-row { gap: 10px; }
+    .cta-row .btn { flex: 1 1 46%; padding: 14px 14px; }
+    .step { grid-template-columns: 64px 1fr; gap: 14px; }
+    .stage { aspect-ratio: 1 / 0.86; }
+    footer { justify-content: flex-start; gap: 6px 16px; }
+  }
+</style>
+</head>
+<body>
+<div class="lang" role="group" aria-label="Language / Язык">
+  <button class="lang-btn" data-lang-set="ru" type="button">RU</button>
+  <button class="lang-btn" data-lang-set="en" type="button">EN</button>
+</div>
+
+<header class="hero" id="top">
+  <div class="wrap hero-grid">
+    <div>
+      <span class="eyebrow reveal" data-i18n="hero.eyebrow">Параметрический CAD · простыми словами</span>
+      <h1 class="reveal" data-i18n="hero.h1"><span class="dimframe">Опиши&nbsp;словами.</span><br><span class="b">Напечатай.</span></h1>
+      <p class="lead reveal" data-i18n="hero.lead">EasyCAD превращает фразу в печатаемую 3D-модель. Описывай по одному
+        изменению за раз — он пишет CadQuery, исполняет его и показывает результат.
+        Смотри, как деталь растёт, и отправляй на принтер.</p>
+      <div class="cta-row reveal">
+        <a class="btn primary" href="/app" target="_blank" rel="noopener" data-i18n="btn.open">Открыть EasyCAD →</a>
+        <a class="btn ghost" href="https://github.com/mikhail-angelov/easycad" target="_blank" rel="noopener" data-i18n="btn.github">Смотреть на GitHub</a>
+      </div>
+    </div>
+    <div class="stage reveal">
+      <span class="tag" data-i18n="tag.fig1">РИС. 01 — результат</span>
+      <span class="tag br" data-i18n="tag.iso">изометрия · мм</span>
+      <canvas id="hero-canvas" aria-label="Isometric drawing of a box"></canvas>
+    </div>
+  </div>
+</header>
+
+<hr class="rule">
+
+<section>
+  <div class="wrap">
+    <span class="eyebrow reveal" data-i18n="origin.eyebrow">С чего началось</span>
+    <h2 class="reveal" data-i18n="origin.h2">Всё началось с салфетки.</h2>
+    <p class="lead reveal muted" style="margin-top:22px" data-i18n="origin.lead">Я нарисовал деталь от руки, отдал фото ИИ — и он с первого раза выдал
+      почти точную 3D-модель. Задача была сделать это повторяемым: точно,
+      редактируемо, по-моему. Много попыток спустя ответ оказался до неловкости
+      прямым: <b>пусть модель пишет CadQuery-код — по одному маленькому изменению
+      за раз — и показывает геометрию после каждого шага.</b></p>
+  </div>
+</section>
+
+<hr class="rule">
+
+<section>
+  <div class="wrap">
+    <span class="eyebrow reveal" data-i18n="work.eyebrow">Рабочее место</span>
+    <h2 class="reveal" data-i18n="work.h2">Ты описываешь. Оно пишет код. Оно строит.</h2>
+    <div class="cards">
+      <div class="card reveal">
+        <span class="n" data-i18n="card1.n">01 · Чат</span>
+        <h3 data-i18n="card1.h">Скажи одно изменение</h3>
+        <p data-i18n="card1.p">Простыми словами, по одной фиче за раз. «Сделай стенки 2 мм». Он уточняет расплывчатые формулировки и переспрашивает, когда запрос правда неоднозначен.</p>
+      </div>
+      <div class="card reveal">
+        <span class="n" data-i18n="card2.n">02 · Код</span>
+        <h3 data-i18n="card2.h">Настоящий CadQuery</h3>
+        <p data-i18n="card2.p">Редактируемый Python, который можно читать и править руками. Ключевые размеры вынесены в именованные константы вверху — никаких магических чисел по всему коду.</p>
+      </div>
+      <div class="card reveal">
+        <span class="n" data-i18n="card3.n">03 · Вьювер</span>
+        <h3 data-i18n="card3.h">Мгновенное 3D</h3>
+        <p data-i18n="card3.p">Каждый шаг исполняется и рендерится сразу, а таймлайн можно отмотать назад. Готово — экспортируй STL.</p>
+      </div>
+    </div>
+  </div>
+</section>
+
+<hr class="rule">
+
+<section>
+  <div class="wrap">
+    <span class="eyebrow reveal" data-i18n="build.eyebrow">По одной фразе за раз</span>
+    <h2 class="reveal" data-i18n="build.h2">От бруска до детали за пять фраз.</h2>
+    <div class="steps">
+      <div class="step reveal"><div class="idx" data-i18n="step.0">ШАГ 0</div><div><div class="prompt" data-i18n="step0.p">Стартовый брусок 50 × 80 × 30</div><div class="cap" data-i18n="step0.c">Каждый проект начинается с одного параметрического бруска.</div></div></div>
+      <div class="step reveal"><div class="idx" data-i18n="step.1">ШАГ 1</div><div><div class="prompt" data-i18n="step1.p">› сделай открытую коробку со стенками 2 мм</div><div class="cap" data-i18n="step1.c">Выдолблено размер-сохраняющим булевым вырезом.</div></div></div>
+      <div class="step reveal"><div class="idx" data-i18n="step.2">ШАГ 2</div><div><div class="prompt" data-i18n="step2.p">› скругли четыре вертикальных угла радиусом 4 мм</div><div class="cap" data-i18n="step2.c">Вертикальные рёбра выбраны через .edges("|Z").</div></div></div>
+      <div class="step reveal"><div class="idx" data-i18n="step.3">ШАГ 3</div><div><div class="prompt" data-i18n="step3.p">› добавь бортик 1.5 мм по внутренней верхней кромке под крышку</div><div class="cap" data-i18n="step3.c">Внутренний бортик, чтобы села крышка.</div></div></div>
+      <div class="step reveal"><div class="idx" data-i18n="step.4">ШАГ 4</div><div><div class="prompt" data-i18n="step4.p">› прорежь кабель-слот 20 × 6 мм внизу стенки</div><div class="cap" data-i18n="step4.c">Пробито увеличенным резаком.</div></div></div>
+      <div class="step reveal"><div class="idx" data-i18n="step.5">ШАГ 5</div><div><div class="prompt" data-i18n="step5.p">› сними фаску 1 мм с верхней внешней кромки</div><div class="cap" data-i18n="step5.c">Аккуратный скос — можно печатать.</div></div></div>
+    </div>
+  </div>
+</section>
+
+<hr class="rule">
+
+<section>
+  <div class="wrap">
+    <span class="eyebrow reveal" data-i18n="param.eyebrow">Параметрично по умолчанию</span>
+    <h2 class="reveal" data-i18n="param.h2">Все размеры собраны вместе.</h2>
+    <div class="param-grid">
+      <div class="reveal">
+        <p class="lead muted" data-i18n="param.lead">Потяни значение — и вся модель следом, потому что код держит ключевые
+          размеры именованными константами вверху. Правишь ширину один раз, а не в
+          десятке разбросанных чисел.</p>
+        <div class="controls">
+          <div class="control">
+            <label><span data-i18n="ctrl.width">Ширина — X</span><b id="w-val">50</b></label>
+            <input id="w-range" type="range" min="30" max="90" value="50" aria-label="Width">
+          </div>
+          <div class="control">
+            <label><span data-i18n="ctrl.height">Высота — Z</span><b id="h-val">30</b></label>
+            <input id="h-range" type="range" min="15" max="60" value="30" aria-label="Height">
+          </div>
+        </div>
+        <div class="codeblock" aria-hidden="true"><span class="c"># &mdash;&mdash; Parameters (edit these to resize) &mdash;&mdash;</span>
+<span class="k">WIDTH</span>  = <span id="code-w">50</span>   <span class="c"># X, mm</span>
+DEPTH  = 80   <span class="c"># Y, mm</span>
+<span class="k">HEIGHT</span> = <span id="code-h">30</span>   <span class="c"># Z, mm</span>
+
+result = cq.Workplane(<span class="c">"XY"</span>).box(WIDTH, DEPTH, HEIGHT)</div>
+      </div>
+      <div class="stage reveal" style="aspect-ratio: 1 / 0.88;">
+        <span class="tag" data-i18n="tag.fig2">РИС. 02 — вживую</span>
+        <span class="tag br" id="dim-tag">50 × 80 × 30 мм</span>
+        <canvas id="param-canvas" aria-label="Isometric box resized by sliders"></canvas>
+      </div>
+    </div>
+  </div>
+</section>
+
+<hr class="rule">
+
+<section>
+  <div class="wrap">
+    <span class="eyebrow reveal" data-i18n="arch.eyebrow">Безопасно by design</span>
+    <h2 class="reveal" data-i18n="arch.h2">Твоя фраза пишет код. Код исполняется в изолированном контуре.</h2>
+    <p class="lead muted reveal" style="margin-top:22px" data-i18n="arch.lead">Сгенерированный код небезопасен, поэтому он никогда не исполняется рядом с
+      твоими данными. Приложение хранит ключ и общается с моделью; отдельный
+      воркер считает геометрию — без сети, без секретов и с жёсткими лимитами.</p>
+    <div class="diagram reveal">
+      <svg viewBox="0 0 720 210" role="img" aria-label="Architecture diagram">
+        <g class="dg" stroke-width="1.5" fill="none">
+          <rect x="24" y="74" width="150" height="60"></rect>
+          <rect x="285" y="64" width="170" height="80"></rect>
+          <rect x="560" y="64" width="150" height="80"></rect>
+          <line x1="174" y1="104" x2="283" y2="104"></line>
+          <path d="M273 99 L283 104 L273 109"></path>
+          <line class="accent" x1="455" y1="104" x2="558" y2="104"></line>
+          <path class="accent" d="M548 99 L558 104 L548 109"></path>
+        </g>
+        <g class="labels">
+          <text data-i18n="dg.you" x="99" y="100" text-anchor="middle" font-size="13" font-weight="700">ТЫ</text>
+          <text data-i18n="dg.you2" class="m" x="99" y="118" text-anchor="middle" font-size="10">фраза</text>
+          <text data-i18n="dg.app" x="370" y="94" text-anchor="middle" font-size="13" font-weight="700">СЕРВЕР</text>
+          <text data-i18n="dg.app2" class="m" x="370" y="112" text-anchor="middle" font-size="10">пишет CadQuery</text>
+          <text data-i18n="dg.app3" class="m" x="370" y="126" text-anchor="middle" font-size="10">хранит ключ</text>
+          <text data-i18n="dg.wrk" class="a" x="635" y="94" text-anchor="middle" font-size="13" font-weight="700">ВОРКЕР</text>
+          <text data-i18n="dg.wrk2" class="m" x="635" y="112" text-anchor="middle" font-size="10">считает геометрию</text>
+          <text data-i18n="dg.wrk3" class="m" x="635" y="126" text-anchor="middle" font-size="10">без сети · без ключа</text>
+          <text data-i18n="dg.seal" class="a" x="506" y="92" text-anchor="middle" font-size="9" letter-spacing="0.12em">ИЗОЛЯЦИЯ</text>
+        </g>
+      </svg>
+    </div>
+  </div>
+</section>
+
+<hr class="rule">
+
+<section class="close">
+  <div class="wrap">
+    <span class="eyebrow reveal" style="justify-content:center" data-i18n="close.eyebrow">Когда будешь готов</span>
+    <h2 class="reveal" data-i18n="close.h2">Опиши свою первую деталь.</h2>
+    <div class="cta-row reveal">
+      <a class="btn primary" href="/app" target="_blank" rel="noopener" data-i18n="btn.open">Открыть EasyCAD →</a>
+      <a class="btn ghost" href="https://github.com/mikhail-angelov/easycad" target="_blank" rel="noopener" data-i18n="btn.github">Смотреть на GitHub</a>
+    </div>
+  </div>
+</section>
+
+<footer class="wrap">
+  <span>© 2026 Mikhail Angelov</span>
+  <span class="muted">CadQuery · FastAPI · Preact</span>
+  <a href="https://easycad.bconf.com" target="_blank" rel="noopener">easycad.bconf.com</a>
+</footer>
+
+<script>
+(function () {
+  var reduce = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+  var themeHooks = [];
+  var UNIT = "мм";
+
+  /* ── i18n ───────────────────────────────────────── */
+  var I18N = {
+    ru: {}, // Russian is authored directly in the markup (default) — filled below for switching back
+    en: {
+      "hero.eyebrow": "Parametric CAD · in plain language",
+      "hero.h1": '<span class="dimframe">Describe&nbsp;it.</span><br><span class="b">Print&nbsp;it.</span>',
+      "hero.lead": "EasyCAD turns a sentence into a printable 3D model. Describe one change at a time — it writes the CadQuery, runs it, and shows the result. Watch your part grow, then send it to the printer.",
+      "btn.open": "Open EasyCAD →",
+      "btn.github": "View on GitHub",
+      "tag.fig1": "FIG. 01 — result",
+      "tag.iso": "isometric · mm",
+      "origin.eyebrow": "The origin",
+      "origin.h2": "It started with a napkin.",
+      "origin.lead": "I sketched a part by hand, handed the photo to an AI, and it produced a nearly-correct 3D model on the first try. The trick was making that repeatable — precise, editable, mine. Many attempts later, the answer was almost embarrassingly direct: <b>let the model write CadQuery code, one small change at a time, and show the geometry after every step.</b>",
+      "work.eyebrow": "The workspace",
+      "work.h2": "You describe. It codes. It builds.",
+      "card1.n": "01 · Chat", "card1.h": "Say one change",
+      "card1.p": "Plain language, one feature at a time. “Give it 2 mm walls.” It refines vague prompts and asks when a request is truly ambiguous.",
+      "card2.n": "02 · Code", "card2.h": "Real CadQuery",
+      "card2.p": "Editable Python you can read and tweak by hand. Primary dimensions live as named constants at the top — never buried as magic numbers.",
+      "card3.n": "03 · Viewer", "card3.h": "Instant 3D",
+      "card3.p": "Every step executes and renders immediately, with a timeline you can rewind. Export STL when the part looks right.",
+      "build.eyebrow": "One sentence at a time",
+      "build.h2": "From a block to a part in five prompts.",
+      "step.0": "STEP 0", "step.1": "STEP 1", "step.2": "STEP 2", "step.3": "STEP 3", "step.4": "STEP 4", "step.5": "STEP 5",
+      "step0.p": "50 × 80 × 30 starting block", "step0.c": "Every project begins from the same parametric block.",
+      "step1.p": "› make an open box with 2 mm walls", "step1.c": "Hollowed with a size-preserving boolean cut.",
+      "step2.p": "› round the four vertical corners, 4 mm fillet", "step2.c": "Vertical edges selected with .edges(\"|Z\").",
+      "step3.p": "› add a 1.5 mm ledge inside the top edge for a lid", "step3.c": "An inner rim to seat a cover.",
+      "step4.p": "› cut a 20 × 6 mm cable slot at the bottom of a wall", "step4.c": "Punched through with an oversized cutter.",
+      "step5.p": "› chamfer the top outer edge 1 mm", "step5.c": "A clean bevel — ready to print.",
+      "param.eyebrow": "Parametric by default",
+      "param.h2": "Every dimension in one place.",
+      "param.lead": "Drag a value and the whole model follows — because the code keeps its primary dimensions as named constants up top. Fix the width once, not in a dozen scattered numbers.",
+      "ctrl.width": "Width — X", "ctrl.height": "Height — Z",
+      "tag.fig2": "FIG. 02 — live",
+      "arch.eyebrow": "Safe by design",
+      "arch.h2": "Your prompt writes code. The code runs in a sealed box.",
+      "arch.lead": "Generated code is untrusted, so it never runs next to your data. The app holds your key and talks to the model; a separate worker executes the geometry with no network, no secrets, and strict limits.",
+      "dg.you": "YOU", "dg.you2": "a sentence",
+      "dg.app": "APP", "dg.app2": "writes CadQuery", "dg.app3": "holds your key",
+      "dg.wrk": "WORKER", "dg.wrk2": "runs geometry", "dg.wrk3": "no net · no key",
+      "dg.seal": "SEALED",
+      "close.eyebrow": "Ready when you are",
+      "close.h2": "Describe your first part."
+    }
+  };
+
+  // Capture the Russian defaults straight from the markup, so switching back is lossless.
+  document.querySelectorAll("[data-i18n]").forEach(function (el) {
+    I18N.ru[el.getAttribute("data-i18n")] = el.innerHTML;
+  });
+
+  function applyLang(lang) {
+    if (!I18N[lang]) lang = "ru";
+    document.documentElement.setAttribute("data-lng", lang);
+    document.documentElement.setAttribute("lang", lang);
+    document.querySelectorAll("[data-i18n]").forEach(function (el) {
+      var v = I18N[lang][el.getAttribute("data-i18n")];
+      if (v != null) el.innerHTML = v;
+    });
+    UNIT = lang === "ru" ? "мм" : "mm";
+    document.querySelectorAll(".lang-btn").forEach(function (b) {
+      b.setAttribute("data-active", b.getAttribute("data-lang-set") === lang ? "true" : "false");
+    });
+    try { localStorage.setItem("easycad_lang", lang); } catch (e) {}
+    if (window._renderParam) window._renderParam();
+  }
+
+  document.querySelectorAll(".lang-btn").forEach(function (b) {
+    b.addEventListener("click", function () { applyLang(b.getAttribute("data-lang-set")); });
+  });
+
+  /* ── Scroll reveals ─────────────────────────────── */
+  var io = new IntersectionObserver(function (entries) {
+    entries.forEach(function (e) { if (e.isIntersecting) { e.target.classList.add("in"); io.unobserve(e.target); } });
+  }, { threshold: 0.16 });
+  document.querySelectorAll(".reveal").forEach(function (el) { io.observe(el); });
+
+  var dg = document.querySelector(".diagram .dg");
+  if (dg) {
+    dg.classList.add("draw");
+    new IntersectionObserver(function (es, obs) {
+      es.forEach(function (e) { if (e.isIntersecting) { dg.classList.add("in"); obs.disconnect(); } });
+    }, { threshold: 0.3 }).observe(document.querySelector(".diagram"));
+  }
+
+  /* ── Isometric parametric box renderer ──────────── */
+  function css(v) { return getComputedStyle(document.documentElement).getPropertyValue(v).trim(); }
+
+  function setup(canvas) {
+    var dpr = Math.min(window.devicePixelRatio || 1, 2);
+    var r = canvas.getBoundingClientRect();
+    canvas.width = Math.max(1, r.width * dpr);
+    canvas.height = Math.max(1, r.height * dpr);
+    var ctx = canvas.getContext("2d");
+    ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+    return { ctx: ctx, w: r.width, h: r.height };
+  }
+
+  function proj(x, y, z, yaw, s, cx, cy) {
+    var c = Math.cos(yaw), sn = Math.sin(yaw);
+    var rx = x * c - z * sn, rz = x * sn + z * c;
+    var ax = Math.cos(Math.PI / 6), ay = Math.sin(Math.PI / 6);
+    return [cx + (rx - rz) * ax * s, cy - ((rx + rz) * ay - y) * s];
+  }
+  function jitter(p, amt) { return amt ? [p[0] + (Math.random() - 0.5) * amt, p[1] + (Math.random() - 0.5) * amt] : p; }
+
+  function drawBox(st, W, H, D, yaw, sketch, showDims) {
+    var ctx = st.ctx, cw = st.w, ch = st.h;
+    ctx.clearRect(0, 0, cw, ch);
+    var ink = css("--ink"), accent = css("--accent"), muted = css("--muted");
+    var maxDim = Math.max(W, D, H);
+    var s = (Math.min(cw, ch) * 0.42) / maxDim;
+    var cx = cw / 2, cy = ch / 2 + H * s * 0.28;
+    var x0 = -W / 2, x1 = W / 2, z0 = -D / 2, z1 = D / 2, y1 = H;
+    function P(x, y, z) { return jitter(proj(x, y, z, yaw, s, cx, cy), sketch * 5); }
+    var A = P(x0, 0, z0), B = P(x1, 0, z0), C = P(x1, 0, z1), Dp = P(x0, 0, z1);
+    var E = P(x0, y1, z0), F = P(x1, y1, z0), G = P(x1, y1, z1), Hp = P(x0, y1, z1);
+    function face(pts, fill, a) {
+      ctx.beginPath(); ctx.moveTo(pts[0][0], pts[0][1]);
+      for (var i = 1; i < pts.length; i++) ctx.lineTo(pts[i][0], pts[i][1]);
+      ctx.closePath(); ctx.globalAlpha = a; ctx.fillStyle = fill; ctx.fill(); ctx.globalAlpha = 1;
+    }
+    face([E, F, G, Hp], accent, 0.10);
+    face([B, C, G, F], ink, 0.06);
+    face([Dp, C, G, Hp], ink, 0.03);
+    ctx.lineJoin = "round"; ctx.lineCap = "round"; ctx.strokeStyle = ink; ctx.lineWidth = 1.6;
+    function edge(a, b) { ctx.beginPath(); ctx.moveTo(a[0], a[1]); ctx.lineTo(b[0], b[1]); ctx.stroke(); }
+    edge(E, F); edge(F, G); edge(G, Hp); edge(Hp, E);
+    edge(A, E); edge(B, F); edge(C, G); edge(Dp, Hp);
+    edge(A, B); edge(B, C);
+    ctx.globalAlpha = 0.35; edge(A, Dp); edge(Dp, C); ctx.globalAlpha = 1;
+    if (showDims && sketch < 0.15) {
+      ctx.font = "11px ui-monospace, Menlo, monospace";
+      dim(ctx, A, B, 16, "" + W, accent, muted);
+      dim(ctx, A, E, -16, "" + H, accent, muted);
+    }
+  }
+  function dim(ctx, a, b, off, label, accent, muted) {
+    var dx = b[0] - a[0], dy = b[1] - a[1], len = Math.hypot(dx, dy) || 1;
+    var nx = -dy / len, ny = dx / len;
+    var a2 = [a[0] + nx * off, a[1] + ny * off], b2 = [b[0] + nx * off, b[1] + ny * off];
+    ctx.strokeStyle = accent; ctx.lineWidth = 1; ctx.globalAlpha = 0.9;
+    ctx.beginPath(); ctx.moveTo(a2[0], a2[1]); ctx.lineTo(b2[0], b2[1]); ctx.stroke();
+    ctx.beginPath(); ctx.moveTo(a[0], a[1]); ctx.lineTo(a2[0], a2[1]); ctx.moveTo(b[0], b[1]); ctx.lineTo(b2[0], b2[1]); ctx.stroke();
+    arrow(ctx, a2, b2); arrow(ctx, b2, a2); ctx.globalAlpha = 1;
+    var mx = (a2[0] + b2[0]) / 2, my = (a2[1] + b2[1]) / 2;
+    ctx.fillStyle = muted; ctx.textAlign = "center"; ctx.textBaseline = "middle";
+    ctx.fillText(label, mx + nx * 9, my + ny * 9);
+  }
+  function arrow(ctx, from, to) {
+    var dx = to[0] - from[0], dy = to[1] - from[1], l = Math.hypot(dx, dy) || 1;
+    var ux = dx / l, uy = dy / l, sz = 5;
+    ctx.beginPath();
+    ctx.moveTo(to[0], to[1]); ctx.lineTo(to[0] - ux * sz - uy * sz * 0.5, to[1] - uy * sz + ux * sz * 0.5);
+    ctx.moveTo(to[0], to[1]); ctx.lineTo(to[0] - ux * sz + uy * sz * 0.5, to[1] - uy * sz - ux * sz * 0.5);
+    ctx.stroke();
+  }
+
+  /* ── Hero animation ─────────────────────────────── */
+  var heroC = document.getElementById("hero-canvas");
+  if (heroC) {
+    var hs = setup(heroC), start = null;
+    function heroFrame(t) {
+      if (!start) start = t;
+      var el = (t - start) / 1000;
+      drawBox(hs, 50, 30, 80, Math.PI / 5 + Math.sin(el * 0.5) * 0.22, Math.max(0, 1 - el / 1.3), true);
+      if (!reduce) requestAnimationFrame(heroFrame);
+    }
+    function heroStatic() { drawBox(hs, 50, 30, 80, Math.PI / 5, 0, true); }
+    if (reduce) { heroStatic(); themeHooks.push(heroStatic); } else requestAnimationFrame(heroFrame);
+    window.addEventListener("resize", function () { hs = setup(heroC); if (reduce) heroStatic(); });
+  }
+
+  /* ── Parameter scrubber ─────────────────────────── */
+  var paramC = document.getElementById("param-canvas");
+  if (paramC) {
+    var ps = setup(paramC);
+    var wR = document.getElementById("w-range"), hR = document.getElementById("h-range");
+    var wV = document.getElementById("w-val"), hV = document.getElementById("h-val");
+    var cW = document.getElementById("code-w"), cH = document.getElementById("code-h"), tag = document.getElementById("dim-tag");
+    function renderParam() {
+      var W = +wR.value, H = +hR.value;
+      wV.textContent = W; hV.textContent = H; cW.textContent = W; cH.textContent = H;
+      tag.textContent = W + " × 80 × " + H + " " + UNIT;
+      drawBox(ps, W, H, 80, Math.PI / 5, 0, true);
+    }
+    window._renderParam = renderParam;
+    wR.addEventListener("input", renderParam);
+    hR.addEventListener("input", renderParam);
+    window.addEventListener("resize", function () { ps = setup(paramC); renderParam(); });
+    themeHooks.push(renderParam);
+    renderParam();
+  }
+
+  /* ── Theme re-render + initial language ─────────── */
+  function fireThemeHooks() { themeHooks.forEach(function (fn) { try { fn(); } catch (e) {} }); }
+  new MutationObserver(fireThemeHooks).observe(document.documentElement, { attributes: true, attributeFilter: ["data-theme"] });
+  window.matchMedia("(prefers-color-scheme: dark)").addEventListener("change", fireThemeHooks);
+
+  var saved = "ru";
+  try { saved = localStorage.getItem("easycad_lang") || "ru"; } catch (e) {}
+  applyLang(saved);
+})();
+</script>
+</body>
+</html>

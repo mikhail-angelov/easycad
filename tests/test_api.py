@@ -71,6 +71,29 @@ def test_failed_manual_step_does_not_advance_current():
     assert out["session"]["current_id"] == 0
 
 
+def test_robots_txt_blocks_app_and_api():
+    client = TestClient(app)
+    r = client.get("/robots.txt")
+    assert r.status_code == 200
+    assert r.headers["content-type"].startswith("text/plain")
+    assert "Disallow: /app" in r.text
+    assert "Disallow: /api" in r.text
+
+
+def test_landing_at_root_and_app_at_app_path():
+    import app.main as m
+    if not (m.STATIC_DIR / "landing.html").exists():
+        import pytest
+        pytest.skip("frontend not built (no static/landing.html)")
+    client = TestClient(app)
+    root = client.get("/")
+    assert root.status_code == 200
+    assert "text/html" in root.headers["content-type"]
+    app_page = client.get("/app")
+    assert app_page.status_code == 200
+    assert "text/html" in app_page.headers["content-type"]
+
+
 def test_oversize_prompt_is_rejected():
     client = TestClient(app)
     client.get("/api/session")

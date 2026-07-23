@@ -270,8 +270,25 @@ class SettingsRequest(BaseModel):
 # ── CAD session helpers ───────────────────────────────────────────────────────
 
 
+_INITIAL_RESULT = None
+
+
+def _initial_result():
+    """Cached execution of INITIAL_CODE.
+
+    The starting box is constant and deterministic, so we run CadQuery for it
+    once per process and reuse the STL/geometry for every new session. This
+    keeps session bootstrap (GET /api/session) cheap — a crawler hitting it no
+    longer triggers a worker/CadQuery run.
+    """
+    global _INITIAL_RESULT
+    if _INITIAL_RESULT is None:
+        _INITIAL_RESULT = execute(INITIAL_CODE)
+    return _INITIAL_RESULT
+
+
 def _create_initial(store) -> None:
-    res = execute(INITIAL_CODE)
+    res = _initial_result()
     store.add(
         kind="initial",
         code=res.code_with_geometry or INITIAL_CODE,
@@ -679,11 +696,54 @@ def export_step(step_id: int, session: Session = Depends(current_session)) -> Re
     )
 
 
-# Serve the built frontend (if present). The SPA catch-all is registered last so
-# /api/* routes win.
+# The landing page at "/" is light static content and may be indexed; the app
+# (/app) and API are heavy/interactive and are kept off-limits to crawlers.
+_SITE_URL = os.getenv("APP_URL", "https://easycad.bconf.com").rstrip("/")
+
+
+@app.get("/robots.txt")
+def robots() -> Response:
+    body = f"User-agent: *\nDisallow: /app\nDisallow: /api\nSitemap: {_SITE_URL}/sitemap.xml\n"
+    return Response(body, media_type="text/plain", headers={"Cache-Control": "public, max-age=86400"})
+
+
+@app.get("/sitemap.xml")
+def sitemap() -> Response:
+    body = (
+        '<?xml version="1.0" encoding="UTF-8"?>\n'
+        '<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">'
+        f"<url><loc>{_SITE_URL}/</loc></url></urlset>"
+    )
+    return Response(body, media_type="application/xml", headers={"Cache-Control": "public, max-age=86400"})
+
+
+# Serve the built frontend (if present).
+#   /       → static marketing landing (light, cacheable, crawler-friendly)
+#   /app    → the SPA (interactive app; hashed assets under /assets)
+# There is no global catch-all: unknown paths 404 rather than returning a 200
+# SPA shell to probing bots.
 if STATIC_DIR.exists():
     app.mount("/assets", StaticFiles(directory=STATIC_DIR / "assets"), name="assets")
+    _INDEX = STATIC_DIR / "index.html"
+    _LANDING = STATIC_DIR / "landing.html"
 
-    @app.get("/{_path:path}")
-    def spa(_path: str) -> FileResponse:
-        return FileResponse(STATIC_DIR / "index.html", headers={"Cache-Control": "no-cache"})
+    @app.get("/")
+    def landing() -> FileResponse:
+        if _LANDING.exists():
+            return FileResponse(_LANDING, headers={"Cache-Control": "public, max-age=300"})
+        return FileResponse(_INDEX, headers={"Cache-Control": "no-cache"})
+
+    # Static-root assets referenced by the landing (no global catch-all serves them).
+    @app.get("/og-image.png")
+    def og_image() -> FileResponse:
+        return FileResponse(STATIC_DIR / "og-image.png", headers={"Cache-Control": "public, max-age=604800"})
+
+    @app.get("/favicon.svg")
+    def favicon() -> FileResponse:
+        return FileResponse(STATIC_DIR / "favicon.svg", media_type="image/svg+xml",
+                            headers={"Cache-Control": "public, max-age=604800"})
+
+    @app.get("/app")
+    @app.get("/app/{_path:path}")
+    def spa(_path: str = "") -> FileResponse:
+        return FileResponse(_INDEX, headers={"Cache-Control": "no-cache"})
