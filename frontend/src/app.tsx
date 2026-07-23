@@ -5,6 +5,7 @@ import { Editor } from './components/Editor'
 import { Viewer } from './components/Viewer'
 import { Chat } from './components/Chat'
 import { Timeline } from './components/Timeline'
+import { Account } from './components/Account'
 
 export function App() {
   const init = useStore((s) => s.init)
@@ -50,6 +51,7 @@ export function App() {
             style="display:none"
             onChange={onFile}
           />
+          <Account />
         </div>
       </header>
       <div class="workspace">

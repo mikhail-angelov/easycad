@@ -12,9 +12,10 @@ services:
       - ./.env
     environment:
       - EASYCAD_WORKER_URL=http://worker:8853
-      - EASYCAD_SESSION_FILE=/data/session.json
+      - EASYCAD_DB_PATH=/data/easycad.db      # accounts + settings (SPEC13)
+      - EASYCAD_SECURE_COOKIES=1
     volumes:
-      - ./data:/data     # session autosave persists here
+      - ./data:/data     # accounts DB persists here (CAD sessions are in-memory)
     labels:
       monic.enabled: "true"
       monic.check: "http"

@@ -83,14 +83,15 @@ def resolve_model(provider: str, model: str | None) -> str:
     return model or PROVIDERS[provider]["default_model"]
 
 
-def make_client(provider: str) -> OpenAI:
+def make_client(provider: str, api_key: str | None = None) -> OpenAI:
     if provider not in PROVIDERS:
         raise LLMError(f"Unknown provider: {provider}")
     cfg = PROVIDERS[provider]
-    api_key = os.getenv(cfg["api_key_env"])
-    if not api_key:
-        raise LLMError(f"{cfg['api_key_env']} is not set in the environment/.env")
-    return OpenAI(base_url=cfg["base_url"], api_key=api_key)
+    # BYOK: a caller-supplied key wins; env is only a local/dev fallback.
+    key = api_key or os.getenv(cfg["api_key_env"])
+    if not key:
+        raise LLMError(f"No API key for provider '{provider}'. Add your key in settings.")
+    return OpenAI(base_url=cfg["base_url"], api_key=key)
 
 
 def strip_markdown_fences(text: str) -> str:
@@ -107,13 +108,14 @@ def generate_code(
     provider: str = DEFAULT_PROVIDER,
     model: str | None = None,
     temperature: float = 0.2,
+    api_key: str | None = None,
 ) -> str:
     """Ask the LLM to append the requested modification to `current_code`.
 
     A higher `temperature` yields more varied output — used to generate several
     distinct candidates for the retry-with-variations flow.
     """
-    client = make_client(provider)
+    client = make_client(provider, api_key)
     resolved = resolve_model(provider, model)
     user_msg = (
         f"Current CadQuery code:\n```python\n{current_code}\n```\n\n"

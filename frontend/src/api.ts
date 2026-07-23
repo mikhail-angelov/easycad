@@ -14,12 +14,25 @@ export interface Step {
   created_at: number
 }
 
+export interface AuthInfo {
+  authenticated: boolean
+  email: string | null
+}
+
+export interface SettingsInfo {
+  provider: string
+  model: string | null
+  has_key: boolean
+}
+
 export interface SessionPayload {
   current_id: number | null
   current: Step | null
   steps: Step[]
   providers: Record<string, string>
   default_provider: string
+  auth: AuthInfo
+  settings: SettingsInfo
 }
 
 export interface StepResult {
@@ -61,17 +74,21 @@ export interface VariationsResponse {
   candidates: Candidate[]
 }
 
-async function post<T>(url: string, body: unknown): Promise<T> {
+async function send<T>(method: string, url: string, body?: unknown): Promise<T> {
   const res = await fetch(url, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify(body),
+    method,
+    headers: body === undefined ? undefined : { 'Content-Type': 'application/json' },
+    body: body === undefined ? undefined : JSON.stringify(body),
   })
   if (!res.ok) {
     const detail = await res.json().catch(() => ({ detail: res.statusText }))
     throw new Error(detail.detail ?? `Request failed: ${res.status}`)
   }
   return res.json()
+}
+
+function post<T>(url: string, body: unknown): Promise<T> {
+  return send<T>('POST', url, body)
 }
 
 export const api = {
@@ -125,4 +142,16 @@ export const api = {
   exportProjectUrl: (): string => '/api/project/export',
 
   importProject: (project: unknown): Promise<SessionPayload> => post('/api/project/import', project),
+
+  // ── Auth & settings (SPEC13) ──
+  me: (): Promise<AuthInfo & { settings: SettingsInfo }> => fetch('/api/auth/me').then((r) => r.json()),
+
+  login: (email: string): Promise<{ ok: boolean }> => post('/api/auth/login', { email }),
+
+  logout: (): Promise<{ ok: boolean }> => post('/api/auth/logout', {}),
+
+  deleteAccount: (): Promise<{ ok: boolean }> => send('DELETE', '/api/auth/me'),
+
+  saveSettings: (patch: { provider?: string; model?: string; key?: string }): Promise<SettingsInfo> =>
+    send('PUT', '/api/settings', patch),
 }

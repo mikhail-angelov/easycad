@@ -89,6 +89,51 @@ body {
   gap: 16px;
 }
 
+/* ── Account / settings panel (SPEC13) ───────────────────── */
+.account {
+  position: relative;
+}
+.account-panel {
+  position: absolute;
+  right: 0;
+  top: calc(100% + 8px);
+  z-index: 20;
+  width: 260px;
+  padding: 14px;
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+  background: var(--paper, #f7f4ee);
+  border: 1px solid rgba(0, 0, 0, 0.15);
+  border-radius: 8px;
+  box-shadow: 0 8px 28px rgba(0, 0, 0, 0.18);
+}
+.account-section {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.account-title {
+  font-weight: 600;
+  font-size: 13px;
+}
+.account-panel input {
+  padding: 7px 9px;
+  border: 1px solid rgba(0, 0, 0, 0.2);
+  border-radius: 6px;
+  font: inherit;
+}
+.account-note {
+  font-size: 12px;
+  opacity: 0.8;
+}
+.account-note.dim {
+  opacity: 0.55;
+}
+.text-button.danger {
+  color: var(--rust, #b4462f);
+}
+
 /* ── Workspace: three panels ─────────────────────────────── */
 .workspace {
   flex: 1 1 auto;

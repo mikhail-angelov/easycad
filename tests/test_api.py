@@ -1,19 +1,13 @@
 """API wiring tests using FastAPI TestClient.
 
-Covers the non-LLM paths (session bootstrap, execute, manual step, revert,
-export). The /api/chat path needs a live provider and is not exercised here.
-Requires cadquery (run with the .venv-poc interpreter).
+Multi-tenant (SPEC13): each TestClient has its own cookie jar → its own
+in-memory session. Covers the non-LLM paths. The /api/chat path needs a live
+provider and is not exercised here. Requires cadquery (.venv-poc interpreter).
 """
-
-import base64
 
 from fastapi.testclient import TestClient
 
-from app.main import app, store
-
-
-def setup_function():
-    store.reset()
+from app.main import app
 
 
 def test_session_bootstrap_creates_initial_step():
@@ -24,17 +18,21 @@ def test_session_bootstrap_creates_initial_step():
     assert data["steps"][0]["kind"] == "initial"
     assert data["current"]["success"] is True
     assert "deepseek" in data["providers"]
+    assert data["auth"]["authenticated"] is False
+    assert data["settings"]["has_key"] is False
 
 
 def test_execute_endpoint_is_stateless():
     client = TestClient(app)
+    client.get("/api/session")  # step 0
     body = {"code": "import cadquery as cq\nresult = cq.Workplane('XY').box(10, 10, 10)\n"}
     res = client.post("/api/execute", json=body).json()
     assert res["success"]
     assert res["stl_base64"]
     assert "Size: 10.0 x 10.0 x 10.0 mm" in res["geometry_info"]
-    # /api/execute is stateless — it must not record a step.
-    assert store.all() == []
+    # /api/execute is stateless — no new step recorded (still just the initial).
+    steps = client.get("/api/steps").json()
+    assert len(steps) == 1
 
 
 def test_execute_manual_creates_step_and_export_works():
@@ -70,5 +68,16 @@ def test_failed_manual_step_does_not_advance_current():
     out = client.post("/api/execute-manual", json={"code": "not valid python"}).json()
     assert out["step"]["success"] is False
     assert out["step"]["error"]
-    # current stays on the last good step (0), failed step recorded but not current.
     assert out["session"]["current_id"] == 0
+
+
+def test_two_clients_have_independent_sessions():
+    a = TestClient(app)
+    b = TestClient(app)
+    a.get("/api/session")
+    a.post("/api/execute-manual", json={"code": "import cadquery as cq\nresult = cq.Workplane('XY').box(8, 8, 8)\n"})
+    # b's session is untouched by a's manual step.
+    b_data = b.get("/api/session").json()
+    assert len(b_data["steps"]) == 1
+    a_data = a.get("/api/session").json()
+    assert len(a_data["steps"]) == 2

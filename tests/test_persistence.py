@@ -1,12 +1,13 @@
-"""Tests for session autosave/resume and project file export/import."""
+"""Tests for the store project roundtrip and project file export/import.
 
-import json
+SPEC13 removed server-side session autosave/resume; export/import is now the
+user's own persistence path.
+"""
 
 import pytest
 from fastapi.testclient import TestClient
 
-import app.main as m
-from app.main import app, store
+from app.main import app
 from app.store import SessionStore
 
 BOX = "import cadquery as cq\nresult = cq.Workplane('XY').box({s},{s},{s})\n"
@@ -24,7 +25,6 @@ def test_store_project_roundtrip():
     assert [x.id for x in s2.all()] == [0, 1]
     assert s2.current_id == 1
     assert s2.current().code == "c1"
-    # New ids must continue after the max imported id.
     assert s2.add(kind="chat", code="c2", success=True).id == 2
 
 
@@ -50,7 +50,6 @@ def test_export_then_import_roundtrip():
         assert "stl_base64" not in st
         assert "code" in st
 
-    store.reset()
     imported = client.post("/api/project/import", json=proj).json()
     assert len(imported["steps"]) == n_steps
     assert imported["current_id"] == proj["current_id"]
@@ -61,27 +60,20 @@ def test_import_rejects_invalid_project():
     assert client.post("/api/project/import", json={"garbage": True}).status_code == 400
 
 
-def test_autosave_and_resume():
-    client = TestClient(app)
-    client.get("/api/session")
-    client.post("/api/execute-manual", json={"code": BOX.format(s=9)})
-
-    assert m.AUTOSAVE.exists()
-    saved = json.loads(m.AUTOSAVE.read_text())
-    assert len(saved["steps"]) == 2
-
-    # Simulate a server restart: clear memory, then a fresh request should
-    # resume from disk rather than start a new single-step session.
-    store.reset()
-    resumed = client.get("/api/session").json()
-    assert len(resumed["steps"]) == 2
-
-
-def test_reset_starts_fresh_not_resume():
+def test_reset_starts_fresh():
     client = TestClient(app)
     client.get("/api/session")
     client.post("/api/execute-manual", json={"code": BOX.format(s=5)})
-    # Reset must NOT reload the autosaved 2-step session.
     fresh = client.post("/api/session/reset").json()
     assert len(fresh["steps"]) == 1
     assert fresh["steps"][0]["kind"] == "initial"
+
+
+def test_no_working_state_file_is_written(tmp_path, monkeypatch):
+    # SPEC13: sessions are memory-only. Building a session must not create any
+    # file under a (hypothetical) session dir.
+    client = TestClient(app)
+    client.get("/api/session")
+    client.post("/api/execute-manual", json={"code": BOX.format(s=6)})
+    # The accounts DB may exist, but no per-session json file should.
+    assert not (tmp_path / "session.json").exists()

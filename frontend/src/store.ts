@@ -61,8 +61,16 @@ interface State {
   selectedVariation: number | null
   busy: boolean
   error: string | null
+  authenticated: boolean
+  email: string | null
+  hasKey: boolean
+  authMessage: string | null
 
   init: () => Promise<void>
+  login: (email: string) => Promise<void>
+  logout: () => Promise<void>
+  saveKey: (key: string) => Promise<void>
+  deleteAccount: () => Promise<void>
   setCode: (code: string) => void
   setProvider: (provider: string) => void
   setModel: (model: string) => void
@@ -156,13 +164,74 @@ export const useStore = create<State>((set, get) => {
     selectedVariation: null,
     busy: false,
     error: null,
+    authenticated: false,
+    email: null,
+    hasKey: false,
+    authMessage: null,
 
     async init() {
       set({ busy: true, error: null })
       try {
         const session = await api.session()
         applySession(session)
-        set({ provider: session.default_provider, chatLog: chatLogFromSteps(session.steps) })
+        set({
+          provider: session.settings.provider || session.default_provider,
+          model: session.settings.model ?? '',
+          authenticated: session.auth.authenticated,
+          email: session.auth.email,
+          hasKey: session.settings.has_key,
+          chatLog: chatLogFromSteps(session.steps),
+        })
+      } catch (e) {
+        set({ error: String(e) })
+      } finally {
+        set({ busy: false })
+      }
+    },
+
+    async login(email) {
+      set({ busy: true, error: null, authMessage: null })
+      try {
+        await api.login(email)
+        set({ authMessage: 'Мы отправили ссылку для входа на ' + email })
+      } catch (e) {
+        set({ error: String(e) })
+      } finally {
+        set({ busy: false })
+      }
+    },
+
+    async logout() {
+      set({ busy: true, error: null })
+      try {
+        await api.logout()
+        const me = await api.me()
+        set({ authenticated: false, email: null, hasKey: me.settings.has_key, authMessage: null })
+      } catch (e) {
+        set({ error: String(e) })
+      } finally {
+        set({ busy: false })
+      }
+    },
+
+    async saveKey(key) {
+      const { provider, model } = get()
+      set({ busy: true, error: null })
+      try {
+        const s = await api.saveSettings({ provider, model: model || undefined, key })
+        set({ hasKey: s.has_key })
+      } catch (e) {
+        set({ error: String(e) })
+      } finally {
+        set({ busy: false })
+      }
+    },
+
+    async deleteAccount() {
+      set({ busy: true, error: null })
+      try {
+        await api.deleteAccount()
+        set({ authenticated: false, email: null, hasKey: false, authMessage: null })
       } catch (e) {
         set({ error: String(e) })
       } finally {

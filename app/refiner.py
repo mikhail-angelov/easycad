@@ -134,9 +134,10 @@ def triage(
     current_code: str,
     provider: str = DEFAULT_PROVIDER,
     model: str | None = None,
+    api_key: str | None = None,
 ) -> TriageResult:
     """Classify a user request against the current model (one LLM call)."""
-    client = make_client(provider)
+    client = make_client(provider, api_key)
     resolved = resolve_model(provider, model)
     user_msg = (
         f"Current CadQuery code (with geometry info):\n```python\n{current_code}\n```\n\n"
