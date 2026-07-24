@@ -1,7 +1,7 @@
 import { useStore, useT } from '../store'
 
 // Codes we have localized copy for; anything else falls back to the server text.
-const LOCALIZED = new Set(['trial_exhausted_anon', 'trial_exhausted_user'])
+const LOCALIZED = new Set(['trial_exhausted_anon', 'trial_exhausted_user', 'trial_budget_exhausted'])
 
 // Orange warning banner (SPEC14) — distinct from the red generation error.
 // Driven by the store's `notice`, set from coded API errors (trial exhaustion).

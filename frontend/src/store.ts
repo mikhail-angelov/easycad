@@ -18,7 +18,7 @@ export interface Notice {
   code: string | null
 }
 
-const TRIAL_CODES = new Set(['trial_exhausted_anon', 'trial_exhausted_user'])
+const TRIAL_CODES = new Set(['trial_exhausted_anon', 'trial_exhausted_user', 'trial_budget_exhausted'])
 
 export interface ChatEntry {
   id: number
@@ -82,6 +82,7 @@ interface State {
   variations: Variations | null
   selectedVariation: number | null
   busy: boolean
+  busyKind: 'gen' | null // 'gen' = an LLM generation is running (staged progress)
   error: string | null
   notice: Notice | null
   accountOpen: boolean
@@ -153,7 +154,7 @@ export const useStore = create<State>((set, get) => {
   // Core chat round-trip shared by send / confirm / proceed-anyway.
   async function doChat(prompt: string, autoRefine: boolean, refinedOverride?: string) {
     const { code, provider, model } = get()
-    set({ busy: true, error: null, notice: null })
+    set({ busy: true, busyKind: 'gen', error: null, notice: null })
     try {
       const res = await api.chat(prompt, code, provider, model || undefined, autoRefine, refinedOverride)
       set({ steps: res.session.steps, currentId: res.session.current_id })
@@ -188,7 +189,7 @@ export const useStore = create<State>((set, get) => {
     } catch (e) {
       reportError(e)
     } finally {
-      set({ busy: false })
+      set({ busy: false, busyKind: null })
     }
   }
 
@@ -212,6 +213,7 @@ export const useStore = create<State>((set, get) => {
     variations: null,
     selectedVariation: null,
     busy: false,
+    busyKind: null,
     error: null,
     notice: null,
     accountOpen: false,
@@ -368,7 +370,7 @@ export const useStore = create<State>((set, get) => {
 
     async sendVariations(prompt) {
       const { code, provider, model, autoRefine } = get()
-      set({ busy: true, error: null, notice: null, pending: null, proposal: null, invalidNotice: null, variations: null, selectedVariation: null })
+      set({ busy: true, busyKind: 'gen', error: null, notice: null, pending: null, proposal: null, invalidNotice: null, variations: null, selectedVariation: null })
       try {
         const res = await api.variations(prompt, code, provider, model || undefined, autoRefine)
         if (res.action === 'clarify') {
@@ -390,7 +392,7 @@ export const useStore = create<State>((set, get) => {
       } catch (e) {
         reportError(e)
       } finally {
-        set({ busy: false })
+        set({ busy: false, busyKind: null })
       }
     },
 

@@ -18,9 +18,10 @@ import pytest
 @pytest.fixture(autouse=True)
 def _isolate():
     import app.main as m
-    from app import db
+    from app import db, metrics
 
     m.registry.clear()
     m.limiter.reset()
     db._reset_for_tests()
+    metrics._reset_for_tests()
     yield

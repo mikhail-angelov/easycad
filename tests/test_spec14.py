@@ -238,6 +238,209 @@ def test_variations_echoes_trial_remaining(monkeypatch):
     assert body["trial_remaining"] == 0  # the one anon grant was just spent
 
 
+# ── Cost controls (launch hardening) ───────────────────────────────────────────
+
+
+def test_daily_budget_kill_switch(monkeypatch):
+    _stub_llm(monkeypatch)
+    monkeypatch.setattr(m, "TRIAL_DAILY_BUDGET", 1)
+    m._budget_state.update(day="", used=0)  # reset for the test
+    client = TestClient(app)
+    # First trial generation spends the single unit of daily budget.
+    assert _chat(client, ip="20.0.0.1").status_code == 200
+    # A different identity still has personal trial left, but the global budget
+    # is spent → paused with the budget code (not per-user exhaustion).
+    r = _chat(client, ip="20.0.0.2")
+    assert r.status_code == 402
+    assert r.json()["detail"]["code"] == "trial_budget_exhausted"
+
+
+def test_ip_rate_limit_survives_cookie_rotation(monkeypatch):
+    _stub_llm(monkeypatch)
+    monkeypatch.setattr(m, "GEN_RATE_LIMIT_IP", 2)  # read from the module, not env
+    m.limiter.reset()
+    # Fresh client each call = a fresh session cookie, but the same IP.
+    codes = []
+    for _ in range(4):
+        c = TestClient(app)
+        codes.append(_chat(c, ip="21.0.0.9").status_code)
+    # Per-session limit would let all through; the per-IP cap trips regardless.
+    assert 429 in codes
+
+
+def test_concurrency_slot_rejects_when_full(monkeypatch):
+    import threading
+
+    monkeypatch.setattr(m, "_gen_semaphore", threading.BoundedSemaphore(1))
+    # Occupy the only slot, then a request must get 503.
+    assert m._gen_semaphore.acquire(blocking=False) is True
+    try:
+        client = TestClient(app)
+        r = _chat(client, ip="22.0.0.1")
+        assert r.status_code == 503
+    finally:
+        m._gen_semaphore.release()
+
+
+# ── Cost-cap hardening (review follow-up) ──────────────────────────────────────
+
+
+def test_refine_reserves_daily_budget(monkeypatch):
+    # /api/refine spends the operator key (triage) → it must now count against the
+    # daily budget, not slip through uncounted.
+    from app.refiner import TriageResult
+
+    monkeypatch.setattr(m, "triage", lambda *a, **k: TriageResult("ready"))
+    monkeypatch.setattr(m, "TRIAL_DAILY_BUDGET", 1)
+    m._budget_state.update(day="", used=0)
+    client = TestClient(app)
+    r1 = client.post("/api/refine", json={"prompt": "x"}, headers={"x-real-ip": "40.5.5.5"})
+    assert r1.status_code == 200  # one refine reserves the single budget unit
+    r2 = _chat(client, ip="40.5.5.6")  # different IP: personal grant ok, budget spent
+    assert r2.status_code == 402
+    assert r2.json()["detail"]["code"] == "trial_budget_exhausted"
+
+
+def test_execute_manual_respects_concurrency_cap(monkeypatch):
+    import threading
+
+    # The cap claims "LLM/worker" — manual worker execution must honour it too.
+    monkeypatch.setattr(m, "_gen_semaphore", threading.BoundedSemaphore(1))
+    assert m._gen_semaphore.acquire(blocking=False) is True
+    try:
+        client = TestClient(app)
+        r = client.post("/api/execute-manual", json={"code": BOX}, headers={"x-real-ip": "41.1.1.1"})
+        assert r.status_code == 503
+    finally:
+        m._gen_semaphore.release()
+
+
+def test_variations_failures_feed_metrics(monkeypatch):
+    from app import metrics
+
+    def boom(*a, **k):
+        raise m.LLMError("down")
+
+    monkeypatch.setattr(m, "generate_code", boom)
+    client = TestClient(app)
+    r = client.post(
+        "/api/variations",
+        json={"prompt": "x", "current_code": BOX, "count": 2, "auto_refine": False},
+        headers={"x-real-ip": "42.9.9.9"},
+    )
+    assert r.status_code == 200
+    snap = metrics.snapshot()
+    assert snap.get("gen_attempts", 0) >= 2  # variations counts attempts
+    assert snap.get("provider_errors", 0) >= 2  # ...and its provider failures
+
+
+def test_variations_charges_budget_per_candidate(monkeypatch):
+    # A variations turn makes up to N generate calls; each must charge the budget,
+    # so the cap can't be overshot by riding one reserved unit.
+    _stub_llm(monkeypatch)
+    monkeypatch.setattr(m, "TRIAL_DAILY_BUDGET", 2)
+    m._budget_state.update(day="", used=0)
+    client = TestClient(app)
+    r = client.post(
+        "/api/variations",
+        json={"prompt": "x", "current_code": BOX, "count": 4, "auto_refine": False},
+        headers={"x-real-ip": "43.1.1.1"},
+    )
+    assert r.status_code == 200
+    # Budget of 2 → only 2 candidates generated, then the loop stops.
+    assert len(r.json()["candidates"]) == 2
+    assert m._budget_state["used"] == 2
+
+
+def test_variations_budget_out_after_triage_returns_notice(monkeypatch):
+    # auto_refine eats the last budget unit on triage; no candidate can be made.
+    # Must surface trial_budget_exhausted, not a silent empty 200.
+    from app.refiner import TriageResult
+
+    _stub_llm(monkeypatch)
+    monkeypatch.setattr(m, "triage", lambda *a, **k: TriageResult("ready"))
+    monkeypatch.setattr(m, "TRIAL_DAILY_BUDGET", 1)
+    m._budget_state.update(day="", used=0)
+    client = TestClient(app)
+    r = client.post(
+        "/api/variations",
+        json={"prompt": "x", "current_code": BOX, "count": 3, "auto_refine": True},
+        headers={"x-real-ip": "44.2.2.2"},
+    )
+    assert r.status_code == 402
+    assert r.json()["detail"]["code"] == "trial_budget_exhausted"
+
+
+def test_lazy_stl_respects_concurrency_cap(monkeypatch):
+    import threading
+    import types
+
+    calls = {"n": 0}
+
+    def fake_exec(code):
+        calls["n"] += 1
+        return types.SimpleNamespace(success=False, stl_base64=None, geometry_info=None)
+
+    monkeypatch.setattr(m, "execute", fake_exec)
+    monkeypatch.setattr(m, "_gen_semaphore", threading.BoundedSemaphore(1))
+    step = types.SimpleNamespace(stl_base64=None, success=True, code="x", geometry_info=None)
+
+    m._gen_semaphore.acquire()  # occupy the only worker slot
+    try:
+        m._ensure_step_stl(step)
+        assert calls["n"] == 0  # at capacity → lazy restore skipped, no worker run
+    finally:
+        m._gen_semaphore.release()
+    m._ensure_step_stl(step)  # slot free now → it does run
+    assert calls["n"] == 1
+
+
+# ── Observability ──────────────────────────────────────────────────────────────
+
+
+def test_admin_stats_hidden_without_token(monkeypatch):
+    monkeypatch.setattr(m, "ADMIN_TOKEN", "s3cret")
+    client = TestClient(app)
+    assert client.get("/api/admin/stats").status_code == 404  # no token
+    assert client.get("/api/admin/stats", headers={"x-admin-token": "wrong"}).status_code == 404
+    r = client.get("/api/admin/stats", headers={"x-admin-token": "s3cret"})
+    assert r.status_code == 200
+    assert "counters" in r.json() and "budget_today" in r.json()
+
+
+def test_admin_stats_disabled_when_no_token(monkeypatch):
+    monkeypatch.setattr(m, "ADMIN_TOKEN", None)
+    client = TestClient(app)
+    assert client.get("/api/admin/stats", headers={"x-admin-token": "anything"}).status_code == 404
+
+
+def test_metrics_count_generation_and_spend(monkeypatch):
+    from app import metrics
+
+    _stub_llm(monkeypatch)
+    monkeypatch.setattr(m, "ADMIN_TOKEN", "tok")
+    client = TestClient(app)
+    assert _chat(client, ip="30.1.1.1").status_code == 200
+    snap = metrics.snapshot()
+    assert snap.get("gen_ok", 0) >= 1
+    assert snap.get("trial_spend", 0) >= 1  # operator-key spend recorded
+    assert snap.get("gen_ms_count", 0) >= 1
+    # And it surfaces through the admin endpoint.
+    body = client.get("/api/admin/stats", headers={"x-admin-token": "tok"}).json()
+    assert body["counters"]["gen_ok"] >= 1
+    assert body["avg_chat_gen_ms"] is not None
+
+
+def test_metrics_count_exhaustion(monkeypatch):
+    from app import metrics
+
+    _stub_llm(monkeypatch)
+    client = TestClient(app)
+    _chat(client, ip="30.2.2.2")  # spends the 1 anon grant
+    _chat(client, ip="30.2.2.2")  # exhausted
+    assert metrics.snapshot().get("exhausted_anon", 0) >= 1
+
+
 # ── DB helpers ─────────────────────────────────────────────────────────────────
 
 

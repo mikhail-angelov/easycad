@@ -71,20 +71,58 @@ a small surface — generate, modify, export — returning the CadQuery code + S
 
 ---
 
+## Community / sharing
+
+### Public model gallery — publish / browse / fork  · L
+**Why:** CAD work is private today (in-memory + personal export/import). A shared
+gallery — publish your model, discover others', fork and tune it for your own
+needs — turns the single-user tool into a community (Thingiverse-style) and
+drives reuse and growth.
+**What:**
+- **Publish** a project (the existing text-only step/code JSON + a rendered
+  thumbnail) to a durable public store, with title/description/tags.
+- **Browse & search** the gallery — by title, tags, author, popularity; preview
+  thumbnail + steps before opening.
+- **Fork & tune:** import a published model into your session as a new project,
+  then keep editing (leans on the existing project import + step model).
+**Open (decide later):** durable storage for published models — new DB tables
+and/or object storage for STL/thumbnails (CAD work is currently in-memory only,
+nothing but accounts is on disk); public/private visibility; **licensing &
+attribution**; moderation / abuse; thumbnail generation (render STL server- or
+client-side); a search index and tag taxonomy; fork lineage / versioning.
+
+---
+
+## Admin / operations
+
+### Admin panel — activity, system events, DB management  · L
+**Why:** No operator visibility today — can't see who's active, what the system
+is doing, or manage data without touching SQLite by hand.
+**What:**
+- **User activity:** accounts, trial usage (`trial_used` / `anon_trial`), last
+  seen, published models.
+- **System event log:** sign-ins, generations, failures, trial exhaustion, key
+  validation, provider errors — a structured event stream to watch health.
+- **DB management:** inspect/edit/delete users, reset trial counters, prune
+  `anon_trial`, moderate published gallery models.
+**Open (decide later):** **admin auth/role** — accounts are flat today (no role
+concept, SPEC13), so this needs an admin flag + protected, off-public routes
+(separate auth, IP allowlist); what to log + retention; custom panel vs. an
+off-the-shelf admin tool; distinct from the **Analytics** item above (that's
+product/marketing funnels; this is operational). Admin is high-privilege — keep
+it hardened and never on the public surface.
+
+---
+
 ## A. UX improvements
 
-### A1. Autofocus the chat input  · S
-**Why:** During testing, the first click on the input sometimes didn't focus it,
-so the typed prompt went nowhere ("empty send").
-**What:** Autofocus the chat textarea on mount and after each send/confirm so the
-user can always just type.
-
-### A2. Better progress feedback during LLM calls  · S–M
-**Why:** Triage → refine → generate → execute can take several seconds; today
-the only feedback is a disabled Send button showing "…".
+### A1. Better progress feedback during LLM calls  · S–M
+**Why:** Triage → refine → generate → execute can take several seconds (up to the
+120 s worker timeout); today the only feedback is a generic "Working…" overlay.
 **What:** A clearer inline "thinking…" state (which stage: triaging / generating /
 executing), so long waits don't feel frozen. (Requires per-stage signals, or at
-least a labeled spinner.)
+least a labeled spinner.) *Worth doing for a public launch — long silent waits
+read as "stuck".*
 
 ---
 

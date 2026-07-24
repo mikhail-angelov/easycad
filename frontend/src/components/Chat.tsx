@@ -34,7 +34,30 @@ export function Chat() {
   const setAutoRefine = useStore((s) => s.setAutoRefine)
   const error = useStore((s) => s.error)
   const lang = useStore((s) => s.lang)
+  const busyKind = useStore((s) => s.busyKind)
   const t = useT()
+
+  // Staged progress for LLM generations: since the server does triage → generate
+  // → execute inside one request, advance a plausible label by elapsed time so a
+  // long wait doesn't read as frozen. Non-generation waits keep a generic label.
+  const [genStage, setGenStage] = useState(0)
+  useEffect(() => {
+    if (!busy || busyKind !== 'gen') {
+      setGenStage(0)
+      return
+    }
+    const start = Date.now()
+    const id = setInterval(() => {
+      const elapsed = (Date.now() - start) / 1000
+      setGenStage(elapsed < 2.5 ? 0 : elapsed < 8 ? 1 : 2)
+    }, 400)
+    return () => clearInterval(id)
+  }, [busy, busyKind])
+
+  const overlayLabel =
+    busyKind === 'gen'
+      ? [t('chat.stageThinking'), t('chat.stageGenerating'), t('chat.stageBuilding')][genStage]
+      : t('chat.working')
 
   const models = providers[provider]?.models ?? []
   const onTrial = trialTier === 'anon' || trialTier === 'user'
@@ -109,7 +132,7 @@ export function Chat() {
       {busy && (
         <div class="chat-overlay" aria-live="polite">
           <span class="spinner" />
-          <span class="chat-overlay-label">{t('chat.working')}</span>
+          <span class="chat-overlay-label">{overlayLabel}</span>
         </div>
       )}
       <header>

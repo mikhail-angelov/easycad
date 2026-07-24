@@ -10,8 +10,10 @@ Users persist CAD work themselves via project export/import.
 import asyncio
 import base64
 import json
+import logging
 import os
 import secrets
+import threading
 import time
 from contextlib import asynccontextmanager
 from dataclasses import dataclass
@@ -23,7 +25,7 @@ from fastapi.responses import FileResponse, JSONResponse, RedirectResponse, Resp
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
 
-from . import db, jwt_utils
+from . import db, jwt_utils, metrics
 from .cadquery_exec import execute
 from .llm import (
     DEFAULT_PROVIDER,
@@ -64,6 +66,23 @@ TRIAL_USER = int(os.getenv("EASYCAD_TRIAL_USER", "10"))
 # the same background loop as sessions).
 ANON_TRIAL_TTL = float(os.getenv("EASYCAD_ANON_TRIAL_TTL", str(30 * 24 * 3600)))  # 30 days
 
+# ── Launch cost controls (SPEC14 hardening). 0 = disabled/unlimited. ──────────
+# Global kill-switch: cap operator-key TRIAL generations per (UTC) day, so a
+# traffic spike can't drain the shared DeepSeek key. Over budget → trial callers
+# are asked to add their own key.
+TRIAL_DAILY_BUDGET = int(os.getenv("EASYCAD_TRIAL_DAILY_BUDGET", "0"))
+# Per-IP generation rate (per minute) — closes the cookie-rotation bypass of the
+# per-session limit for the LLM endpoints.
+GEN_RATE_LIMIT_IP = int(os.getenv("EASYCAD_GEN_RATE_LIMIT_IP", "60"))
+# Max concurrent LLM/worker generation requests on this instance.
+MAX_INFLIGHT_GEN = int(os.getenv("EASYCAD_MAX_INFLIGHT_GEN", "0"))
+# Observability: shared token gating /api/admin/stats (unset → endpoint hidden).
+ADMIN_TOKEN = os.getenv("EASYCAD_ADMIN_TOKEN")
+# Optional ops address alerted (once/day) when the budget kill-switch trips.
+ALERT_EMAIL = os.getenv("EASYCAD_ALERT_EMAIL")
+
+log = logging.getLogger("easycad")
+
 # Input bounds (review C1) — reject oversized payloads before parsing/retention.
 MAX_BODY_BYTES = int(os.getenv("EASYCAD_MAX_BODY_BYTES", str(2_000_000)))  # 2 MB
 MAX_PROMPT = 20_000
@@ -75,6 +94,13 @@ load_dotenv(ROOT / ".env")
 
 registry = build_registry()
 limiter = RateLimiter()
+
+# Daily operator-budget counter (in-memory, single-instance per SPEC13; resets at
+# UTC midnight and on restart — fine for a soft cost kill-switch).
+_budget_lock = threading.Lock()
+_budget_state = {"day": "", "used": 0}
+# Non-blocking concurrency cap for generation endpoints (None = disabled).
+_gen_semaphore = threading.BoundedSemaphore(MAX_INFLIGHT_GEN) if MAX_INFLIGHT_GEN > 0 else None
 
 
 @asynccontextmanager
@@ -194,7 +220,34 @@ def _coded_error(status: int, code: str, message: str) -> HTTPException:
 
 
 def _provider_error(context: str, exc: Exception) -> HTTPException:
+    metrics.incr("provider_errors")
     return _coded_error(502, "provider_error", f"{context}: {exc}")
+
+
+_alert_lock = threading.Lock()
+_alert_day = ""
+
+
+def _budget_alert() -> None:
+    """Warn once per (UTC) day when the daily budget kill-switch trips: a log
+    line (alertable via the existing health monitor) + an optional ops email."""
+    global _alert_day
+    day = time.strftime("%Y-%m-%d", time.gmtime())
+    with _alert_lock:
+        if _alert_day == day:
+            return
+        _alert_day = day
+    log.warning("Daily trial budget (%s) exhausted — trials paused until UTC midnight.", TRIAL_DAILY_BUDGET)
+    if ALERT_EMAIL:
+        try:
+            send_mail(
+                ALERT_EMAIL,
+                "EasyCAD: daily trial budget exhausted",
+                f"The operator-key trial budget ({TRIAL_DAILY_BUDGET}/day) is spent; "
+                "trials are paused until UTC midnight. Users are asked to add their own key.",
+            )
+        except Exception:  # noqa: BLE001 — alerting must never break the request
+            log.warning("Budget-alert email failed")
 
 
 def _resolve_settings(session: Session) -> dict:
@@ -299,14 +352,19 @@ def _resolve_llm(session: Session, request: Request, req_provider: str | None, r
 
     trial = _trial_status(session, request)
     if trial.remaining and trial.remaining > 0:
-        # api_key stays None → make_client falls back to the operator env key.
+        # The daily budget is charged per operator-key LLM call at the call sites
+        # (via _charge_operator_call), not per turn — so variations' N generates
+        # can't overshoot the cap. api_key stays None → make_client falls back to
+        # the operator env key.
         return TRIAL_PROVIDER, TRIAL_MODEL, None, trial.ident
 
     if trial.tier == "user":
+        metrics.incr("exhausted_user")
         raise _coded_error(
             402, "trial_exhausted_user",
             f"You've used your {TRIAL_USER} free generations — add your LLM key to continue.",
         )
+    metrics.incr("exhausted_anon")
     raise _coded_error(
         402, "trial_exhausted_anon",
         f"Register for {TRIAL_USER} free generations, or add your own LLM key.",
@@ -327,10 +385,81 @@ def _client_ip(request: Request) -> str:
     return request.client.host if request.client else "unknown"
 
 
-def _gen_guard(session: Session) -> None:
+def _gen_guard(session: Session, request: Request | None = None) -> None:
     limit = int(os.getenv("EASYCAD_GEN_RATE_LIMIT", "30"))
     if not limiter.allow(f"gen:{session.id}", limit, 60):
         raise HTTPException(429, "Rate limit exceeded — slow down a moment.")
+    # LLM endpoints also cap per client IP, so rotating the session cookie can't
+    # bypass the per-session limit and burn the operator key (SPEC14 hardening).
+    if request is not None:
+        ip = _client_ip(request)
+        if not limiter.allow(f"genip:{ip}", GEN_RATE_LIMIT_IP, 60):
+            raise HTTPException(429, "Rate limit exceeded — slow down a moment.")
+
+
+def _trial_budget_reserve() -> bool:
+    """Atomically reserve one unit of today's operator-key budget, or return False
+    (without reserving) if the day is already spent. check + increment happen in a
+    SINGLE critical section, so concurrent trials cannot overshoot the cap — the
+    budget is a strict kill-switch, not a soft, race-able counter."""
+    if TRIAL_DAILY_BUDGET <= 0:
+        return True
+    day = time.strftime("%Y-%m-%d", time.gmtime())
+    with _budget_lock:
+        if _budget_state["day"] != day:
+            _budget_state.update(day=day, used=0)
+        if _budget_state["used"] >= TRIAL_DAILY_BUDGET:
+            return False
+        _budget_state["used"] += 1
+        return True
+
+
+def _charge_trial(trial_ident: "TrialIdent") -> None:
+    """Charge a successful trial generation to its per-identity grant (the
+    lifetime free-N counter). The operator daily budget is charged separately, per
+    LLM call, via `_charge_operator_call`."""
+    trial_ident.count()
+
+
+def _budget_exhausted_error() -> HTTPException:
+    metrics.incr("budget_exhausted")
+    _budget_alert()
+    return _coded_error(
+        402, "trial_budget_exhausted",
+        "Free generations are paused right now — add your LLM key to keep building.",
+    )
+
+
+def _charge_operator_call(trial_ident: "TrialIdent | None") -> bool:
+    """Reserve budget for ONE operator-key LLM call (a triage or a generate).
+
+    Charged per call — not per turn — so variations' up-to-4 generates plus a
+    triage cannot ride a single reserved unit past the daily cap. Returns True
+    when allowed (BYOK, or under the cap) and False when the cap is spent, so the
+    caller can raise (turn start) or stop (mid-batch). Also feeds `trial_spend`."""
+    if trial_ident is None:
+        return True  # BYOK — their key, their cost, no operator budget
+    if _trial_budget_reserve():
+        metrics.incr("trial_spend")
+        return True
+    return False
+
+
+def gen_slot():
+    """Cap concurrent LLM/worker generation requests globally (SPEC14 hardening).
+
+    Non-blocking: over capacity → 503 instead of piling work onto one instance.
+    Used as a dependency on the LLM endpoints; the slot is held for the request.
+    """
+    if _gen_semaphore is None:
+        yield
+        return
+    if not _gen_semaphore.acquire(blocking=False):
+        raise HTTPException(503, "Server is busy right now — try again in a moment.")
+    try:
+        yield
+    finally:
+        _gen_semaphore.release()
 
 
 # ── Request models ────────────────────────────────────────────────────────────
@@ -426,7 +555,17 @@ def _ensure_initial(store) -> None:
 def _ensure_step_stl(step) -> None:
     if step is None or step.stl_base64 or not step.success or not step.code:
         return
-    res = execute(step.code)
+    # Lazy STL restore also runs the worker, but from read paths (get step, export,
+    # session payload after import). Honour the concurrency cap so it can't be a
+    # bypass, but best-effort: if the worker is at capacity, skip rather than 503 a
+    # read — the client just gets the step without STL and can retry later.
+    if _gen_semaphore is not None and not _gen_semaphore.acquire(blocking=False):
+        return
+    try:
+        res = execute(step.code)
+    finally:
+        if _gen_semaphore is not None:
+            _gen_semaphore.release()
     if res.success:
         step.stl_base64 = res.stl_base64
         if res.geometry_info:
@@ -582,6 +721,31 @@ def validate_key(req: ValidateKeyRequest, request: Request, session: Session = D
     return {"ok": ok, "reason": reason}
 
 
+# ── Ops / observability ───────────────────────────────────────────────────────
+
+
+@app.get("/api/admin/stats")
+def admin_stats(request: Request) -> dict:
+    """Operator snapshot: counters, avg chat-generation latency, today's operator-
+    key budget, live session count. Gated by a shared token (`EASYCAD_ADMIN_TOKEN`);
+    hidden (404) unless the token is configured and matches, so it never leaks on
+    the public surface. High-privilege — keep the token off the client."""
+    if not ADMIN_TOKEN or request.headers.get("x-admin-token") != ADMIN_TOKEN:
+        raise HTTPException(404, "Not found")
+    counts = metrics.snapshot()
+    # Scoped, honestly named: this is the /api/chat generation-turn latency only —
+    # NOT triage, variations, manual execute, or lazy STL restore.
+    avg_ms = round(counts["gen_ms_total"] / counts["gen_ms_count"]) if counts.get("gen_ms_count") else None
+    with _budget_lock:
+        budget = {"day": _budget_state["day"], "used": _budget_state["used"], "limit": TRIAL_DAILY_BUDGET}
+    return {
+        "counters": counts,
+        "avg_chat_gen_ms": avg_ms,
+        "budget_today": budget,
+        "sessions_live": registry.count(),
+    }
+
+
 # ── CAD session endpoints ─────────────────────────────────────────────────────
 
 
@@ -621,7 +785,10 @@ def revert_step(step_id: int, request: Request, session: Session = Depends(locke
 
 
 @app.post("/api/execute")
-def api_execute(req: ExecuteRequest, session: Session = Depends(current_session)) -> dict:
+def api_execute(
+    req: ExecuteRequest,
+    session: Session = Depends(current_session), _slot: None = Depends(gen_slot),
+) -> dict:
     _gen_guard(session)
     res = execute(req.code)
     return {
@@ -634,7 +801,10 @@ def api_execute(req: ExecuteRequest, session: Session = Depends(current_session)
 
 
 @app.post("/api/execute-manual")
-def api_execute_manual(req: ExecuteRequest, request: Request, session: Session = Depends(locked_session)) -> dict:
+def api_execute_manual(
+    req: ExecuteRequest, request: Request,
+    session: Session = Depends(locked_session), _slot: None = Depends(gen_slot),
+) -> dict:
     _gen_guard(session)
     _check_capacity(session)
     res = execute(req.code)
@@ -651,13 +821,19 @@ def api_execute_manual(req: ExecuteRequest, request: Request, session: Session =
 
 
 @app.post("/api/refine")
-def api_refine(req: RefineRequest, request: Request, session: Session = Depends(current_session)) -> dict:
+def api_refine(
+    req: RefineRequest, request: Request,
+    session: Session = Depends(current_session), _slot: None = Depends(gen_slot),
+) -> dict:
     # Rate-limit like /api/chat: /api/refine also spends the operator key on a
     # trial (a triage LLM call), so without this an anonymous caller could hit it
     # unbounded — triage is uncounted by design, so the gate is the only bound.
-    _gen_guard(session)
+    _gen_guard(session, request)
     _ensure_initial(session.store)
-    provider, model, api_key, _trial = _resolve_llm(session, request, req.provider, req.model)
+    provider, model, api_key, trial_ident = _resolve_llm(session, request, req.provider, req.model)
+    # refine is one operator-key triage call on trial → charge the budget for it.
+    if not _charge_operator_call(trial_ident):
+        raise _budget_exhausted_error()
     try:
         t = triage(req.prompt, _base_code(session.store, req.current_code), provider, model, api_key)
     except LLMError as exc:
@@ -683,6 +859,10 @@ def _generate_and_step(
     api_key: str | None,
     trial_ident: TrialIdent | None,
 ) -> dict:
+    if not _charge_operator_call(trial_ident):
+        raise _budget_exhausted_error()
+    metrics.incr("gen_attempts")
+    _t0 = time.time()
     try:
         code = generate_code(base_code, gen_prompt, provider, model, api_key=api_key)
     except LLMError as exc:
@@ -694,9 +874,12 @@ def _generate_and_step(
     # is at the LLM call, and a per-execute gate would let bad-code prompts burn
     # operator tokens for free. See docs/CODE_REVIEW_HEAD.md (Spec #5).
     if trial_ident is not None:
-        trial_ident.count()
+        _charge_trial(trial_ident)
 
     res = execute(code)
+    metrics.incr("gen_ms_total", int((time.time() - _t0) * 1000))
+    metrics.incr("gen_ms_count")
+    metrics.incr("gen_ok" if res.success else "gen_exec_fail")
     step = session.store.add(
         kind="chat",
         original_prompt=original_prompt,
@@ -734,8 +917,11 @@ def _no_step(session: Session, request: Request, action: str, original_prompt: s
 
 
 @app.post("/api/chat")
-def api_chat(req: ChatRequest, request: Request, session: Session = Depends(locked_session)) -> dict:
-    _gen_guard(session)
+def api_chat(
+    req: ChatRequest, request: Request,
+    session: Session = Depends(locked_session), _slot: None = Depends(gen_slot),
+) -> dict:
+    _gen_guard(session, request)
     _check_capacity(session)
     _ensure_initial(session.store)
     base_code = _base_code(session.store, req.current_code)
@@ -748,6 +934,9 @@ def api_chat(req: ChatRequest, request: Request, session: Session = Depends(lock
             provider, model, api_key, trial_ident,
         )
 
+    # The triage call is a separate operator-key LLM call → charge it too.
+    if not _charge_operator_call(trial_ident):
+        raise _budget_exhausted_error()
     try:
         t = triage(req.prompt, base_code, provider, model, api_key)
     except LLMError as exc:
@@ -767,8 +956,11 @@ def api_chat(req: ChatRequest, request: Request, session: Session = Depends(lock
 
 
 @app.post("/api/variations")
-def api_variations(req: VariationsRequest, request: Request, session: Session = Depends(current_session)) -> dict:
-    _gen_guard(session)
+def api_variations(
+    req: VariationsRequest, request: Request,
+    session: Session = Depends(current_session), _slot: None = Depends(gen_slot),
+) -> dict:
+    _gen_guard(session, request)
     _ensure_initial(session.store)
     base_code = _base_code(session.store, req.current_code)
     provider, model, api_key, trial_ident = _resolve_llm(session, request, req.provider, req.model)
@@ -776,6 +968,8 @@ def api_variations(req: VariationsRequest, request: Request, session: Session = 
     gen_prompt = req.prompt
     refined_prompt: str | None = None
     if req.auto_refine:
+        if not _charge_operator_call(trial_ident):  # triage is an operator call
+            raise _budget_exhausted_error()
         try:
             t = triage(req.prompt, base_code, provider, model, api_key)
         except LLMError as exc:
@@ -793,14 +987,21 @@ def api_variations(req: VariationsRequest, request: Request, session: Session = 
     count = max(1, min(req.count, 4))
     candidates: list[dict] = []
     for _ in range(count):
+        # Charge each candidate as its own operator-key call; if the daily budget
+        # runs out mid-batch, stop and return the candidates already produced.
+        if not _charge_operator_call(trial_ident):
+            break
+        metrics.incr("gen_attempts")
         try:
             code = generate_code(base_code, gen_prompt, provider, model, temperature=0.7, api_key=api_key)
         except LLMError as exc:
+            metrics.incr("provider_errors")  # so variations feed the failure rate
             candidates.append(
                 {"code": None, "stl_base64": None, "geometry_info": None, "success": False, "error": str(exc)}
             )
             continue
         res = execute(code)
+        metrics.incr("gen_ok" if res.success else "gen_exec_fail")
         candidates.append({
             "code": res.code_with_geometry or code,
             "stl_base64": res.stl_base64,
@@ -809,11 +1010,17 @@ def api_variations(req: VariationsRequest, request: Request, session: Session = 
             "error": res.error,
         })
 
+    # Zero candidates can only happen when the budget ran out before the first
+    # generate (trial only — BYOK always makes ≥1). Surface the notice instead of
+    # a silent empty 200; a partial batch (≥1 candidate) still returns normally.
+    if not candidates:
+        raise _budget_exhausted_error()
+
     # One variations turn = one trial unit (like /api/chat), charged once if any
     # candidate's code was actually generated. Prevents unlimited free use of the
     # operator key via the ×N button before the first chat exhausts the grant.
     if trial_ident is not None and any(c["code"] for c in candidates):
-        trial_ident.count()
+        _charge_trial(trial_ident)
 
     # Echo the post-charge trial status so the client just applies it, rather than
     # re-implementing the "charge once if any candidate" rule (which could drift).
@@ -831,7 +1038,10 @@ def api_variations(req: VariationsRequest, request: Request, session: Session = 
 
 
 @app.post("/api/commit")
-def api_commit(req: CommitRequest, request: Request, session: Session = Depends(locked_session)) -> dict:
+def api_commit(
+    req: CommitRequest, request: Request,
+    session: Session = Depends(locked_session), _slot: None = Depends(gen_slot),
+) -> dict:
     _gen_guard(session)
     _check_capacity(session)
     res = execute(req.code)
