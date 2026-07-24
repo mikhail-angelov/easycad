@@ -153,10 +153,11 @@ Defence in depth for untrusted, LLM-generated code (hosted mode):
 - **Rolling session ("stay logged in"):** the session cookie has a 1-year expiry
   and is **re-issued on activity** (at most once/day) with a fresh expiry, so a
   returning user is never logged out; only a full year of inactivity ends it.
-- **BYOK key resolution** per generation: session settings (anonymous) → user DB
-  settings (authed) → server env fallback (disabled in SaaS via
-  `EASYCAD_REQUIRE_USER_KEY`). The key is used by the app to call the LLM and is
-  **never** passed to the worker.
+- **Key resolution** per generation (SPEC14): a saved BYOK key (user DB when
+  authed, in-memory session when anonymous) is used as-is; otherwise a free-trial
+  call runs on the operator's `DEEP_SEEK_KEY` (forced to `deepseek-chat`) until
+  the grant is spent, after which `/api/chat` returns 402 asking for a key. The
+  key is used by the app to call the LLM and is **never** passed to the worker.
 - **Anonymous vs authed settings:** anonymous settings live in the in-memory
   session (lost on TTL); authenticated settings persist in SQLite.
 
@@ -244,7 +245,7 @@ Components: cadquery_exec(RemoteExecutor), worker/main, code_guard, worker/limit
 | `MAIL_FROM`, `POST_SERVICE_URL`, `POST_USER`, `POST_PASS` | Magic-link email (SMTP) |
 | `EASYCAD_DB_PATH` | SQLite accounts DB path |
 | `EASYCAD_SESSION_TTL`, `EASYCAD_MAX_SESSIONS` | Session eviction / cap |
-| `EASYCAD_REQUIRE_USER_KEY` | SaaS: no server-key fallback |
+| `EASYCAD_TRIAL_ANON` / `EASYCAD_TRIAL_USER` | Free-trial generations on the operator key (default 1 / 10; both 0 disables) |
 | `EASYCAD_SECURE_COOKIES`, `EASYCAD_GEN_RATE_LIMIT` | Secure cookies; per-session generation rate |
 
 ---

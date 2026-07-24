@@ -1,5 +1,18 @@
 import { useEffect, useRef, useState } from 'preact/hooks'
 import { useStore } from '../store'
+import { Notice } from './Notice'
+
+// One-tap example prompts for the empty state — clicking one sends it, so a new
+// user gets a first result without facing a blank box. Each works on the default
+// 50×80×30 starting solid.
+const STARTER_PROMPTS = [
+  'Make it 10 mm thinner',
+  'Add a 6 mm hole in each corner',
+  'Round the top edges with a 3 mm fillet',
+  'Hollow it out with 2 mm walls',
+]
+
+const WELCOME_KEY = 'easycad_welcome_seen'
 
 export function Chat() {
   const chatLog = useStore((s) => s.chatLog)
@@ -21,16 +34,52 @@ export function Chat() {
   const busy = useStore((s) => s.busy)
   const provider = useStore((s) => s.provider)
   const providers = useStore((s) => s.providers)
-  const setProvider = useStore((s) => s.setProvider)
   const model = useStore((s) => s.model)
-  const setModel = useStore((s) => s.setModel)
+  const selectModel = useStore((s) => s.selectModel)
+  const hasKey = useStore((s) => s.hasKey)
+  const trialTier = useStore((s) => s.trialTier)
+  const trialRemaining = useStore((s) => s.trialRemaining)
   const autoRefine = useStore((s) => s.autoRefine)
   const setAutoRefine = useStore((s) => s.setAutoRefine)
   const error = useStore((s) => s.error)
 
+  const models = providers[provider]?.models ?? []
+  const onTrial = trialTier === 'anon' || trialTier === 'user'
+
   const [text, setText] = useState('')
+  const [showWelcome, setShowWelcome] = useState(() => {
+    try {
+      return localStorage.getItem(WELCOME_KEY) !== '1'
+    } catch {
+      return true
+    }
+  })
   const proposalRef = useRef<HTMLTextAreaElement>(null)
   const logRef = useRef<HTMLDivElement>(null)
+  const inputRef = useRef<HTMLTextAreaElement>(null)
+
+  // Autofocus the prompt box on mount so the user can just start typing.
+  useEffect(() => {
+    inputRef.current?.focus()
+  }, [])
+
+  const dismissWelcome = () => {
+    setShowWelcome(false)
+    try {
+      localStorage.setItem(WELCOME_KEY, '1')
+    } catch {
+      /* ignore */
+    }
+  }
+
+  const runStarter = (prompt: string) => {
+    if (busy) return
+    dismissWelcome()
+    sendChat(prompt)
+  }
+
+  // Show the empty-state coaching only before any conversation/flow has started.
+  const emptyState = chatLog.length === 0 && !pending && !proposal && !invalidNotice && !variations
 
   // Keep the latest message/prompt/proposal in view, like a normal chat.
   useEffect(() => {
@@ -80,27 +129,66 @@ export function Chat() {
             />
             refine
           </label>
-          <select value={provider} onChange={(e) => setProvider((e.target as HTMLSelectElement).value)}>
-            {Object.keys(providers).map((p) => (
-              <option value={p} key={p}>
-                {p}
-              </option>
-            ))}
-          </select>
-          <input
-            class="model-input"
-            type="text"
-            value={model}
-            placeholder={providers[provider] ?? 'model'}
-            title="Model override (blank = provider default)"
-            onInput={(e) => setModel((e.target as HTMLInputElement).value)}
-          />
+          {/* On trial the model is fixed (operator DeepSeek key); the picker is a
+              BYOK-only live control. On trial we show the remaining free count. */}
+          {hasKey ? (
+            <select
+              class="model-select"
+              value={model}
+              title={`Model (${provider})`}
+              disabled={busy}
+              onChange={(e) => selectModel((e.target as HTMLSelectElement).value)}
+            >
+              {models.map((mo) => (
+                <option value={mo} key={mo}>
+                  {mo}
+                </option>
+              ))}
+            </select>
+          ) : (
+            onTrial &&
+            trialRemaining != null && (
+              <span
+                class={`trial-pill ${trialRemaining <= 0 ? 'empty' : ''}`}
+                title={
+                  trialTier === 'anon'
+                    ? 'Free generations — no sign-up needed. Sign in for more.'
+                    : 'Free generations remaining on your account.'
+                }
+              >
+                {trialTier === 'anon' && trialRemaining > 0
+                  ? `${trialRemaining} free · no sign-up`
+                  : `${trialRemaining} free left`}
+              </span>
+            )
+          )}
         </div>
       </header>
 
       <div class="chat-log" ref={logRef}>
-        {chatLog.length === 0 && !pending && (
-          <p class="hint">Describe one change at a time — e.g. “add a 2 mm rim along the top edge”.</p>
+        {emptyState && (
+          <div class="empty-state">
+            {showWelcome && (
+              <div class="welcome">
+                <button class="welcome-dismiss" title="Dismiss" onClick={dismissWelcome}>
+                  ×
+                </button>
+                <div class="welcome-title">👋 Describe what you want to build</div>
+                <div class="welcome-body">
+                  Type a change and the model updates. No sign-up needed to try — your first
+                  build is free.
+                </div>
+              </div>
+            )}
+            <p class="hint">Describe one change at a time. Try one of these to start:</p>
+            <div class="starter-chips">
+              {STARTER_PROMPTS.map((p) => (
+                <button key={p} class="starter-chip" disabled={busy} onClick={() => runStarter(p)}>
+                  {p}
+                </button>
+              ))}
+            </div>
+          </div>
         )}
         {chatLog.map((e) => (
           <div class={`chat-entry ${e.ok ? 'ok' : 'fail'}`} key={e.id}>
@@ -210,10 +298,12 @@ export function Chat() {
         )}
       </div>
 
+      <Notice />
       {error && <div class="chat-error">{error}</div>}
 
       <div class="chat-input">
         <textarea
+          ref={inputRef}
           placeholder="Describe a change…"
           value={text}
           disabled={busy}

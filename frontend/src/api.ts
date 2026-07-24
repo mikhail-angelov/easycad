@@ -19,20 +19,36 @@ export interface AuthInfo {
   email: string | null
 }
 
+export interface ProviderInfo {
+  default_model: string
+  models: string[]
+  key_prefix: string
+}
+
+export type TrialTier = 'anon' | 'user' | 'byok'
+
 export interface SettingsInfo {
   provider: string
   model: string | null
   has_key: boolean
+  providers: Record<string, ProviderInfo>
+  trial_tier?: TrialTier
+  trial_remaining?: number | null
 }
 
 export interface SessionPayload {
   current_id: number | null
   current: Step | null
   steps: Step[]
-  providers: Record<string, string>
+  providers: Record<string, ProviderInfo>
   default_provider: string
   auth: AuthInfo
   settings: SettingsInfo
+}
+
+export interface ValidateKeyResult {
+  ok: boolean
+  reason: string | null
 }
 
 export interface StepResult {
@@ -72,6 +88,23 @@ export interface VariationsResponse {
   original_prompt: string
   refined_prompt: string | null
   candidates: Candidate[]
+  // Present on the 'generated' path: post-charge trial status, so the client
+  // applies it instead of re-deriving the "charge once" rule (SPEC14).
+  trial_tier?: TrialTier
+  trial_remaining?: number | null
+}
+
+// Error carrying the API's stable machine-readable `code` (SPEC14) so the store
+// can map code → orange notice vs. red error instead of matching on prose.
+export class ApiError extends Error {
+  code: string | null
+  status: number
+  constructor(message: string, code: string | null, status: number) {
+    super(message)
+    this.name = 'ApiError'
+    this.code = code
+    this.status = status
+  }
 }
 
 async function send<T>(method: string, url: string, body?: unknown): Promise<T> {
@@ -81,8 +114,17 @@ async function send<T>(method: string, url: string, body?: unknown): Promise<T> 
     body: body === undefined ? undefined : JSON.stringify(body),
   })
   if (!res.ok) {
-    const detail = await res.json().catch(() => ({ detail: res.statusText }))
-    throw new Error(detail.detail ?? `Request failed: ${res.status}`)
+    const parsed = await res.json().catch(() => null)
+    const detail = parsed?.detail
+    // Coded errors ship `{detail: {code, message}}`; plain ones `{detail: "…"}`.
+    if (detail && typeof detail === 'object') {
+      throw new ApiError(detail.message ?? `Request failed: ${res.status}`, detail.code ?? null, res.status)
+    }
+    throw new ApiError(
+      typeof detail === 'string' ? detail : `Request failed: ${res.status}`,
+      null,
+      res.status,
+    )
   }
   return res.json()
 }
@@ -154,4 +196,7 @@ export const api = {
 
   saveSettings: (patch: { provider?: string; model?: string; key?: string }): Promise<SettingsInfo> =>
     send('PUT', '/api/settings', patch),
+
+  validateKey: (provider: string, key: string): Promise<ValidateKeyResult> =>
+    post('/api/settings/validate-key', { provider, key }),
 }

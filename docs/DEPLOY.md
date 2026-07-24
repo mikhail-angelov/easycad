@@ -40,8 +40,12 @@ make install                        # scp .env.prod + compose to /opt/easycad
 make deploy                         # pull images, up -d
 ```
 
-`make install` also creates `/opt/easycad/data`, bind-mounted at `/data` for
-session autosave (`EASYCAD_SESSION_FILE=/data/session.json`).
+`make install` also creates `/opt/easycad/data`, bind-mounted at `/data` for the
+accounts DB (`EASYCAD_DB_PATH=/data/easycad.db`, SPEC13 — magic-link accounts +
+per-user settings). CAD working state is in-memory; nothing else touches disk.
+The `trial_used` column and `anon_trial` table (SPEC14) are migrated in place on
+first DB access when the new image boots — no manual step, additive and
+rollback-safe.
 
 ## Routine deploy
 

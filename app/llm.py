@@ -13,25 +13,73 @@ from openai import OpenAI
 
 # ── Providers (OpenAI-compatible) ────────────────────────────────────────────
 
+# Each entry additionally carries (SPEC14):
+#   - "models":     static allow-list surfaced in the BYOK model picker.
+#   - "key_prefix": expected API-key prefix, for fast client-side/server-side
+#                   validation before spending a live test call.
+# "ui": False keeps a provider usable in code/tests but hidden from the UI
+# dropdown (e.g. plain OpenAI is kept but not offered).
 PROVIDERS = {
     "deepseek": {
         "base_url": "https://api.deepseek.com",
         "api_key_env": "DEEP_SEEK_KEY",
         "default_model": "deepseek-chat",  # best results in POC
+        "models": ["deepseek-chat", "deepseek-reasoner"],
+        "key_prefix": "sk-",
+        "ui": True,
     },
     "openrouter": {
         "base_url": "https://openrouter.ai/api/v1",
         "api_key_env": "OPEN_ROUTER_KEY",
-        "default_model": "openai/gpt-4o-mini",
+        "default_model": "deepseek/deepseek-chat",  # DeepSeek is the default
+        "models": [
+            "deepseek/deepseek-chat",
+            "openai/gpt-4o-mini",
+            "anthropic/claude-sonnet-4.5",
+            "google/gemini-2.5-flash",
+        ],
+        "key_prefix": "sk-or-",
+        "ui": True,
     },
     "openai": {
         "base_url": "https://api.openai.com/v1",
         "api_key_env": "OPENAI_API_KEY",
         "default_model": "gpt-4o-mini",
+        "models": ["gpt-4o-mini", "gpt-4o"],
+        "key_prefix": "sk-",
+        "ui": False,  # kept in code, NOT surfaced in the UI dropdown
     },
 }
 
 DEFAULT_PROVIDER = "deepseek"
+
+# On trial, provider AND model are hard-forced to the operator's DeepSeek key so
+# nobody runs an expensive model on our dime (SPEC14).
+TRIAL_PROVIDER = "deepseek"
+TRIAL_MODEL = "deepseek-chat"
+
+
+def ui_providers() -> dict:
+    """Provider metadata surfaced to the frontend:
+    {name: {default_model, models, key_prefix}}. `key_prefix` lets the UI show a
+    correct placeholder without re-hardcoding the prefixes defined here."""
+    return {
+        name: {
+            "default_model": cfg["default_model"],
+            "models": cfg["models"],
+            "key_prefix": cfg["key_prefix"],
+        }
+        for name, cfg in PROVIDERS.items()
+        if cfg.get("ui")
+    }
+
+
+def key_prefix_ok(provider: str, key: str) -> bool:
+    """Cheap format check: does `key` start with the provider's expected prefix?"""
+    cfg = PROVIDERS.get(provider)
+    if not cfg:
+        return False
+    return key.startswith(cfg["key_prefix"])
 
 # ── Starting geometry ────────────────────────────────────────────────────────
 
@@ -107,6 +155,31 @@ def make_client(provider: str, api_key: str | None = None) -> OpenAI:
     if not key:
         raise LLMError(f"No API key for provider '{provider}'. Add your key in settings.")
     return OpenAI(base_url=cfg["base_url"], api_key=key)
+
+
+def validate_key_live(provider: str, key: str) -> tuple[bool, str | None]:
+    """Make a minimal, cheap completion to confirm the key works (SPEC14).
+
+    Returns (ok, reason). Auth/permission failures map to a friendly reason;
+    success returns (True, None). The caller is expected to have already passed
+    the cheap `key_prefix_ok` check and rate limiting before spending this call.
+    """
+    try:
+        client = make_client(provider, key)
+        client.chat.completions.create(
+            model=PROVIDERS[provider]["default_model"],
+            messages=[{"role": "user", "content": "ping"}],
+            max_tokens=1,
+            temperature=0,
+        )
+    except Exception as exc:  # noqa: BLE001 — normalize SDK/transport errors
+        status = getattr(exc, "status_code", None)
+        if status in (401, 403):
+            return False, f"Key rejected by {provider}."
+        # Anything else (network, rate limit on the provider, etc.) — surface it
+        # but do not claim the key is bad.
+        return False, f"Could not verify the key with {provider}: {exc}"
+    return True, None
 
 
 def strip_markdown_fences(text: str) -> str:

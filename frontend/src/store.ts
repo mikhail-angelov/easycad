@@ -1,5 +1,23 @@
 import { create } from 'zustand'
-import { api, type Candidate, type ClarifyQuestion, type SessionPayload, type Step } from './api'
+import {
+  ApiError,
+  api,
+  type Candidate,
+  type ClarifyQuestion,
+  type ProviderInfo,
+  type SessionPayload,
+  type Step,
+  type TrialTier,
+  type ValidateKeyResult,
+} from './api'
+
+// Orange warning banner (SPEC14), distinct from the red `error`.
+export interface Notice {
+  message: string
+  code: string | null
+}
+
+const TRIAL_CODES = new Set(['trial_exhausted_anon', 'trial_exhausted_user'])
 
 export interface ChatEntry {
   id: number
@@ -49,9 +67,11 @@ interface State {
   code: string // editor contents
   stlBase64: string | null // model currently shown in the viewer
   geometryInfo: string | null
-  providers: Record<string, string>
+  providers: Record<string, ProviderInfo>
   provider: string
   model: string
+  trialTier: TrialTier | null
+  trialRemaining: number | null
   autoRefine: boolean
   chatLog: ChatEntry[]
   pending: Pending | null
@@ -61,6 +81,8 @@ interface State {
   selectedVariation: number | null
   busy: boolean
   error: string | null
+  notice: Notice | null
+  accountOpen: boolean
   authenticated: boolean
   email: string | null
   hasKey: boolean
@@ -69,11 +91,13 @@ interface State {
   init: () => Promise<void>
   login: (email: string) => Promise<void>
   logout: () => Promise<void>
-  saveKey: (key: string) => Promise<void>
+  validateKey: (provider: string, key: string) => Promise<ValidateKeyResult>
+  saveKey: (provider: string, model: string, key: string) => Promise<void>
   deleteAccount: () => Promise<void>
   setCode: (code: string) => void
-  setProvider: (provider: string) => void
-  setModel: (model: string) => void
+  selectModel: (model: string) => Promise<void>
+  dismissNotice: () => void
+  setAccountOpen: (open: boolean) => void
   setAutoRefine: (on: boolean) => void
   sendChat: (prompt: string) => Promise<void>
   answerClarification: (answer: string) => Promise<void>
@@ -103,15 +127,34 @@ export const useStore = create<State>((set, get) => {
       stlBase64: cur?.stl_base64 ?? null,
       geometryInfo: cur?.geometry_info ?? null,
     })
+    applyTrial(session)
+  }
+
+  // Keep the trial tier/remaining fresh from any payload carrying settings.
+  function applyTrial(session: SessionPayload) {
+    set({
+      trialTier: session.settings.trial_tier ?? null,
+      trialRemaining: session.settings.trial_remaining ?? null,
+    })
+  }
+
+  // Map a thrown API error to either the orange trial notice or the red error.
+  function reportError(e: unknown) {
+    if (e instanceof ApiError && e.code && TRIAL_CODES.has(e.code)) {
+      set({ notice: { message: e.message, code: e.code } })
+    } else {
+      set({ error: e instanceof Error ? e.message : String(e) })
+    }
   }
 
   // Core chat round-trip shared by send / confirm / proceed-anyway.
   async function doChat(prompt: string, autoRefine: boolean, refinedOverride?: string) {
     const { code, provider, model } = get()
-    set({ busy: true, error: null })
+    set({ busy: true, error: null, notice: null })
     try {
       const res = await api.chat(prompt, code, provider, model || undefined, autoRefine, refinedOverride)
       set({ steps: res.session.steps, currentId: res.session.current_id })
+      applyTrial(res.session)
 
       if (res.action === 'clarify') {
         set({ pending: { originalPrompt: prompt, questions: res.questions } })
@@ -140,7 +183,7 @@ export const useStore = create<State>((set, get) => {
         set({ code: step.code, error: step.error })
       }
     } catch (e) {
-      set({ error: String(e) })
+      reportError(e)
     } finally {
       set({ busy: false })
     }
@@ -155,6 +198,8 @@ export const useStore = create<State>((set, get) => {
     providers: {},
     provider: 'deepseek',
     model: '',
+    trialTier: null,
+    trialRemaining: null,
     autoRefine: true,
     chatLog: [],
     pending: null,
@@ -164,6 +209,8 @@ export const useStore = create<State>((set, get) => {
     selectedVariation: null,
     busy: false,
     error: null,
+    notice: null,
+    accountOpen: false,
     authenticated: false,
     email: null,
     hasKey: false,
@@ -183,7 +230,7 @@ export const useStore = create<State>((set, get) => {
           chatLog: chatLogFromSteps(session.steps),
         })
       } catch (e) {
-        set({ error: String(e) })
+        reportError(e)
       } finally {
         set({ busy: false })
       }
@@ -195,7 +242,7 @@ export const useStore = create<State>((set, get) => {
         await api.login(email)
         set({ authMessage: 'We sent a sign-in link to ' + email })
       } catch (e) {
-        set({ error: String(e) })
+        reportError(e)
       } finally {
         set({ busy: false })
       }
@@ -206,22 +253,38 @@ export const useStore = create<State>((set, get) => {
       try {
         await api.logout()
         const me = await api.me()
-        set({ authenticated: false, email: null, hasKey: me.settings.has_key, authMessage: null })
+        set({
+          authenticated: false,
+          email: null,
+          hasKey: me.settings.has_key,
+          trialTier: me.settings.trial_tier ?? null,
+          trialRemaining: me.settings.trial_remaining ?? null,
+          authMessage: null,
+        })
       } catch (e) {
-        set({ error: String(e) })
+        reportError(e)
       } finally {
         set({ busy: false })
       }
     },
 
-    async saveKey(key) {
-      const { provider, model } = get()
+    validateKey(provider, key) {
+      return api.validateKey(provider, key)
+    },
+
+    async saveKey(provider, model, key) {
       set({ busy: true, error: null })
       try {
         const s = await api.saveSettings({ provider, model: model || undefined, key })
-        set({ hasKey: s.has_key })
+        set({
+          hasKey: s.has_key,
+          provider: s.provider,
+          model: s.model ?? '',
+          trialTier: s.trial_tier ?? null,
+          trialRemaining: s.trial_remaining ?? null,
+        })
       } catch (e) {
-        set({ error: String(e) })
+        reportError(e)
       } finally {
         set({ busy: false })
       }
@@ -233,15 +296,28 @@ export const useStore = create<State>((set, get) => {
         await api.deleteAccount()
         set({ authenticated: false, email: null, hasKey: false, authMessage: null })
       } catch (e) {
-        set({ error: String(e) })
+        reportError(e)
       } finally {
         set({ busy: false })
       }
     },
 
     setCode: (code) => set({ code }),
-    setProvider: (provider) => set({ provider, model: '' }),
-    setModel: (model) => set({ model }),
+
+    // Live model switch for a BYOK key: persist so generation actually uses it
+    // (the backend reads the saved model for BYOK calls).
+    async selectModel(model) {
+      set({ model })
+      if (!get().hasKey) return
+      try {
+        await api.saveSettings({ provider: get().provider, model })
+      } catch (e) {
+        reportError(e)
+      }
+    },
+
+    dismissNotice: () => set({ notice: null }),
+    setAccountOpen: (accountOpen) => set({ accountOpen }),
     setAutoRefine: (autoRefine) => set({ autoRefine }),
 
     async sendChat(prompt) {
@@ -278,7 +354,7 @@ export const useStore = create<State>((set, get) => {
 
     async sendVariations(prompt) {
       const { code, provider, model, autoRefine } = get()
-      set({ busy: true, error: null, pending: null, proposal: null, invalidNotice: null, variations: null, selectedVariation: null })
+      set({ busy: true, error: null, notice: null, pending: null, proposal: null, invalidNotice: null, variations: null, selectedVariation: null })
       try {
         const res = await api.variations(prompt, code, provider, model || undefined, autoRefine)
         if (res.action === 'clarify') {
@@ -289,11 +365,16 @@ export const useStore = create<State>((set, get) => {
           set({ invalidNotice: { originalPrompt: prompt, reason: res.reason ?? 'Inconsistent request.' } })
           return
         }
+        // Apply the server's post-charge trial status (no session payload here);
+        // the client does not re-derive the "charge once" rule (SPEC14).
+        if (res.trial_tier !== undefined) {
+          set({ trialTier: res.trial_tier, trialRemaining: res.trial_remaining ?? null })
+        }
         set({
           variations: { candidates: res.candidates, originalPrompt: prompt, refined: res.refined_prompt },
         })
       } catch (e) {
-        set({ error: String(e) })
+        reportError(e)
       } finally {
         set({ busy: false })
       }
@@ -334,7 +415,7 @@ export const useStore = create<State>((set, get) => {
           set({ code: step.code, stlBase64: step.stl_base64, geometryInfo: step.geometry_info })
         }
       } catch (e) {
-        set({ error: String(e) })
+        reportError(e)
       } finally {
         set({ busy: false })
       }
@@ -359,7 +440,7 @@ export const useStore = create<State>((set, get) => {
           set({ error: step.error })
         }
       } catch (e) {
-        set({ error: String(e) })
+        reportError(e)
       } finally {
         set({ busy: false })
       }
@@ -370,7 +451,7 @@ export const useStore = create<State>((set, get) => {
       try {
         applySession(await api.revert(stepId))
       } catch (e) {
-        set({ error: String(e) })
+        reportError(e)
       } finally {
         set({ busy: false })
       }
@@ -382,7 +463,7 @@ export const useStore = create<State>((set, get) => {
         applySession(await api.reset())
         set({ chatLog: [], pending: null, proposal: null, invalidNotice: null, variations: null, selectedVariation: null })
       } catch (e) {
-        set({ error: String(e) })
+        reportError(e)
       } finally {
         set({ busy: false })
       }

@@ -1,4 +1,4 @@
-.PHONY: run build install deploy
+.PHONY: run build install deploy release
 
 PYTHON ?= .venv-poc/bin/python
 LOCAL_ENV = CADQUERY_WORKER_TIMEOUT_SECONDS=120 XDG_CACHE_HOME=$(CURDIR)/.cache PYTHONDONTWRITEBYTECODE=1
@@ -29,3 +29,23 @@ deploy:
 	ssh root@$(HOST) "docker pull ghcr.io/mikhail-angelov/easycad-worker:latest"
 	ssh root@$(HOST) "cd /opt/easycad && docker compose down"
 	ssh root@$(HOST) "cd /opt/easycad && docker compose up -d"
+
+# ── release ──────────────────────────────────────────────────────────────────
+# Abort if the working tree is dirty, run tests + frontend build as a gate, then
+# bump the patch of the latest vX.Y.Z tag and push the branch commits AND the new
+# tag in a single push (CI builds the images on the tag). Requires a clean tree.
+release:
+	@[ -z "$$(git status --porcelain)" ] || { echo "✗ Uncommitted or untracked changes — commit/stash first:"; git status --short; exit 1; }
+	@echo "Running tests…"
+	$(LOCAL_ENV) $(PYTHON) -m pytest -q
+	@echo "Building frontend (→ static/)…"
+	npm run build
+	@latest=$$(git tag --list 'v*' --sort=-v:refname | head -n1); \
+	  latest=$${latest:-v0.0.0}; ver=$${latest#v}; \
+	  major=$${ver%%.*}; rest=$${ver#*.}; minor=$${rest%%.*}; patch=$${rest##*.}; \
+	  next="v$$major.$$minor.$$((patch + 1))"; \
+	  branch=$$(git rev-parse --abbrev-ref HEAD); \
+	  echo "Releasing $$latest → $$next on $$branch"; \
+	  git tag -a "$$next" -m "Release $$next"; \
+	  git push origin "$$branch" "$$next"; \
+	  echo "✓ Pushed $$branch + $$next"

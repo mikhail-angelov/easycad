@@ -42,9 +42,10 @@ This runs two containers: the **app** (web UI + API) and an isolated **worker**
 that executes the generated CadQuery code with no network access and strict
 resource limits. Your projects/settings persist in a `userdata` volume.
 
-> To make each user supply their own key instead of a shared server key, set
-> `EASYCAD_REQUIRE_USER_KEY=1` on the `app` service and users add their key after
-> signing in.
+> New visitors get a free trial on the operator's `DEEP_SEEK_KEY` (anonymous: 1
+> generation, signed-in: 10), then add their own key (BYOK). Tune with
+> `EASYCAD_TRIAL_ANON` / `EASYCAD_TRIAL_USER`; set both to `0` to require a key
+> from the start.
 
 ---
 
@@ -100,8 +101,8 @@ For frontend hot-reload during development, run `npm run dev` (Vite proxies
 
 | Variable | Purpose |
 |---|---|
-| `DEEP_SEEK_KEY` / `OPEN_ROUTER_KEY` | LLM provider key (server-side or dev fallback) |
-| `EASYCAD_REQUIRE_USER_KEY` | `1` = every user must bring their own key (BYOK) |
+| `DEEP_SEEK_KEY` / `OPEN_ROUTER_KEY` | LLM provider key (dev fallback; `DEEP_SEEK_KEY` also powers the free trial) |
+| `EASYCAD_TRIAL_ANON` / `EASYCAD_TRIAL_USER` | Free-trial generations on the operator key (default `1` / `10`; both `0` disables the trial) |
 | `EASYCAD_WORKER_URL` | Set → delegate execution to the worker (hosted); unset → local in-process |
 | `EASYCAD_LOCAL_GUARD` | `1` = run the AST safety check in local mode too |
 | `CADQUERY_WORKER_TIMEOUT_SECONDS` | Per-execution timeout (default 120) |

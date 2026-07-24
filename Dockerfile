@@ -19,7 +19,7 @@ COPY app ./app
 COPY static ./static
 
 # Trusted tier (no untrusted-code execution here — that's the worker). Runs as
-# root so it can write the mounted /data volume (session autosave). Isolation
-# of LLM-generated code lives entirely in worker/Dockerfile.
+# root so it can write the mounted /data volume (the accounts DB, SPEC13 — CAD
+# sessions are in-memory). Isolation of LLM-generated code lives in worker/Dockerfile.
 EXPOSE 8852
 CMD ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8852"]

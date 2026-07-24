@@ -70,8 +70,17 @@ def test_anon_settings_never_return_the_key():
 def test_user_settings_persist_in_db(monkeypatch):
     client = TestClient(app)
     _login(client, monkeypatch, "persist@example.com")
-    client.put("/api/settings", json={"provider": "openrouter", "key": "sk-user", "model": "x"})
-    assert client.get("/api/settings").json() == {"provider": "openrouter", "model": "x", "has_key": True}
+    client.put(
+        "/api/settings",
+        json={"provider": "openrouter", "key": "sk-user", "model": "openai/gpt-4o-mini"},
+    )
+    body = client.get("/api/settings").json()
+    assert body["provider"] == "openrouter"
+    assert body["model"] == "openai/gpt-4o-mini"
+    assert body["has_key"] is True
+    # SPEC14: a saved key ⇒ byok tier, unlimited (no trial remaining count).
+    assert body["trial_tier"] == "byok"
+    assert body["trial_remaining"] is None
 
     from app import db
     user = db.get_or_create_user("persist@example.com")

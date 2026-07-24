@@ -10,31 +10,24 @@ Legend — rough effort: **S** small (~<1h), **M** medium (a few hours), **L** l
 ## UI / i18n
 
 ### Bilingual UI (ru/en)  · M
-The UI chrome is currently English-only. Add a language toggle (ru/en) with an
-i18n string table, detect the initial language from the browser
-(`Accept-Language`), and persist the choice (per session; per user when signed
+The in-app chrome is currently English-only. Add a language toggle (ru/en) with
+an i18n string table, and persist the choice (per session; per user when signed
 in). The LLM already replies in the language of the user's prompt, so this is
-purely the static interface text (buttons, tooltips, panel labels, hints).
+purely the static interface text (buttons, tooltips, panel labels, hints). *(The
+static landing page already detects ru/en from the browser; this item is only
+the app UI.)*
 
 ---
 
-## A. UX improvements I proposed this session
+## A. UX improvements
 
-### A1. Make "resume" transparent — session banner + quick "New"  · M
-**Why:** With autosave/resume, opening the app silently continues the last
-session. This already caused confusion (a leftover test model appeared as the
-starting geometry, and a "first" prompt was applied on top of it).
-**What:** On load, show a small banner like *"Продолжена сессия (N шагов, изменена <дата>)"*
-with a one-click **New model** next to it, so the user always knows whether they
-are continuing or starting fresh.
-
-### A2. Autofocus the chat input  · S
+### A1. Autofocus the chat input  · S
 **Why:** During testing, the first click on the input sometimes didn't focus it,
 so the typed prompt went nowhere ("empty send").
 **What:** Autofocus the chat textarea on mount and after each send/confirm so the
 user can always just type.
 
-### A3. Better progress feedback during LLM calls  · S–M
+### A2. Better progress feedback during LLM calls  · S–M
 **Why:** Triage → refine → generate → execute can take several seconds; today
 the only feedback is a disabled Send button showing "…".
 **What:** A clearer inline "thinking…" state (which stage: triaging / generating /
@@ -43,16 +36,9 @@ least a labeled spinner.)
 
 ---
 
-## B. Persistence / project-format ideas I floated
+## B. Project-format ideas
 
-### B1. Multiple named sessions with a switcher  · L
-**Why:** P2-5 was intentionally scoped to a single autosaved session. The full
-SPEC11 vision is `~/.easycad/sessions/<id>/…` with list / resume / duplicate /
-delete.
-**What:** A session menu in the topbar (list, new, switch, rename, duplicate,
-delete), each session its own text-only project on disk.
-
-### B2. Export a project as a folder of per-step `.py` files  · M
+### B1. Export a project as a folder of per-step `.py` files  · M
 **Why:** The project is currently one JSON file. A folder of numbered CadQuery
 scripts (`step_00.py`, `step_01.py`, …) would be even more git-native and lets
 users open individual steps in any editor / run them standalone.
@@ -84,17 +70,26 @@ quick-pick of the proven example prompts (the 5-step POC sequence).
 
 ## D. Smaller / opportunistic
 
-### D1. Frontend code-splitting  · S
-The production bundle is ~3.1 MB (Monaco + three.js in one chunk). Lazy-load
-Monaco and/or the viewer to speed first paint. (Fine for a local app; matters if
-ever hosted.)
-
-### D2. Auto-migrate legacy project files  · S
-Old project/autosave files may still contain base64 STL and `\uXXXX`-escaped
+### D1. Auto-migrate legacy project files  · S
+Old exported project files may still contain base64 STL and `\uXXXX`-escaped
 text. They load fine and become clean text/UTF-8 on the next save — a one-shot
 "normalize on load" could make this explicit.
 
-### D3. Tune the refiner's "ready" verdict  · S
+### D2. Tune the refiner's "ready" verdict  · S
 Triage tends to pick `refine` even for already-precise prompts (it still adds a
 hint). Not harmful (the user confirms), but tuning it to return `ready` more
 often would skip an unnecessary confirmation step for expert users.
+
+### D3. Force the reply language explicitly (don't rely on "same language")  · S–M
+**Why:** The triage/refiner prompt asks the model to answer "in the SAME language
+as the request", but the model drifts — observed live: an **English** starter
+prompt ("Make it 10 mm thinner") came back with a **Russian** refined
+instruction. That's a wart exactly in the new-user onboarding flow (clicked an
+English chip, got Russian back).
+**What:** Determine the prompt language explicitly instead of leaving it to the
+model to infer, then inject it as a direct instruction (e.g. *"Write refined_prompt,
+questions and reason in <language>."*). Detection can be a cheap heuristic
+(unicode script / stop-words: Cyrillic → ru, else en) computed server-side and
+passed into `triage()` / `generate_code()`, or a first step where the model
+reports the detected language and we echo it back. Apply to both the refiner and
+any human-facing generator text.

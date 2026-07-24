@@ -370,6 +370,35 @@ result = cq.Workplane(<span class="c">"XY"</span>).box(WIDTH, DEPTH, HEIGHT)</di
 
 <hr class="rule">
 
+<section>
+  <div class="wrap">
+    <span class="eyebrow reveal" data-i18n="pricing.eyebrow">Начни бесплатно</span>
+    <h2 class="reveal" data-i18n="pricing.h2">Попробуй без ключа. Заведёшь свой — когда захочешь.</h2>
+    <p class="lead muted reveal" style="margin-top:22px" data-i18n="pricing.lead">Ничего не нужно настраивать, чтобы начать. Первые модели считаются на нашем
+      ключе — просто опиши деталь. Войдёшь во вкус — подключишь свой ключ и работаешь
+      без ограничений.</p>
+    <div class="cards">
+      <div class="card reveal">
+        <span class="n" data-i18n="tier1.n">01 · Гость</span>
+        <h3 data-i18n="tier1.h">1 модель бесплатно</h3>
+        <p data-i18n="tier1.p">Без регистрации и без ключа. Открой приложение, опиши деталь и получи результат — сразу.</p>
+      </div>
+      <div class="card reveal">
+        <span class="n" data-i18n="tier2.n">02 · Аккаунт</span>
+        <h3 data-i18n="tier2.h">10 моделей бесплатно</h3>
+        <p data-i18n="tier2.p">Войди по e-mail — и получи 10 бесплатных генераций на нашем ключе. Пароли не нужны, ссылка придёт на почту.</p>
+      </div>
+      <div class="card reveal">
+        <span class="n" data-i18n="tier3.n">03 · Свой ключ</span>
+        <h3 data-i18n="tier3.h">Без ограничений</h3>
+        <p data-i18n="tier3.p">Подключи ключ DeepSeek или OpenRouter — выбери провайдера и модель в пару кликов. Дальше платишь только своему провайдеру.</p>
+      </div>
+    </div>
+  </div>
+</section>
+
+<hr class="rule">
+
 <section class="close">
   <div class="wrap">
     <span class="eyebrow reveal" style="justify-content:center" data-i18n="close.eyebrow">Когда будешь готов</span>
@@ -436,6 +465,15 @@ result = cq.Workplane(<span class="c">"XY"</span>).box(WIDTH, DEPTH, HEIGHT)</di
       "dg.app": "APP", "dg.app2": "writes CadQuery", "dg.app3": "holds your key",
       "dg.wrk": "WORKER", "dg.wrk2": "runs geometry", "dg.wrk3": "no net · no key",
       "dg.seal": "SEALED",
+      "pricing.eyebrow": "Start free",
+      "pricing.h2": "Try it with no key. Bring your own whenever you like.",
+      "pricing.lead": "Nothing to set up to begin. Your first models run on our key — just describe a part. Once you're hooked, add your own key and work with no limits.",
+      "tier1.n": "01 · Guest", "tier1.h": "1 model free",
+      "tier1.p": "No signup, no key. Open the app, describe a part, and get the result — right away.",
+      "tier2.n": "02 · Account", "tier2.h": "10 models free",
+      "tier2.p": "Sign in by e-mail and get 10 free generations on our key. No passwords — a link lands in your inbox.",
+      "tier3.n": "03 · Your key", "tier3.h": "No limits",
+      "tier3.p": "Add a DeepSeek or OpenRouter key — pick provider and model in a couple of clicks. From there you only pay your own provider.",
       "close.eyebrow": "Ready when you are",
       "close.h2": "Describe your first part."
     }
@@ -594,9 +632,21 @@ result = cq.Workplane(<span class="c">"XY"</span>).box(WIDTH, DEPTH, HEIGHT)</di
   new MutationObserver(fireThemeHooks).observe(document.documentElement, { attributes: true, attributeFilter: ["data-theme"] });
   window.matchMedia("(prefers-color-scheme: dark)").addEventListener("change", fireThemeHooks);
 
-  var saved = "ru";
-  try { saved = localStorage.getItem("easycad_lang") || "ru"; } catch (e) {}
-  applyLang(saved);
+  function pickLang() {
+    // A visitor's explicit choice always wins.
+    try {
+      var stored = localStorage.getItem("easycad_lang");
+      if (stored === "ru" || stored === "en") return stored;
+    } catch (e) {}
+    // Otherwise follow the browser: Russian speakers get RU, everyone else EN.
+    var langs = navigator.languages || [navigator.language || "en"];
+    for (var i = 0; i < langs.length; i++) {
+      if (/^ru\b/i.test(langs[i])) return "ru";
+      if (/^en\b/i.test(langs[i])) return "en";
+    }
+    return "en";
+  }
+  applyLang(pickLang());
 })();
 </script>
 </body>
