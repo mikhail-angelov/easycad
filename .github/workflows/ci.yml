@@ -60,6 +60,21 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
+      # Skip the expensive worker rebuild (OCP/CadQuery layer) when none of its
+      # inputs changed. The worker image is built ONLY from these paths; anything
+      # else (frontend, other app code, docs) leaves it byte-identical.
+      # KEEP IN SYNC with the COPY lines in worker/Dockerfile — this list must
+      # mirror every file that image vendors in (worker/** + the shared app/*).
+      - name: Detect worker changes
+        uses: dorny/paths-filter@v3
+        id: changes
+        with:
+          filters: |
+            worker:
+              - 'worker/**'
+              - 'app/cq_worker.py'
+              - 'app/code_guard.py'
+
       # The app image bundles the built frontend (static/), so build it here too.
       - name: Setup Node
         uses: actions/setup-node@v4
@@ -126,6 +141,9 @@ jobs:
             type=raw,value=latest,enable=${{ github.ref == 'refs/heads/main' }}
 
       - name: Build & push worker image
+        # Build when the worker's own inputs changed, or always on a release tag
+        # (so vX.Y.Z / latest point at a complete, consistent image set).
+        if: steps.changes.outputs.worker == 'true' || startsWith(github.ref, 'refs/tags/')
         uses: docker/build-push-action@v6
         with:
           context: .

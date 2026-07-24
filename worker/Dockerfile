@@ -20,6 +20,9 @@ COPY worker/requirements.txt ./requirements.txt
 RUN pip install --no-cache-dir -r requirements.txt
 
 # Shared code — single source of truth with local mode (execution core + guard).
+# NOTE: these app/* files are worker image inputs. If you add/remove one here,
+# update the `worker:` path list in .github/workflows/ci.yml (the change-detection
+# filter that decides whether to rebuild this image), or detection will drift.
 COPY app/cq_worker.py ./cq_worker.py
 COPY app/code_guard.py ./code_guard.py
 # Worker service code.
