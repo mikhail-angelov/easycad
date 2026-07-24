@@ -7,15 +7,67 @@ Legend — rough effort: **S** small (~<1h), **M** medium (a few hours), **L** l
 
 ---
 
-## UI / i18n
+## Monetization
 
-### Bilingual UI (ru/en)  · M
-The in-app chrome is currently English-only. Add a language toggle (ru/en) with
-an i18n string table, and persist the choice (per session; per user when signed
-in). The LLM already replies in the language of the user's prompt, so this is
-purely the static interface text (buttons, tooltips, panel labels, hints). *(The
-static landing page already detects ru/en from the browser; this item is only
-the app UI.)*
+### Subscription — paid access to the server-side LLM  · L
+**Why:** Today, past the free trial (SPEC14) users must bring their own key
+(BYOK). A subscription would let a paying user keep using **our** server-side
+LLM to build models — no key of their own — as the revenue model.
+**What:** A paid plan that, in `_resolve_llm`, becomes a fourth tier above the
+trial: an active subscriber runs on the operator key without the trial cap
+(instead of hitting `trial_exhausted_*`). Natural extension of the SPEC14 trial
+infrastructure (`_resolve_llm` precedence, per-user counters, provider forcing).
+**Open (decide later):** billing/payments integration; whether to meter **token
+usage** and enforce per-plan **limits** (vs. flat unlimited); which model(s) a
+plan may use; how counters reset (monthly vs. lifetime, unlike the trial's
+one-time grant). **Decisions and implementation are deferred** — this entry just
+records the direction.
+
+---
+
+## Analytics / product metrics
+
+### Usage analytics (Google Analytics / Yandex.Metrica)  · M
+**Why:** We have no visibility into how people actually use the app — whether
+they onboard correctly, where they drop off, and whether the SPEC14 onboarding
+(trial pill, starter chips, welcome) actually converts. Need data to tune it.
+**What:** Integrate a web analytics provider (Google Analytics and/or
+Yandex.Metrica) and track a small, meaningful event set, not just pageviews:
+- onboarding funnel: landing → open `/app` → first prompt sent → first
+  **successful** step (the key "aha") → trial exhausted → sign-in / add-key;
+- interaction signals: starter-chip click vs. free-typed prompt, refine
+  confirm/dismiss, ×3 variations used, revert, manual `Run`, export, language
+  switch (en/ru);
+- health signals: generation failure rate, clarify/invalid verdict rate.
+**Open (decide later):** which provider(s); **privacy/consent** — the app is
+currently tracker-free and sets only privacy-preserving cookies, so adding
+third-party analytics needs a consent banner (GDPR) and a CSP review; whether to
+prefer a self-hosted/cookieless option (Plausible/Umami) over GA/Metrica; keep
+event names in one taxonomy module so they don't drift.
+
+---
+
+## API / integrations
+
+### External API + MCP tool (use EasyCAD from an agent)  · L
+**Why:** Expose the "text → CadQuery → STL" capability programmatically so an AI
+agent can generate/modify 3D models — e.g. an **MCP server** that Claude or
+another agent calls to produce parts and get back the model.
+**What:** A token-authed public API (not the cookie/magic-link browser flow) with
+a small surface — generate, modify, export — returning the CadQuery code + STL
+(and ideally STEP) + geometry info; then a thin **MCP server** wrapping it
+(tools like `create_model(prompt)`, `modify_model(prompt)`, `export(format)`).
+**Open (decide later):**
+- **Auth:** per-account API keys/tokens issued from settings; not magic-link
+  cookies. Rate-limit + abuse controls (it's an LLM + compute proxy).
+- **State:** current sessions are in-memory + cookie-bound; agents need either
+  explicit session ids threaded through calls, or a **stateless** `code + prompt
+  → new code + STL` call. A stateless variant of `/api/chat`/`/api/execute` is
+  probably the cleanest MCP fit.
+- **Billing:** programmatic use burns LLM + compute harder than a human — decide
+  BYOK-token vs. a paid API plan (ties into **Monetization** above).
+- **Output formats:** STL / STEP / raw code; whether to run CadQuery per call or
+  return code only.
 
 ---
 

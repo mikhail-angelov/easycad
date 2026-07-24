@@ -1,10 +1,11 @@
 import { useEffect, useRef } from 'preact/hooks'
 import { lazy, Suspense } from 'preact/compat'
 import { api } from './api'
-import { useStore } from './store'
+import { useStore, useT } from './store'
 import { Chat } from './components/Chat'
 import { Timeline } from './components/Timeline'
 import { Account } from './components/Account'
+import { LangToggle } from './components/LangToggle'
 import { IconSave, IconLoad, IconNew } from './components/Icons'
 
 // Heavy panels (Monaco ~3 MB, three.js) are code-split into their own chunks so
@@ -17,6 +18,7 @@ export function App() {
   const reset = useStore((s) => s.reset)
   const importProject = useStore((s) => s.importProject)
   const busy = useStore((s) => s.busy)
+  const t = useT()
   const fileRef = useRef<HTMLInputElement>(null)
 
   useEffect(() => {
@@ -37,21 +39,22 @@ export function App() {
         <div class="brand">
           <span class="brand-mark" />
           EasyCAD
-          <span class="project-name">cadquery chat</span>
+          <span class="project-name">{t('app.projectName')}</span>
         </div>
         <div class="topbar-actions">
-          <a class="icon-button" href={api.exportProjectUrl()} download title="Save project">
+          <LangToggle />
+          <a class="icon-button" href={api.exportProjectUrl()} download title={t('app.saveProject')}>
             <IconSave />
           </a>
           <button
             class="icon-button"
             onClick={() => fileRef.current?.click()}
             disabled={busy}
-            title="Load project"
+            title={t('app.loadProject')}
           >
             <IconLoad />
           </button>
-          <button class="icon-button" onClick={() => reset()} disabled={busy} title="New model">
+          <button class="icon-button" onClick={() => reset()} disabled={busy} title={t('app.newModel')}>
             <IconNew />
           </button>
           <input
@@ -65,10 +68,10 @@ export function App() {
         </div>
       </header>
       <div class="workspace">
-        <Suspense fallback={<section class="panel">Loading editor…</section>}>
+        <Suspense fallback={<section class="panel">{t('app.loadingEditor')}</section>}>
           <Editor />
         </Suspense>
-        <Suspense fallback={<section class="panel">Loading viewer…</section>}>
+        <Suspense fallback={<section class="panel">{t('app.loadingViewer')}</section>}>
           <Viewer />
         </Suspense>
         <Chat />

@@ -4,7 +4,7 @@ import { useEffect, useRef } from 'preact/hooks'
 import * as monaco from 'monaco-editor/esm/vs/editor/editor.api'
 import 'monaco-editor/esm/vs/basic-languages/python/python.contribution'
 import editorWorker from 'monaco-editor/esm/vs/editor/editor.worker?worker'
-import { useStore } from '../store'
+import { useStore, useT } from '../store'
 
 // Monaco only needs its core editor worker here (no TS/JSON language services).
 ;(self as unknown as { MonacoEnvironment: monaco.Environment }).MonacoEnvironment = {
@@ -16,6 +16,7 @@ export function Editor() {
   const setCode = useStore((s) => s.setCode)
   const runManual = useStore((s) => s.runManual)
   const busy = useStore((s) => s.busy)
+  const t = useT()
 
   const hostRef = useRef<HTMLDivElement>(null)
   const edRef = useRef<monaco.editor.IStandaloneCodeEditor | null>(null)
@@ -54,9 +55,9 @@ export function Editor() {
   return (
     <section class="panel editor-panel">
       <header>
-        <h2>Code</h2>
+        <h2>{t('editor.title')}</h2>
         <button class="text-button" disabled={busy} onClick={() => runManual()}>
-          Run ▷
+          {t('editor.run')}
         </button>
       </header>
       <div class="code-host" ref={hostRef} />

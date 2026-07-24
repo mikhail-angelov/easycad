@@ -1,4 +1,4 @@
-import { useStore } from '../store'
+import { useStore, useT } from '../store'
 import { IconGithub } from './Icons'
 
 const REPO_URL = 'https://github.com/mikhail-angelov/easycad'
@@ -8,10 +8,11 @@ export function Timeline() {
   const currentId = useStore((s) => s.currentId)
   const revert = useStore((s) => s.revert)
   const busy = useStore((s) => s.busy)
+  const t = useT()
 
   return (
     <div class="timeline">
-      <span class="timeline-label">Steps</span>
+      <span class="timeline-label">{t('timeline.steps')}</span>
       {steps.map((s) => (
         <button
           key={s.id}
@@ -30,7 +31,7 @@ export function Timeline() {
           href={REPO_URL}
           target="_blank"
           rel="noopener noreferrer"
-          title="View on GitHub"
+          title={t('timeline.github')}
         >
           <IconGithub size={16} />
         </a>

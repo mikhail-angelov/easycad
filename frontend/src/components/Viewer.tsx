@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from 'preact/hooks'
 import { api } from '../api'
-import { useStore } from '../store'
+import { useStore, useT } from '../store'
 import { ModelViewer } from '../viewer3d'
 
 export function Viewer() {
@@ -8,6 +8,7 @@ export function Viewer() {
   const geometryInfo = useStore((s) => s.geometryInfo)
   const currentId = useStore((s) => s.currentId)
 
+  const t = useT()
   const stageRef = useRef<HTMLDivElement>(null)
   const viewerRef = useRef<ModelViewer | null>(null)
   const [wire, setWire] = useState(false)
@@ -39,7 +40,7 @@ export function Viewer() {
   return (
     <section class="panel viewer-panel">
       <header>
-        <h2>Model</h2>
+        <h2>{t('viewer.title')}</h2>
         <div class="viewer-actions">
           <label class="wire-toggle">
             <input
@@ -47,11 +48,11 @@ export function Viewer() {
               checked={wire}
               onChange={(e) => setWire((e.target as HTMLInputElement).checked)}
             />
-            wireframe
+            {t('viewer.wireframe')}
           </label>
           {currentId != null && (
             <a class="text-button" href={api.exportUrl(currentId)} download>
-              Export STL
+              {t('viewer.exportStl')}
             </a>
           )}
         </div>

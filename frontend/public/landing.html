@@ -430,6 +430,7 @@ result = cq.Workplane(<span class="c">"XY"</span>).box(WIDTH, DEPTH, HEIGHT)</di
       "hero.h1": '<span class="dimframe">Describe&nbsp;it.</span><br><span class="b">Print&nbsp;it.</span>',
       "hero.lead": "EasyCAD turns a sentence into a printable 3D model. Describe one change at a time — it writes the CadQuery, runs it, and shows the result. Watch your part grow, then send it to the printer.",
       "btn.open": "Open EasyCAD →",
+      "btn.openAuthed": "Open your workspace →",
       "btn.github": "View on GitHub",
       "tag.fig1": "FIG. 01 — result",
       "tag.iso": "isometric · mm",
@@ -483,6 +484,8 @@ result = cq.Workplane(<span class="c">"XY"</span>).box(WIDTH, DEPTH, HEIGHT)</di
   document.querySelectorAll("[data-i18n]").forEach(function (el) {
     I18N.ru[el.getAttribute("data-i18n")] = el.innerHTML;
   });
+  // Authed-CTA label isn't in the markup (only shown to signed-in visitors).
+  I18N.ru["btn.openAuthed"] = "Открыть рабочее пространство →";
 
   function applyLang(lang) {
     if (!I18N[lang]) lang = "ru";
@@ -647,6 +650,31 @@ result = cq.Workplane(<span class="c">"XY"</span>).box(WIDTH, DEPTH, HEIGHT)</di
     return "en";
   }
   applyLang(pickLang());
+
+  /* ── Soft redirect for signed-in visitors ─────────────────────────────────
+     The landing stays 100% static & cacheable — this runs client-side only.
+     A returning, authenticated visitor is sent straight to /app on a FRESH
+     visit, but NOT via Back/Forward (so they can still view this page) and NOT
+     when the URL carries ?stay. The primary CTA is relabelled either way. The
+     auth cookie is httpOnly, so we can't read it directly — ask the API. */
+  (function () {
+    var navEntry = (performance.getEntriesByType && performance.getEntriesByType("navigation")[0]) || {};
+    var viaBackForward = navEntry.type === "back_forward";
+    var stay = /(?:^|[?&#])stay\b/i.test(location.search + location.hash);
+    fetch("/api/auth/me", { credentials: "same-origin" })
+      .then(function (r) { return r.ok ? r.json() : null; })
+      .then(function (me) {
+        if (!me || !me.authenticated) return;
+        // Relabel the primary CTA(s) for a returning user; open in the same tab.
+        document.querySelectorAll('a.btn.primary[href="/app"]').forEach(function (a) {
+          a.setAttribute("data-i18n", "btn.openAuthed");
+          a.removeAttribute("target");
+        });
+        applyLang(document.documentElement.getAttribute("data-lng") || "ru");
+        if (!viaBackForward && !stay) location.href = "/app";
+      })
+      .catch(function () {});
+  })();
 })();
 </script>
 </body>

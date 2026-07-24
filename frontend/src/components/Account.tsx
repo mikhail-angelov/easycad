@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'preact/hooks'
-import { useStore } from '../store'
+import { useStore, useT } from '../store'
 import { IconUser } from './Icons'
 
 export function Account() {
@@ -18,6 +18,7 @@ export function Account() {
   const saveKey = useStore((s) => s.saveKey)
   const validateKey = useStore((s) => s.validateKey)
   const deleteAccount = useStore((s) => s.deleteAccount)
+  const t = useT()
 
   const [emailText, setEmailText] = useState('')
   const [keyText, setKeyText] = useState('')
@@ -59,17 +60,17 @@ export function Account() {
       <button
         class="icon-button"
         onClick={() => setOpen(!open)}
-        title={authenticated ? (email ?? 'Account') : 'Account & LLM key'}
+        title={authenticated ? (email ?? t('account.iconTip')) : t('account.iconTip')}
       >
         <IconUser />
-        {hasKey && <span class="key-dot" title="LLM key set" />}
+        {hasKey && <span class="key-dot" title={t('account.keySet')} />}
       </button>
 
       {open && (
         <div class="account-panel">
           {!authenticated && (
             <div class="account-section">
-              <div class="account-title">Sign in by email</div>
+              <div class="account-title">{t('account.signInTitle')}</div>
               <input
                 type="email"
                 placeholder="you@example.com"
@@ -81,9 +82,9 @@ export function Account() {
                 disabled={busy || !emailText.includes('@')}
                 onClick={() => login(emailText.trim())}
               >
-                Send link
+                {t('account.sendLink')}
               </button>
-              {authMessage && <div class="account-note">{authMessage}</div>}
+              {authMessage && <div class="account-note">{t('account.linkSent', { email: authMessage })}</div>}
             </div>
           )}
 
@@ -91,30 +92,30 @@ export function Account() {
             <div class="account-section">
               <div class="account-title">{email}</div>
               <button class="text-link" disabled={busy} onClick={() => logout()}>
-                Sign out
+                {t('account.signOut')}
               </button>
               <button
                 class="text-link danger"
                 disabled={busy}
                 onClick={() => {
-                  if (confirm('Delete your account and all settings?')) deleteAccount()
+                  if (confirm(t('account.deleteConfirm'))) deleteAccount()
                 }}
               >
-                Delete account
+                {t('account.delete')}
               </button>
             </div>
           )}
 
           <div class="account-section">
-            <div class="account-title">Your LLM key</div>
+            <div class="account-title">{t('account.keyTitle')}</div>
             <div class="account-note">
               {hasKey
-                ? `Key saved (${savedProvider}). Add a new one to replace it.`
-                : 'Add a key for unlimited generations with your own model choice.'}
+                ? t('account.keySaved', { provider: savedProvider })
+                : t('account.keyPrompt')}
             </div>
 
             <label class="account-field">
-              <span>Provider</span>
+              <span>{t('account.provider')}</span>
               <select
                 value={provider}
                 disabled={busy}
@@ -132,7 +133,7 @@ export function Account() {
             </label>
 
             <label class="account-field">
-              <span>Model</span>
+              <span>{t('account.model')}</span>
               <select value={model} disabled={busy} onChange={(e) => setModel((e.target as HTMLSelectElement).value)}>
                 {models.map((mo) => (
                   <option value={mo} key={mo}>
@@ -156,18 +157,18 @@ export function Account() {
               <div class="account-warn">
                 {result.reason}
                 <button class="text-link" disabled={busy} onClick={() => onSave(true)}>
-                  Save anyway
+                  {t('account.saveAnyway')}
                 </button>
               </div>
             )}
-            {result && result.ok && <div class="account-ok">Key verified and saved.</div>}
+            {result && result.ok && <div class="account-ok">{t('account.keyVerified')}</div>}
 
             <button class="primary" disabled={busy || checking || !keyText.trim()} onClick={() => onSave()}>
-              {checking ? 'Checking…' : 'Validate & save key'}
+              {checking ? t('account.checking') : t('account.validateSave')}
             </button>
 
             {!authenticated && (
-              <div class="account-note dim">Without signing in, the key is kept for this session only.</div>
+              <div class="account-note dim">{t('account.sessionOnly')}</div>
             )}
           </div>
         </div>

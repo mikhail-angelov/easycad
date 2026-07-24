@@ -1,16 +1,7 @@
 import { useEffect, useRef, useState } from 'preact/hooks'
-import { useStore } from '../store'
+import { useStore, useT } from '../store'
+import { STARTERS } from '../i18n'
 import { Notice } from './Notice'
-
-// One-tap example prompts for the empty state — clicking one sends it, so a new
-// user gets a first result without facing a blank box. Each works on the default
-// 50×80×30 starting solid.
-const STARTER_PROMPTS = [
-  'Make it 10 mm thinner',
-  'Add a 6 mm hole in each corner',
-  'Round the top edges with a 3 mm fillet',
-  'Hollow it out with 2 mm walls',
-]
 
 const WELCOME_KEY = 'easycad_welcome_seen'
 
@@ -42,9 +33,12 @@ export function Chat() {
   const autoRefine = useStore((s) => s.autoRefine)
   const setAutoRefine = useStore((s) => s.setAutoRefine)
   const error = useStore((s) => s.error)
+  const lang = useStore((s) => s.lang)
+  const t = useT()
 
   const models = providers[provider]?.models ?? []
   const onTrial = trialTier === 'anon' || trialTier === 'user'
+  const starters = STARTERS[lang]
 
   const [text, setText] = useState('')
   const [showWelcome, setShowWelcome] = useState(() => {
@@ -115,19 +109,19 @@ export function Chat() {
       {busy && (
         <div class="chat-overlay" aria-live="polite">
           <span class="spinner" />
-          <span class="chat-overlay-label">Working…</span>
+          <span class="chat-overlay-label">{t('chat.working')}</span>
         </div>
       )}
       <header>
-        <h2>Chat</h2>
+        <h2>{t('chat.title')}</h2>
         <div class="chat-header-controls">
-          <label class="refine-toggle" title="Refine short prompts into precise instructions">
+          <label class="refine-toggle" title={t('chat.refineTip')}>
             <input
               type="checkbox"
               checked={autoRefine}
               onChange={(e) => setAutoRefine((e.target as HTMLInputElement).checked)}
             />
-            refine
+            {t('chat.refine')}
           </label>
           {/* On trial the model is fixed (operator DeepSeek key); the picker is a
               BYOK-only live control. On trial we show the remaining free count. */}
@@ -135,7 +129,7 @@ export function Chat() {
             <select
               class="model-select"
               value={model}
-              title={`Model (${provider})`}
+              title={t('chat.modelTip', { provider })}
               disabled={busy}
               onChange={(e) => selectModel((e.target as HTMLSelectElement).value)}
             >
@@ -150,15 +144,11 @@ export function Chat() {
             trialRemaining != null && (
               <span
                 class={`trial-pill ${trialRemaining <= 0 ? 'empty' : ''}`}
-                title={
-                  trialTier === 'anon'
-                    ? 'Free generations — no sign-up needed. Sign in for more.'
-                    : 'Free generations remaining on your account.'
-                }
+                title={trialTier === 'anon' ? t('chat.trialAnonTip') : t('chat.trialUserTip')}
               >
                 {trialTier === 'anon' && trialRemaining > 0
-                  ? `${trialRemaining} free · no sign-up`
-                  : `${trialRemaining} free left`}
+                  ? t('chat.trialNoSignup', { n: trialRemaining })
+                  : t('chat.trialLeft', { n: trialRemaining })}
               </span>
             )
           )}
@@ -170,19 +160,16 @@ export function Chat() {
           <div class="empty-state">
             {showWelcome && (
               <div class="welcome">
-                <button class="welcome-dismiss" title="Dismiss" onClick={dismissWelcome}>
+                <button class="welcome-dismiss" title={t('chat.dismiss')} onClick={dismissWelcome}>
                   ×
                 </button>
-                <div class="welcome-title">👋 Describe what you want to build</div>
-                <div class="welcome-body">
-                  Type a change and the model updates. No sign-up needed to try — your first
-                  build is free.
-                </div>
+                <div class="welcome-title">{t('chat.welcomeTitle')}</div>
+                <div class="welcome-body">{t('chat.welcomeBody')}</div>
               </div>
             )}
-            <p class="hint">Describe one change at a time. Try one of these to start:</p>
+            <p class="hint">{t('chat.emptyHint')}</p>
             <div class="starter-chips">
-              {STARTER_PROMPTS.map((p) => (
+              {starters.map((p) => (
                 <button key={p} class="starter-chip" disabled={busy} onClick={() => runStarter(p)}>
                   {p}
                 </button>
@@ -195,11 +182,13 @@ export function Chat() {
             <div class="bubble user">{e.prompt}</div>
             {e.refined && (
               <details class="refined">
-                <summary>refined prompt</summary>
+                <summary>{t('chat.refinedPrompt')}</summary>
                 {e.refined}
               </details>
             )}
-            <div class="bubble result">{e.ok ? `Step ${e.id} ✓` : `Failed: ${e.error}`}</div>
+            <div class="bubble result">
+              {e.ok ? t('chat.stepOk', { id: e.id }) : t('chat.failed', { error: e.error ?? '' })}
+            </div>
           </div>
         ))}
 
@@ -229,7 +218,7 @@ export function Chat() {
         {proposal && (
           <div class="proposal">
             <div class="bubble user">{proposal.originalPrompt}</div>
-            <div class="proposal-head">Refined instruction — confirm or edit:</div>
+            <div class="proposal-head">{t('chat.proposalHead')}</div>
             <textarea
               key={proposal.originalPrompt}
               ref={proposalRef}
@@ -243,10 +232,10 @@ export function Chat() {
                 disabled={busy}
                 onClick={() => confirmProposal(proposalRef.current?.value)}
               >
-                Use
+                {t('chat.use')}
               </button>
               <button disabled={busy} onClick={() => dismissProposal()}>
-                Cancel
+                {t('chat.cancel')}
               </button>
             </div>
           </div>
@@ -258,10 +247,10 @@ export function Chat() {
             <div class="invalid-reason">{invalidNotice.reason}</div>
             <div class="invalid-actions">
               <button disabled={busy} onClick={() => proceedInvalid()}>
-                Generate anyway
+                {t('chat.generateAnyway')}
               </button>
               <button disabled={busy} onClick={() => dismissInvalid()}>
-                Cancel
+                {t('chat.cancel')}
               </button>
             </div>
           </div>
@@ -270,7 +259,7 @@ export function Chat() {
         {variations && (
           <div class="variations">
             <div class="bubble user">{variations.originalPrompt}</div>
-            <div class="variations-head">Pick a variation — click to preview in the viewer:</div>
+            <div class="variations-head">{t('chat.variationsHead')}</div>
             {variations.candidates.map((c, i) => (
               <button
                 key={i}
@@ -279,7 +268,9 @@ export function Chat() {
                 onClick={() => previewVariation(i)}
               >
                 <span class="v-index">{i + 1}</span>
-                <span class="v-info">{c.success ? summarize(c.geometry_info) : `failed: ${c.error}`}</span>
+                <span class="v-info">
+                  {c.success ? summarize(c.geometry_info) : t('chat.variationFailed', { error: c.error ?? '' })}
+                </span>
               </button>
             ))}
             <div class="variations-actions">
@@ -288,10 +279,10 @@ export function Chat() {
                 disabled={selectedVariation == null || busy}
                 onClick={() => commitVariation()}
               >
-                Use this
+                {t('chat.useThis')}
               </button>
               <button disabled={busy} onClick={() => cancelVariations()}>
-                Cancel
+                {t('chat.cancel')}
               </button>
             </div>
           </div>
@@ -304,7 +295,7 @@ export function Chat() {
       <div class="chat-input">
         <textarea
           ref={inputRef}
-          placeholder="Describe a change…"
+          placeholder={t('chat.inputPlaceholder')}
           value={text}
           disabled={busy}
           onInput={(e) => setText((e.target as HTMLTextAreaElement).value)}
@@ -317,12 +308,12 @@ export function Chat() {
         />
         <div class="chat-send">
           <button class="primary" disabled={busy} onClick={submit}>
-            {busy ? '…' : 'Send'}
+            {busy ? '…' : t('chat.send')}
           </button>
           <button
             class="variations-btn"
             disabled={busy}
-            title="Generate 3 variations to pick from"
+            title={t('chat.variationsTip')}
             onClick={submitVariations}
           >
             ×3

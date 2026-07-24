@@ -10,6 +10,7 @@ import {
   type TrialTier,
   type ValidateKeyResult,
 } from './api'
+import { LANG_KEY, type Lang, detectLang, translate } from './i18n'
 
 // Orange warning banner (SPEC14), distinct from the red `error`.
 export interface Notice {
@@ -70,6 +71,7 @@ interface State {
   providers: Record<string, ProviderInfo>
   provider: string
   model: string
+  lang: Lang
   trialTier: TrialTier | null
   trialRemaining: number | null
   autoRefine: boolean
@@ -96,6 +98,7 @@ interface State {
   deleteAccount: () => Promise<void>
   setCode: (code: string) => void
   selectModel: (model: string) => Promise<void>
+  setLang: (lang: Lang) => void
   dismissNotice: () => void
   setAccountOpen: (open: boolean) => void
   setAutoRefine: (on: boolean) => void
@@ -165,7 +168,7 @@ export const useStore = create<State>((set, get) => {
         return
       }
       if (res.action === 'invalid') {
-        set({ invalidNotice: { originalPrompt: prompt, reason: res.reason ?? 'Inconsistent request.' } })
+        set({ invalidNotice: { originalPrompt: prompt, reason: res.reason ?? translate(get().lang, 'chat.inconsistent') } })
         return
       }
 
@@ -198,6 +201,7 @@ export const useStore = create<State>((set, get) => {
     providers: {},
     provider: 'deepseek',
     model: '',
+    lang: detectLang(),
     trialTier: null,
     trialRemaining: null,
     autoRefine: true,
@@ -240,7 +244,8 @@ export const useStore = create<State>((set, get) => {
       set({ busy: true, error: null, authMessage: null })
       try {
         await api.login(email)
-        set({ authMessage: 'We sent a sign-in link to ' + email })
+        // Store the address only; the component localizes the confirmation text.
+        set({ authMessage: email })
       } catch (e) {
         reportError(e)
       } finally {
@@ -316,6 +321,15 @@ export const useStore = create<State>((set, get) => {
       }
     },
 
+    setLang: (lang) => {
+      try {
+        localStorage.setItem(LANG_KEY, lang)
+      } catch {
+        /* ignore */
+      }
+      set({ lang })
+    },
+
     dismissNotice: () => set({ notice: null }),
     setAccountOpen: (accountOpen) => set({ accountOpen }),
     setAutoRefine: (autoRefine) => set({ autoRefine }),
@@ -362,7 +376,7 @@ export const useStore = create<State>((set, get) => {
           return
         }
         if (res.action === 'invalid') {
-          set({ invalidNotice: { originalPrompt: prompt, reason: res.reason ?? 'Inconsistent request.' } })
+          set({ invalidNotice: { originalPrompt: prompt, reason: res.reason ?? translate(get().lang, 'chat.inconsistent') } })
           return
         }
         // Apply the server's post-charge trial status (no session payload here);
@@ -484,10 +498,17 @@ export const useStore = create<State>((set, get) => {
           selectedVariation: null,
         })
       } catch (e) {
-        set({ error: `Could not load project: ${e}` })
+        set({ error: translate(get().lang, 'store.loadProjectError', { error: String(e) }) })
       } finally {
         set({ busy: false })
       }
     },
   }
 })
+
+// Translation hook bound to the current language — components call `const t =
+// useT()` then `t('some.key', { param })`. Re-renders on language change.
+export function useT() {
+  const lang = useStore((s) => s.lang)
+  return (key: string, params?: Record<string, string | number>) => translate(lang, key, params)
+}
