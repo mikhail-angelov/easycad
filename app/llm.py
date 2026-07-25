@@ -13,6 +13,8 @@ import time
 
 from openai import OpenAI
 
+from .skills import render as skills_render
+
 log = logging.getLogger("easycad.llm")
 
 # Hard ceiling on any single provider call. The OpenAI SDK defaults to 600s,
@@ -144,6 +146,39 @@ SYSTEM_PROMPT = textwrap.dedent("""\
       at Z=B, use translate((x, y, B + H/2)).
     - Use .edges("|Z") to select vertical edges for filleting.
     - When cutting, make the cutting block oversized in non-critical dimensions.
+    - WORKPLANE CENTER. .workplane() defaults to centerOption="ProjectedOrigin",
+      which projects the PARENT origin onto the face — NOT the face centre. When
+      placing a feature on an off-centre face (e.g. a box moved with translate),
+      pass centerOption="CenterOfBoundBox" (or .center(x, y)) or it lands in the
+      wrong spot with no error.
+    - PREFER FEATURE OPS over booleans when they fit: a hole is
+      .faces(sel).workplane().hole(d), not .cut(a_cylinder); a hollow is .shell(-t),
+      not a cut; rounded/bevelled edges are .fillet(r)/.chamfer(d), not unions.
+      Boolean .cut()/.union() with an oversized tool is still fine for slots,
+      pockets, and joining separate bodies.
+    - CLOSE PROFILES: after .lineTo()/.threePointArc()/.spline(), call .close()
+      before .extrude()/.revolve() unless the wire is meant to stay open.
+    - .shell(): select the face(s) to REMOVE first, then .shell(-t) (negative =
+      inward), e.g. .faces(">Z").shell(-2).
+    - FILLET/CHAMFER radius MUST be smaller than the shortest adjacent edge, and
+      neighbouring rounds must not overlap. If OCCT raises "BREP_API command not
+      done", reduce the radius or fillet edge groups separately.
+    - SELECTORS: >Z/<Z = highest/lowest face on that axis, |Z = edges parallel to
+      Z, #Z = normal orthogonal to Z; combine with " and "/" or "/"not ". AVOID
+      index selectors like ">>Z[1]" — the index shifts when earlier steps add
+      geometry; prefer a geometric selector or .tag()/.faces(tag=...).
+    - Fluent Workplane API only. Do NOT use the free-function API
+      (`from cadquery.func import *`, or `a + b`/`a - b` on raw shapes) or mix them.
+    - TEXT. Workplane.text(txt, fontsize, distance, ...) has NO `cut` argument.
+      Its signature is text(txt, fontsize, distance, combine='cut'|'a'|'s'|bool,
+      halign=..., valign=...). fontsize = letter height; distance = extrude depth
+      (sign sets direction along the workplane normal). To ENGRAVE recessed text
+      into a face: select the face and cut inward, e.g.
+        result = result.faces(">Z").workplane().text(S, H, -D)   # combine='cut' default
+      To EMBOSS raised text on a face, extrude outward and add:
+        result = result.faces(">Z").workplane().text(S, H, D, combine='a')
+      To build a standalone text solid (e.g. to .cut()/.union() yourself later),
+      pass combine=False — NOT cut=False.
 """)
 
 
@@ -208,11 +243,14 @@ def generate_code(
     model: str | None = None,
     temperature: float = 0.2,
     api_key: str | None = None,
+    skills: list[str] | None = None,
 ) -> str:
     """Ask the LLM to append the requested modification to `current_code`.
 
     A higher `temperature` yields more varied output — used to generate several
-    distinct candidates for the retry-with-variations flow.
+    distinct candidates for the retry-with-variations flow. `skills` are
+    specialised recipe tags (from triage) injected as an extra system message
+    only when relevant — see `app/skills.py` (SPEC15).
     """
     client = make_client(provider, api_key)
     resolved = resolve_model(provider, model)
@@ -220,18 +258,20 @@ def generate_code(
         f"Current CadQuery code:\n```python\n{current_code}\n```\n\n"
         f"Modification request: {prompt}"
     )
+    messages = [{"role": "system", "content": SYSTEM_PROMPT}]
+    skill_prompt = skills_render(skills)
+    if skill_prompt:
+        messages.append({"role": "system", "content": skill_prompt})
+    messages.append({"role": "user", "content": user_msg})
     log.info(
-        "llm.generate start provider=%s model=%s code_len=%d prompt_len=%d temp=%s",
-        provider, resolved, len(current_code), len(prompt), temperature,
+        "llm.generate start provider=%s model=%s code_len=%d prompt_len=%d temp=%s skills=%s",
+        provider, resolved, len(current_code), len(prompt), temperature, skills or [],
     )
     _t0 = time.monotonic()
     try:
         response = client.chat.completions.create(
             model=resolved,
-            messages=[
-                {"role": "system", "content": SYSTEM_PROMPT},
-                {"role": "user", "content": user_msg},
-            ],
+            messages=messages,
             temperature=temperature,
             max_tokens=4096,
         )

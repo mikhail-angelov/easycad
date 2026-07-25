@@ -918,12 +918,19 @@ def api_refine(
         t = triage(req.prompt, _base_code(session.store, req.current_code), provider, model, api_key)
     except LLMError as exc:
         raise _provider_error("Triage error", exc) from exc
+    # `/api/refine` is STATELESS: it does not touch session.pending_skills.
+    # Doing so would race /api/chat (which mutates pending under the session
+    # lock) and would wrongly persist skills for clarify/invalid verdicts too.
+    # The confirm flow runs through /api/chat's own triage, which stores the
+    # pending skills under the lock, bound to the prompt. `skills` is returned
+    # for transparency only; the client cannot set it back (no ChatRequest field).
     return {
         "verdict": t.verdict,
         "refined_prompt": t.refined_prompt,
         "questions": t.questions,
         "reason": t.reason,
         "original_prompt": req.prompt,
+        "skills": t.skills,
     }
 
 
@@ -938,13 +945,15 @@ def _generate_and_step(
     model: str | None,
     api_key: str | None,
     trial_ident: TrialIdent | None,
+    skills: list[str] | None = None,
+    consume_pending: bool = False,
 ) -> dict:
     if not _charge_operator_call(trial_ident):
         raise _budget_exhausted_error()
     metrics.incr("gen_attempts")
     _t0 = time.time()
     try:
-        code = generate_code(base_code, gen_prompt, provider, model, api_key=api_key)
+        code = generate_code(base_code, gen_prompt, provider, model, api_key=api_key, skills=skills)
     except LLMError as exc:
         raise _provider_error("LLM error", exc) from exc
 
@@ -968,6 +977,11 @@ def _generate_and_step(
     )
     if not res.success:
         log.warning("chat.gen exec error: %s", (res.error or "")[:300])
+    # Consume the pending refinement only on a FULLY successful confirm turn.
+    # Provider/budget errors raise before here and an exec failure leaves it set,
+    # so the user can retry the same confirmation and still get the recipe.
+    if consume_pending and res.success:
+        session.pending_skills = None
     step = session.store.add(
         kind="chat",
         original_prompt=original_prompt,
@@ -1016,10 +1030,22 @@ def api_chat(
     provider, model, api_key, trial_ident = _resolve_llm(session, request, req.provider, req.model)
 
     if not req.auto_refine:
+        # No triage this turn. Skills come ONLY from the server-side pending
+        # refinement stored by the triage that returned confirm_refine — never
+        # from the request, and only when this turn's prompt matches the one the
+        # refinement was for. So neither a client nor an unrelated auto_refine=off
+        # turn can pick up someone else's recipe (SPEC15). The pending state is
+        # consumed inside _generate_and_step, and only on a fully successful
+        # attempt — a failed confirm leaves it so a retry still gets the recipe.
+        matched = (
+            session.pending_skills is not None
+            and session.pending_skills[0] == req.prompt
+        )
+        skills = session.pending_skills[1] if matched else None
         gen_prompt = req.refined_prompt or req.prompt
         return _generate_and_step(
             session, request, base_code, gen_prompt, req.prompt, req.refined_prompt,
-            provider, model, api_key, trial_ident,
+            provider, model, api_key, trial_ident, skills=skills, consume_pending=matched,
         )
 
     # The triage call is a separate operator-key LLM call → charge it too.
@@ -1030,16 +1056,20 @@ def api_chat(
     except LLMError as exc:
         raise _provider_error("Triage error", exc) from exc
 
+    session.pending_skills = None  # a fresh triage supersedes any stale pending
     if t.verdict == "clarify":
         return _no_step(session, request, "clarify", req.prompt, questions=t.questions)
     if t.verdict == "invalid":
         return _no_step(session, request, "invalid", req.prompt, reason=t.reason)
     if t.verdict == "refine":
-        return _no_step(session, request, "confirm_refine", req.prompt, refined_prompt=t.refined_prompt)
+        # Hold the skills server-side, bound to this prompt, for the confirm turn.
+        session.pending_skills = (req.prompt, t.skills) if t.skills else None
+        return _no_step(session, request, "confirm_refine", req.prompt,
+                        refined_prompt=t.refined_prompt)
 
     return _generate_and_step(
         session, request, base_code, req.prompt, req.prompt, None,
-        provider, model, api_key, trial_ident,
+        provider, model, api_key, trial_ident, skills=t.skills,
     )
 
 
@@ -1055,6 +1085,7 @@ def api_variations(
 
     gen_prompt = req.prompt
     refined_prompt: str | None = None
+    skills: list[str] | None = None
     if req.auto_refine:
         if not _charge_operator_call(trial_ident):  # triage is an operator call
             raise _budget_exhausted_error()
@@ -1062,6 +1093,7 @@ def api_variations(
             t = triage(req.prompt, base_code, provider, model, api_key)
         except LLMError as exc:
             raise _provider_error("Triage error", exc) from exc
+        skills = t.skills
         if t.verdict == "clarify":
             return {"action": "clarify", "questions": t.questions, "reason": None,
                     "original_prompt": req.prompt, "refined_prompt": None, "candidates": []}
@@ -1081,7 +1113,7 @@ def api_variations(
             break
         metrics.incr("gen_attempts")
         try:
-            code = generate_code(base_code, gen_prompt, provider, model, temperature=0.7, api_key=api_key)
+            code = generate_code(base_code, gen_prompt, provider, model, temperature=0.7, api_key=api_key, skills=skills)
         except LLMError as exc:
             metrics.incr("provider_errors")  # so variations feed the failure rate
             candidates.append(

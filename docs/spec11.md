@@ -25,7 +25,8 @@ Direct generation of 3D models from text descriptions produces unpredictable res
 
 **Not suited:**
 - Organic/sculptural forms (CadQuery limitation)
-- Precision engineering (threads, tight tolerances) — prompts can't convey enough detail
+- Precision engineering / exact mating fits & tolerances — prompts can't convey enough detail
+  (real helical threads themselves are supported via the thread skill added in SPEC15)
 - Complex multi-body assemblies — coordinate confusion grows with complexity
 - Models requiring more than ~15-20 incremental steps — code accumulates, context grows
 

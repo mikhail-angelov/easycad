@@ -23,6 +23,11 @@ class Session:
         # users, settings come from the DB instead (see resolve in main).
         self.settings: dict = {}
         self.user_id: int | None = None
+        # (original_prompt, skills) from the triage that returned confirm_refine,
+        # held server-side until the matching confirm turn consumes it. Bound to
+        # the original prompt so an unrelated auto_refine=off turn can't pick it
+        # up, cleared on use, never settable by the client (SPEC15). One-shot.
+        self.pending_skills: tuple[str, list[str]] | None = None
         self.last_access = time.time()
         # Serializes mutating requests for this session so concurrent calls on
         # one cookie can't race the read-then-append history update (review H1).

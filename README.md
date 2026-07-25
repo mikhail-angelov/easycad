@@ -20,9 +20,10 @@ Three panels: a code editor (you can hand-edit), a 3D viewer, and a chat.
 ```
 
 **Well suited:** boxes, enclosures, organizers, brackets, mounts — prismatic
-shapes built from cuts, fillets, chamfers, extrusions.
-**Not suited:** organic/sculpted forms, threads/tight tolerances, large
-multi-body assemblies.
+shapes built from cuts, fillets, chamfers, extrusions — and basic threaded
+fasteners (real helical ISO threads via a dedicated thread skill).
+**Not suited:** organic/sculpted forms, precise mating-thread fits/tolerances,
+large multi-body assemblies.
 
 ---
 

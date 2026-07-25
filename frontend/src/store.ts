@@ -370,7 +370,8 @@ export const useStore = create<State>((set, get) => {
       const p = get().proposal
       if (!p) return
       set({ proposal: null })
-      // Confirmed refinement → generate directly from it (no re-triage).
+      // Confirmed refinement → generate directly from it (no re-triage). The
+      // skills triage chose are held server-side and applied on this turn (SPEC15).
       await doChat(p.originalPrompt, false, editedText ?? p.refinedPrompt)
     },
 

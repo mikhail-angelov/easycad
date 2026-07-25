@@ -22,6 +22,7 @@ import textwrap
 from dataclasses import dataclass
 
 from .llm import DEFAULT_PROVIDER, LLMError, make_client, resolve_model
+from .skills import SKILL_MENU, clean_tags
 
 VERDICTS = {"ready", "refine", "clarify", "invalid"}
 
@@ -63,15 +64,21 @@ TRIAGE_SYSTEM_PROMPT = textwrap.dedent("""\
     "reason" in the SAME LANGUAGE as the user's request (Russian in -> Russian
     out, English in -> English out).
 
+    SKILLS: independently of the verdict, decide which specialised generation
+    skills the request needs, and return their tags in "skills". Available:
+{skill_menu}
+    Return only tags that clearly apply (usually none). Use [] when unsure.
+
     Return ONLY a JSON object, no markdown, of exactly this shape:
-    {
+    {{
       "verdict": "ready" | "refine" | "clarify" | "invalid",
       "refined_prompt": "<only when verdict is 'refine'>",
-      "questions": [ { "question": "<text>", "options": ["<opt1>", "<opt2>"] } ],
-      "reason": "<only when verdict is 'invalid'>"
-    }
+      "questions": [ {{ "question": "<text>", "options": ["<opt1>", "<opt2>"] }} ],
+      "reason": "<only when verdict is 'invalid'>",
+      "skills": ["<tag>", ...]
+    }}
     Include only the fields relevant to the chosen verdict; use [] / omit the rest.
-""")
+""").format(skill_menu=SKILL_MENU)
 
 
 @dataclass
@@ -80,10 +87,13 @@ class TriageResult:
     refined_prompt: str | None = None
     questions: list[dict] | None = None
     reason: str | None = None
+    skills: list[str] | None = None  # generation skills to load (SPEC15)
 
     def __post_init__(self) -> None:
         if self.questions is None:
             self.questions = []
+        if self.skills is None:
+            self.skills = []
 
 
 def _extract_json(text: str) -> dict | None:
@@ -118,6 +128,8 @@ def _parse(raw: str) -> TriageResult:
     reason = data.get("reason")
     reason = str(reason).strip() if reason else None
 
+    skills = clean_tags(data.get("skills"))
+
     # Reconcile verdict with the payload actually provided.
     if verdict == "refine" and not refined:
         verdict = "ready"
@@ -126,7 +138,7 @@ def _parse(raw: str) -> TriageResult:
     if verdict == "invalid" and not reason:
         reason = "The request appears inconsistent with the current model."
 
-    return TriageResult(verdict, refined, questions, reason)
+    return TriageResult(verdict, refined, questions, reason, skills)
 
 
 def triage(
