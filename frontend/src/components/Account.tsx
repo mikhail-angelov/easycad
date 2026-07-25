@@ -16,6 +16,7 @@ export function Account() {
   const login = useStore((s) => s.login)
   const logout = useStore((s) => s.logout)
   const saveKey = useStore((s) => s.saveKey)
+  const removeKey = useStore((s) => s.removeKey)
   const validateKey = useStore((s) => s.validateKey)
   const deleteAccount = useStore((s) => s.deleteAccount)
   const t = useT()
@@ -113,6 +114,11 @@ export function Account() {
                 ? t('account.keySaved', { provider: savedProvider })
                 : t('account.keyPrompt')}
             </div>
+            {hasKey && (
+              <button class="text-link" disabled={busy} onClick={() => removeKey()}>
+                {t('account.removeKey')}
+              </button>
+            )}
 
             <label class="account-field">
               <span>{t('account.provider')}</span>
@@ -167,9 +173,9 @@ export function Account() {
               {checking ? t('account.checking') : t('account.validateSave')}
             </button>
 
-            {!authenticated && (
-              <div class="account-note dim">{t('account.sessionOnly')}</div>
-            )}
+            <div class="account-note dim">
+              {authenticated ? t('account.keyPrivacy') : t('account.sessionOnly')}
+            </div>
           </div>
         </div>
       )}

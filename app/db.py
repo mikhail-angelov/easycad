@@ -5,9 +5,10 @@ in-memory, see `session_registry`). One `users` table; magic-link tokens are
 stateless JWTs (no token table), matching playground.
 
 Per-user `settings` is a JSON blob `{provider, model, key}`. The BYOK key is
-stored as plaintext (confirmed decision, as in playground); it is protected by
-the DB file being app-only and never web-served, and is never logged or returned
-by any endpoint.
+**encrypted at rest** (`app/crypto.py`, SPEC14): the stored column holds
+ciphertext, decrypted only in-process on read. It is additionally never logged or
+returned by any endpoint. Legacy plaintext keys read through and re-encrypt on
+the next save.
 """
 
 import json
@@ -16,6 +17,8 @@ import sqlite3
 import threading
 import time
 from pathlib import Path
+
+from . import crypto
 
 _lock = threading.Lock()
 _conn: sqlite3.Connection | None = None
@@ -77,6 +80,14 @@ def _row_to_user(row: sqlite3.Row) -> dict:
         settings = json.loads(row["settings"]) if row["settings"] else {}
     except (json.JSONDecodeError, TypeError):
         settings = {}
+    # Decrypt the BYOK key in-process; drop it if it can't be decrypted (secret
+    # changed) so the caller sees no key and the user simply re-enters it.
+    if isinstance(settings, dict) and settings.get("key"):
+        plain = crypto.decrypt(settings["key"])
+        if plain is None:
+            settings.pop("key", None)
+        else:
+            settings["key"] = plain
     return {"id": row["id"], "email": row["email"], "settings": settings}
 
 
@@ -99,11 +110,17 @@ def get_user(user_id: int) -> dict | None:
 
 
 def update_settings(user_id: int, settings: dict) -> None:
+    # Encrypt the BYOK key before it touches disk (leave already-ciphertext and
+    # other fields as-is). Copy so the caller's in-memory dict stays plaintext.
+    to_store = dict(settings)
+    key = to_store.get("key")
+    if key and not crypto.is_encrypted(key):
+        to_store["key"] = crypto.encrypt(key)
     with _lock:
         conn = _get()
         conn.execute(
             "UPDATE users SET settings = ? WHERE id = ?",
-            (json.dumps(settings, ensure_ascii=False), user_id),
+            (json.dumps(to_store, ensure_ascii=False), user_id),
         )
         conn.commit()
 

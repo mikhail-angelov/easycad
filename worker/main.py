@@ -46,6 +46,11 @@ class ExecRequest(BaseModel):
     code: str = Field(max_length=MAX_CODE)
 
 
+class ExportRequest(BaseModel):
+    code: str = Field(max_length=MAX_CODE)
+    format: str = Field(max_length=8)
+
+
 @app.get("/healthz")
 def healthz() -> dict:
     return {"ok": True}
@@ -64,3 +69,13 @@ async def execute(req: ExecRequest) -> dict:
     async with _sem:
         # limits.run blocks (subprocess); keep the event loop free.
         return await asyncio.to_thread(limits.run, req.code)
+
+
+@app.post("/export")
+async def export(req: ExportRequest) -> dict:
+    """On-demand export of `result` to a download format (stl/step)."""
+    ok, reason = code_guard.check(req.code)
+    if not ok:
+        return {"success": False, "data_base64": None, "error": f"Code rejected by guard: {reason}"}
+    async with _sem:
+        return await asyncio.to_thread(limits.export, req.code, req.format)

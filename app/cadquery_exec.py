@@ -37,6 +37,10 @@ _GEOMETRY_RE = re.compile(r"\n*# ── Geometry info.*?(?=\n[^#]|\Z)", re.DOTAL
 
 _ROOT = Path(__file__).resolve().parent.parent
 
+# On-demand download formats (extension = format). Whitelisted so a caller can't
+# smuggle an arbitrary extension/path into the worker.
+_EXPORT_EXTS = {"stl", "step"}
+
 
 @dataclass
 class ExecResult:
@@ -126,6 +130,40 @@ class LocalExecutor:
             out["stl_base64"] = base64.b64encode(stl_path.read_bytes()).decode("ascii")
             return _result_from_worker_payload(code, out)
 
+    def export(self, code: str, fmt: str) -> bytes | None:
+        """Run `code` and export `result` to `fmt`; return the file bytes or None."""
+        import tempfile
+
+        if fmt not in _EXPORT_EXTS:
+            return None
+        if os.getenv("EASYCAD_LOCAL_GUARD") == "1":
+            from . import code_guard
+
+            ok, _ = code_guard.check(code)
+            if not ok:
+                return None
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / f"model.{fmt}"
+            job = json.dumps({"code": code, "export_path": str(path)})
+            try:
+                proc = subprocess.run(
+                    [sys.executable, "-m", "app.cq_worker"],
+                    input=job, capture_output=True, text=True,
+                    timeout=TIMEOUT_SECONDS, cwd=str(_ROOT),
+                )
+            except subprocess.TimeoutExpired:
+                return None
+            if proc.returncode != 0:
+                return None
+            line = proc.stdout.strip().splitlines()[-1] if proc.stdout.strip() else ""
+            try:
+                out = json.loads(line)
+            except json.JSONDecodeError:
+                return None
+            if not out.get("success") or not path.exists():
+                return None
+            return path.read_bytes()
+
 
 class RemoteExecutor:
     """Delegates execution to an isolated worker container over HTTP.
@@ -158,6 +196,26 @@ class RemoteExecutor:
             return ExecResult(False, error=f"Worker response invalid: {exc}")
         return _result_from_worker_payload(code, out)
 
+    def export(self, code: str, fmt: str) -> bytes | None:
+        if fmt not in _EXPORT_EXTS:
+            return None
+        url = f"{self.base_url}/export"
+        body = json.dumps({"code": code, "format": fmt}).encode("utf-8")
+        req = urllib.request.Request(
+            url, data=body, headers={"Content-Type": "application/json"}, method="POST"
+        )
+        try:
+            with urllib.request.urlopen(req, timeout=TIMEOUT_SECONDS + 15) as resp:
+                out = json.loads(resp.read().decode("utf-8"))
+        except (urllib.error.HTTPError, urllib.error.URLError, TimeoutError, json.JSONDecodeError):
+            return None
+        if not out.get("success") or not out.get("data_base64"):
+            return None
+        try:
+            return base64.b64decode(out["data_base64"])
+        except Exception:  # noqa: BLE001
+            return None
+
 
 def _select_backend():
     """Pick the execution backend from the environment on each call (cheap).
@@ -182,3 +240,9 @@ def _select_backend():
 def execute(code: str) -> ExecResult:
     """Execute CadQuery `code` via the configured backend and return the outcome."""
     return _select_backend().execute(code)
+
+
+def export_model(code: str, fmt: str) -> bytes | None:
+    """Run `code` and export `result` to `fmt` ('stl'|'step'); return the file
+    bytes, or None on any failure. Used for on-demand STEP/STL downloads."""
+    return _select_backend().export(code, fmt)

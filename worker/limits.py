@@ -107,3 +107,35 @@ def run(code: str) -> dict:
             "geometry_info": out["geometry_info"],
             "error": None,
         }
+
+
+_EXPORT_EXTS = {"stl", "step"}
+
+
+def export(code: str, fmt: str) -> dict:
+    """Export `result` to `fmt` in a resource-limited child; return
+    {success, data_base64, error}. `fmt` is whitelisted (extension = format)."""
+    if fmt not in _EXPORT_EXTS:
+        return {"success": False, "data_base64": None, "error": f"Unsupported format: {fmt}"}
+    with tempfile.TemporaryDirectory() as tmp:
+        path = Path(tmp) / f"model.{fmt}"
+        job = json.dumps({"code": code, "export_path": str(path)})
+        try:
+            proc = subprocess.run(
+                [sys.executable, "-m", "cq_worker"],
+                input=job, capture_output=True, text=True,
+                timeout=TIMEOUT_SECONDS, cwd=str(_HERE), preexec_fn=_set_limits,
+            )
+        except subprocess.TimeoutExpired:
+            return {"success": False, "data_base64": None, "error": f"Export timed out after {TIMEOUT_SECONDS}s."}
+        if proc.returncode != 0:
+            detail = proc.stderr.strip() or f"worker exited with code {proc.returncode}"
+            return {"success": False, "data_base64": None, "error": f"Export crashed: {detail[:800]}"}
+        line = proc.stdout.strip().splitlines()[-1] if proc.stdout.strip() else ""
+        try:
+            out = json.loads(line)
+        except json.JSONDecodeError:
+            return {"success": False, "data_base64": None, "error": f"Malformed worker output: {proc.stdout[:500]!r}"}
+        if not out.get("success"):
+            return {"success": False, "data_base64": None, "error": out.get("error") or "Unknown export error."}
+        return {"success": True, "data_base64": base64.b64encode(path.read_bytes()).decode("ascii"), "error": None}

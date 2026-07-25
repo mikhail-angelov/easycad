@@ -63,6 +63,10 @@ const STRINGS: Record<Lang, Record<string, string>> = {
     'viewer.title': 'Model',
     'viewer.wireframe': 'wireframe',
     'viewer.exportStl': 'Export STL',
+    'viewer.download': 'Download',
+    'viewer.hintMesh': '3D mesh',
+    'viewer.hintCad': 'CAD solid',
+    'viewer.hintSource': 'CadQuery',
 
     'timeline.steps': 'Steps',
     'timeline.github': 'View on GitHub',
@@ -108,6 +112,7 @@ const STRINGS: Record<Lang, Record<string, string>> = {
     'account.keyTitle': 'Your LLM key',
     'account.keySaved': 'Key saved ({provider}). Add a new one to replace it.',
     'account.keyPrompt': 'Add a key for unlimited generations with your own model choice.',
+    'account.removeKey': 'Remove key',
     'account.provider': 'Provider',
     'account.model': 'Model',
     'account.validateSave': 'Validate & save key',
@@ -115,6 +120,8 @@ const STRINGS: Record<Lang, Record<string, string>> = {
     'account.saveAnyway': 'Save anyway',
     'account.keyVerified': 'Key verified and saved.',
     'account.sessionOnly': 'Without signing in, the key is kept for this session only.',
+    'account.keyPrivacy':
+      'Your key is encrypted at rest and used only to call your provider — never shared or logged. Replace or remove it anytime; deleting your account erases it.',
 
     'notice.signIn': 'Sign in',
     'notice.addKey': 'Add your key',
@@ -142,6 +149,10 @@ const STRINGS: Record<Lang, Record<string, string>> = {
     'viewer.title': 'Модель',
     'viewer.wireframe': 'каркас',
     'viewer.exportStl': 'Экспорт STL',
+    'viewer.download': 'Скачать',
+    'viewer.hintMesh': '3D-меш',
+    'viewer.hintCad': 'CAD-модель',
+    'viewer.hintSource': 'CadQuery',
 
     'timeline.steps': 'Шаги',
     'timeline.github': 'Открыть на GitHub',
@@ -187,6 +198,7 @@ const STRINGS: Record<Lang, Record<string, string>> = {
     'account.keyTitle': 'Ваш ключ LLM',
     'account.keySaved': 'Ключ сохранён ({provider}). Добавьте новый, чтобы заменить.',
     'account.keyPrompt': 'Добавьте ключ для безлимитных генераций с выбором своей модели.',
+    'account.removeKey': 'Удалить ключ',
     'account.provider': 'Провайдер',
     'account.model': 'Модель',
     'account.validateSave': 'Проверить и сохранить ключ',
@@ -194,6 +206,8 @@ const STRINGS: Record<Lang, Record<string, string>> = {
     'account.saveAnyway': 'Всё равно сохранить',
     'account.keyVerified': 'Ключ проверен и сохранён.',
     'account.sessionOnly': 'Без входа ключ хранится только в текущей сессии.',
+    'account.keyPrivacy':
+      'Ключ хранится в зашифрованном виде и используется только для вызовов вашего провайдера — не передаётся и не логируется. Можно заменить или удалить в любой момент; удаление аккаунта стирает его.',
 
     'notice.signIn': 'Войти',
     'notice.addKey': 'Добавить ключ',

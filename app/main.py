@@ -25,8 +25,8 @@ from fastapi.responses import FileResponse, JSONResponse, RedirectResponse, Resp
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
 
-from . import db, jwt_utils, metrics
-from .cadquery_exec import execute
+from . import crypto, db, jwt_utils, metrics
+from .cadquery_exec import execute, export_model
 from .llm import (
     DEFAULT_PROVIDER,
     INITIAL_CODE,
@@ -91,6 +91,33 @@ MAX_NAME = 500
 MAX_EMAIL = 320
 
 load_dotenv(ROOT / ".env")
+
+
+def _check_required_env() -> None:
+    """Fail-fast on boot when a security-critical env var is missing in production
+    (EASYCAD_SECURE_COOKIES=1) — better to refuse to start than to run on a PUBLIC
+    default secret. Feature-config gaps (trial key) only warn, so a deliberately-
+    minimal deploy still boots."""
+    problems = []
+    # JWT_SECRET is checked on its OWN — it signs auth tokens, so it must be a real
+    # secret even if a separate EASYCAD_SECRETS_KEY handles encryption. Without it,
+    # anyone can forge magic-link / session tokens (account takeover).
+    if not jwt_utils.secret_is_secure():
+        problems.append("JWT_SECRET (signs auth tokens — a public default lets anyone forge sessions)")
+    # Encryption key: JWT_SECRET or EASYCAD_SECRETS_KEY. Separate from the above so
+    # an explicit EASYCAD_SECRETS_KEY=<default> is still caught.
+    if not crypto.secret_is_secure():
+        problems.append("JWT_SECRET or EASYCAD_SECRETS_KEY (encrypts BYOK keys at rest)")
+    if problems:
+        if SECURE_COOKIES:
+            raise RuntimeError("Refusing to start: missing/insecure " + "; ".join(problems) + ".")
+        for p in problems:
+            log.warning("Insecure config: %s — OK for local dev only.", p)
+    if SECURE_COOKIES and (TRIAL_ANON > 0 or TRIAL_USER > 0) and not os.getenv("DEEP_SEEK_KEY"):
+        log.warning("Free trial is enabled but DEEP_SEEK_KEY is unset — trial generations will fail.")
+
+
+_check_required_env()
 
 registry = build_registry()
 limiter = RateLimiter()
@@ -1093,6 +1120,39 @@ def export_step(step_id: int, session: Session = Depends(current_session)) -> Re
         content=data,
         media_type="model/stl",
         headers={"Content-Disposition": f'attachment; filename="model_step_{step_id}.stl"'},
+    )
+
+
+@app.get("/api/export/{step_id}/source")
+def export_step_source(step_id: int, session: Session = Depends(current_session)) -> Response:
+    """Download the step's CadQuery script (.py) — just the stored code, no worker."""
+    step = session.store.get(step_id)
+    if step is None or not step.code:
+        raise HTTPException(404, f"No source available for step {step_id}")
+    return Response(
+        content=step.code,
+        media_type="text/x-python; charset=utf-8",
+        headers={"Content-Disposition": f'attachment; filename="model_step_{step_id}.py"'},
+    )
+
+
+@app.get("/api/export/{step_id}/step")
+def export_step_step(
+    step_id: int, session: Session = Depends(current_session), _slot: None = Depends(gen_slot),
+) -> Response:
+    """Download the step as a STEP file — re-runs the stored code in the worker to
+    export CAD-native geometry (no LLM; rate-limited + concurrency-capped)."""
+    _gen_guard(session)
+    step = session.store.get(step_id)
+    if step is None or not step.success or not step.code:
+        raise HTTPException(404, f"No model available for step {step_id}")
+    data = export_model(step.code, "step")
+    if not data:
+        raise HTTPException(502, "Could not export STEP for this model.")
+    return Response(
+        content=data,
+        media_type="application/step",
+        headers={"Content-Disposition": f'attachment; filename="model_step_{step_id}.step"'},
     )
 
 

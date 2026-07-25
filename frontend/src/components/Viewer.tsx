@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from 'preact/hooks'
 import { api } from '../api'
 import { useStore, useT } from '../store'
 import { ModelViewer } from '../viewer3d'
+import { IconCode, IconCube, IconDownload, IconMesh } from './Icons'
 
 export function Viewer() {
   const stlBase64 = useStore((s) => s.stlBase64)
@@ -12,6 +13,18 @@ export function Viewer() {
   const stageRef = useRef<HTMLDivElement>(null)
   const viewerRef = useRef<ModelViewer | null>(null)
   const [wire, setWire] = useState(false)
+  const [dlOpen, setDlOpen] = useState(false)
+  const dlRef = useRef<HTMLDivElement>(null)
+
+  // Close the download menu on an outside click.
+  useEffect(() => {
+    if (!dlOpen) return
+    const onDoc = (e: MouseEvent) => {
+      if (dlRef.current && !dlRef.current.contains(e.target as Node)) setDlOpen(false)
+    }
+    document.addEventListener('mousedown', onDoc)
+    return () => document.removeEventListener('mousedown', onDoc)
+  }, [dlOpen])
 
   useEffect(() => {
     if (!stageRef.current) return
@@ -51,9 +64,30 @@ export function Viewer() {
             {t('viewer.wireframe')}
           </label>
           {currentId != null && (
-            <a class="text-button" href={api.exportUrl(currentId)} download>
-              {t('viewer.exportStl')}
-            </a>
+            <div class="export-menu" ref={dlRef}>
+              <button class="text-button" onClick={() => setDlOpen((v) => !v)}>
+                <IconDownload /> {t('viewer.download')} <span class="caret">▾</span>
+              </button>
+              {dlOpen && (
+                <div class="export-dropdown">
+                  <a class="export-item" href={api.exportUrl(currentId)} download onClick={() => setDlOpen(false)}>
+                    <IconMesh />
+                    <span class="export-fmt">STL</span>
+                    <span class="export-hint">{t('viewer.hintMesh')}</span>
+                  </a>
+                  <a class="export-item" href={api.exportStepUrl(currentId)} download onClick={() => setDlOpen(false)}>
+                    <IconCube />
+                    <span class="export-fmt">STEP</span>
+                    <span class="export-hint">{t('viewer.hintCad')}</span>
+                  </a>
+                  <a class="export-item" href={api.exportSourceUrl(currentId)} download onClick={() => setDlOpen(false)}>
+                    <IconCode />
+                    <span class="export-fmt">.py</span>
+                    <span class="export-hint">{t('viewer.hintSource')}</span>
+                  </a>
+                </div>
+              )}
+            </div>
           )}
         </div>
       </header>

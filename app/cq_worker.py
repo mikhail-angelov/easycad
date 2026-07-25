@@ -1,9 +1,11 @@
 """Isolated CadQuery execution worker — invoked as a subprocess.
 
-Reads one JSON job from stdin: {"code": str, "stl_path": str}.
-Executes the code, exports the `result` Workplane to STL, and computes a
-geometry-info comment block. Writes a single JSON line to stdout:
-{"success": bool, "geometry_info": str | None, "error": str | None}.
+Reads one JSON job from stdin: {"code": str, "export_path": str} (or the legacy
+key "stl_path"). Executes the code, exports the `result` Workplane to that path —
+the FORMAT is inferred from the file extension (`.stl`, `.step`) by
+`cq.exporters.export` — and computes a geometry-info comment block. Writes a
+single JSON line to stdout: {"success": bool, "geometry_info": str|None,
+"error": str|None}; the parent reads the exported file itself.
 
 Running in a child process means a CadQuery/OCP segfault or hang can't take
 down the API server — the parent just observes a non-zero exit or timeout.
@@ -56,7 +58,8 @@ def _describe(exc: Exception) -> str:
 def main() -> None:
     job = json.load(sys.stdin)
     code = job["code"]
-    stl_path = job["stl_path"]
+    # Format is inferred from the extension; `stl_path` kept for back-compat.
+    export_path = job.get("export_path") or job["stl_path"]
 
     namespace: dict = {}
     try:
@@ -77,7 +80,7 @@ def main() -> None:
     try:
         import cadquery as cq
 
-        cq.exporters.export(result, stl_path)
+        cq.exporters.export(result, export_path)
         info = get_geometry_info(result)
     except Exception as exc:  # noqa: BLE001
         _emit({"success": False, "geometry_info": None, "error": f"Export error: {_describe(exc)}"})

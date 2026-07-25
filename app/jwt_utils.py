@@ -12,8 +12,18 @@ import os
 import time
 
 
+INSECURE_DEFAULT = "dev-insecure-secret-change-me"
+
+
 def _secret() -> bytes:
-    return os.getenv("JWT_SECRET", "dev-insecure-secret-change-me").encode()
+    return os.getenv("JWT_SECRET", INSECURE_DEFAULT).encode()
+
+
+def secret_is_secure() -> bool:
+    """False when JWT_SECRET is unset (falls back to the public dev default),
+    which would let anyone forge magic-link / session tokens. Independent of the
+    BYOK encryption key — auth signing must have its own real secret."""
+    return os.getenv("JWT_SECRET", INSECURE_DEFAULT) != INSECURE_DEFAULT
 
 
 def _b64u_encode(raw: bytes) -> str:

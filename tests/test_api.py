@@ -51,6 +51,27 @@ def test_execute_manual_creates_step_and_export_works():
     assert len(resp.content) > 200
 
 
+def test_download_step_and_source():
+    client = TestClient(app)
+    client.get("/api/session")
+    code = "import cadquery as cq\nresult = cq.Workplane('XY').box(20, 20, 20)\n"
+    step_id = client.post("/api/execute-manual", json={"code": code}).json()["step"]["id"]
+
+    # STEP: re-runs the worker to export CAD-native geometry.
+    step = client.get(f"/api/export/{step_id}/step")
+    assert step.status_code == 200
+    assert step.headers["content-type"] == "application/step"
+    assert step.content[:13] == b"ISO-10303-21;"  # STEP file signature
+    assert "model_step_" in step.headers["content-disposition"]
+
+    # Source: the stored CadQuery script, no worker.
+    src = client.get(f"/api/export/{step_id}/source")
+    assert src.status_code == 200
+    assert src.headers["content-type"].startswith("text/x-python")
+    assert "import cadquery" in src.text
+    assert src.headers["content-disposition"].endswith('.py"')
+
+
 def test_revert_moves_current_pointer():
     client = TestClient(app)
     client.get("/api/session")  # step 0

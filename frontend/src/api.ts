@@ -179,7 +179,9 @@ export const api = {
 
   revert: (stepId: number): Promise<SessionPayload> => post(`/api/steps/${stepId}/revert`, {}),
 
-  exportUrl: (stepId: number): string => `/api/export/${stepId}`,
+  exportUrl: (stepId: number): string => `/api/export/${stepId}`, // STL (cached)
+  exportStepUrl: (stepId: number): string => `/api/export/${stepId}/step`,
+  exportSourceUrl: (stepId: number): string => `/api/export/${stepId}/source`,
 
   exportProjectUrl: (): string => '/api/project/export',
 

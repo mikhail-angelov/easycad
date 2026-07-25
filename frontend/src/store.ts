@@ -96,6 +96,7 @@ interface State {
   logout: () => Promise<void>
   validateKey: (provider: string, key: string) => Promise<ValidateKeyResult>
   saveKey: (provider: string, model: string, key: string) => Promise<void>
+  removeKey: () => Promise<void>
   deleteAccount: () => Promise<void>
   setCode: (code: string) => void
   selectModel: (model: string) => Promise<void>
@@ -287,6 +288,23 @@ export const useStore = create<State>((set, get) => {
           hasKey: s.has_key,
           provider: s.provider,
           model: s.model ?? '',
+          trialTier: s.trial_tier ?? null,
+          trialRemaining: s.trial_remaining ?? null,
+        })
+      } catch (e) {
+        reportError(e)
+      } finally {
+        set({ busy: false })
+      }
+    },
+
+    async removeKey() {
+      set({ busy: true, error: null })
+      try {
+        // Empty key clears it server-side (has_key ⇒ false); provider/model stay.
+        const s = await api.saveSettings({ key: '' })
+        set({
+          hasKey: s.has_key,
           trialTier: s.trial_tier ?? null,
           trialRemaining: s.trial_remaining ?? null,
         })
