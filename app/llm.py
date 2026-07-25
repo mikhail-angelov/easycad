@@ -5,11 +5,22 @@ CadQuery code and a modification request, returns new code that appends the
 requested feature. OpenAI-compatible providers only.
 """
 
+import logging
 import os
 import re
 import textwrap
+import time
 
 from openai import OpenAI
+
+log = logging.getLogger("easycad.llm")
+
+# Hard ceiling on any single provider call. The OpenAI SDK defaults to 600s,
+# which is far longer than the edge proxy's response timeout — so a slow
+# generation used to hang until the proxy reset the (HTTP/2) connection
+# (ERR_HTTP2_PROTOCOL_ERROR in the browser) with nothing logged. Timing out
+# here turns that into a fast, logged LLMError the API can report cleanly.
+LLM_TIMEOUT = float(os.getenv("EASYCAD_LLM_TIMEOUT", "90"))
 
 # ── Providers (OpenAI-compatible) ────────────────────────────────────────────
 
@@ -154,7 +165,7 @@ def make_client(provider: str, api_key: str | None = None) -> OpenAI:
     key = api_key or os.getenv(cfg["api_key_env"])
     if not key:
         raise LLMError(f"No API key for provider '{provider}'. Add your key in settings.")
-    return OpenAI(base_url=cfg["base_url"], api_key=key)
+    return OpenAI(base_url=cfg["base_url"], api_key=key, timeout=LLM_TIMEOUT)
 
 
 def validate_key_live(provider: str, key: str) -> tuple[bool, str | None]:
@@ -209,6 +220,11 @@ def generate_code(
         f"Current CadQuery code:\n```python\n{current_code}\n```\n\n"
         f"Modification request: {prompt}"
     )
+    log.info(
+        "llm.generate start provider=%s model=%s code_len=%d prompt_len=%d temp=%s",
+        provider, resolved, len(current_code), len(prompt), temperature,
+    )
+    _t0 = time.monotonic()
     try:
         response = client.chat.completions.create(
             model=resolved,
@@ -220,7 +236,15 @@ def generate_code(
             max_tokens=4096,
         )
     except Exception as exc:  # noqa: BLE001 — normalize SDK/transport errors
+        log.warning(
+            "llm.generate FAIL provider=%s model=%s dur_ms=%d err=%s",
+            provider, resolved, int((time.monotonic() - _t0) * 1000), exc,
+        )
         raise LLMError(str(exc)) from exc
 
     raw = response.choices[0].message.content or ""
+    log.info(
+        "llm.generate ok provider=%s model=%s dur_ms=%d out_len=%d",
+        provider, resolved, int((time.monotonic() - _t0) * 1000), len(raw),
+    )
     return strip_markdown_fences(raw)

@@ -26,6 +26,11 @@ services:
       redoproxy.enabled: "true"
       redoproxy.domain: "easycad.bconf.com"
       redoproxy.port: 8852
+      # /api/chat runs an LLM generation turn that can take longer than the proxy's
+      # 30s default — without this the edge reset the (HTTP/2) connection mid-turn
+      # (ERR_HTTP2_PROTOCOL_ERROR). Kept above the app's EASYCAD_LLM_TIMEOUT (90s)
+      # so the app fails first with a clean 502 rather than the proxy timing out.
+      redoproxy.timeout: 120
     depends_on:
       - worker
     logging:

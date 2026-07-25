@@ -81,7 +81,18 @@ ADMIN_TOKEN = os.getenv("EASYCAD_ADMIN_TOKEN")
 # Optional ops address alerted (once/day) when the budget kill-switch trips.
 ALERT_EMAIL = os.getenv("EASYCAD_ALERT_EMAIL")
 
+# ── Logging setup ─────────────────────────────────────────────────────────────
+# Without this, `logging.getLogger("easycad")` inherits the root WARNING level and
+# has no handler under some runners, so INFO "happy path" lines never appear and
+# the container logs stay empty. Configure a single stream handler + timestamped
+# format once, at import, and honour EASYCAD_LOG_LEVEL (default INFO).
+LOG_LEVEL = os.getenv("EASYCAD_LOG_LEVEL", "INFO").upper()
+logging.basicConfig(
+    level=LOG_LEVEL,
+    format="%(asctime)s %(levelname)s %(name)s %(message)s",
+)
 log = logging.getLogger("easycad")
+log.setLevel(LOG_LEVEL)
 
 # Input bounds (review C1) — reject oversized payloads before parsing/retention.
 MAX_BODY_BYTES = int(os.getenv("EASYCAD_MAX_BODY_BYTES", str(2_000_000)))  # 2 MB
@@ -213,6 +224,47 @@ async def _session_cookie(request: Request, call_next):
     return response
 
 
+# Access log (registered last → outermost middleware, so it wraps and times the
+# whole request). One line per request with method, path, status and duration.
+# Static-asset GETs are dropped to keep the signal high. This is the "positive
+# path" visibility the container logs were missing.
+_ACCESS_LOG_SKIP_PREFIXES = ("/assets", "/static")
+
+
+@app.middleware("http")
+async def _access_log(request: Request, call_next):
+    path = request.url.path
+    if request.method == "GET" and path.startswith(_ACCESS_LOG_SKIP_PREFIXES):
+        return await call_next(request)
+    _t0 = time.monotonic()
+    try:
+        response = await call_next(request)
+    except Exception as exc:
+        # Unhandled error escaping the app: emit the concise access line here (no
+        # traceback — the exception handler below logs the full traceback once)
+        # and re-raise so that handler turns it into a 500 for the client.
+        dur_ms = int((time.monotonic() - _t0) * 1000)
+        log.error("%s %s -> 500 (%dms) unhandled: %s", request.method, path, dur_ms, exc)
+        raise
+    dur_ms = int((time.monotonic() - _t0) * 1000)
+    level = logging.INFO
+    if response.status_code >= 500:
+        level = logging.ERROR
+    elif response.status_code >= 400:
+        level = logging.WARNING
+    log.log(level, "%s %s -> %d (%dms)", request.method, path, response.status_code, dur_ms)
+    return response
+
+
+@app.exception_handler(Exception)
+async def _unhandled_exception(request: Request, exc: Exception):
+    """Last-resort handler so a bug returns a clean 500 JSON body (and is logged
+    with a traceback via the access-log middleware above) instead of the client
+    seeing a dropped/reset connection."""
+    log.exception("Unhandled error on %s %s: %s", request.method, request.url.path, exc)
+    return JSONResponse({"detail": "Internal server error."}, status_code=500)
+
+
 def current_session(request: Request) -> Session:
     """Resolve the caller's session and (re)link it to their user, if logged in."""
     session = registry.get_or_create(request.state.session_id)
@@ -248,6 +300,7 @@ def _coded_error(status: int, code: str, message: str) -> HTTPException:
 
 def _provider_error(context: str, exc: Exception) -> HTTPException:
     metrics.incr("provider_errors")
+    log.warning("provider_error %s: %s", context, exc)
     return _coded_error(502, "provider_error", f"{context}: {exc}")
 
 
@@ -904,9 +957,17 @@ def _generate_and_step(
         _charge_trial(trial_ident)
 
     res = execute(code)
-    metrics.incr("gen_ms_total", int((time.time() - _t0) * 1000))
+    dur_ms = int((time.time() - _t0) * 1000)
+    metrics.incr("gen_ms_total", dur_ms)
     metrics.incr("gen_ms_count")
     metrics.incr("gen_ok" if res.success else "gen_exec_fail")
+    log.info(
+        "chat.gen provider=%s model=%s trial=%s exec_%s dur_ms=%d",
+        provider, model, trial_ident is not None,
+        "ok" if res.success else "fail", dur_ms,
+    )
+    if not res.success:
+        log.warning("chat.gen exec error: %s", (res.error or "")[:300])
     step = session.store.add(
         kind="chat",
         original_prompt=original_prompt,
