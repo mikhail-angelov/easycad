@@ -32,7 +32,7 @@ Lower the first-run barrier and make the key form self-explanatory:
   separately; one user turn = one trial unit.
 - **Trial key** = the operator's server-side `DEEP_SEEK_KEY` (existing env).
   On trial, **both provider and model are fixed** — always DeepSeek with
-  `deepseek-chat`. The user selects nothing; the pickers are inactive/hidden
+  `deepseek-v4-flash`. The user selects nothing; the pickers are inactive/hidden
   until a key is added. Model selection is a **BYOK-only** feature.
 
 ## Trial tiers
@@ -61,16 +61,16 @@ PROVIDERS = {
     "deepseek": {
         "base_url": "https://api.deepseek.com",
         "api_key_env": "DEEP_SEEK_KEY",
-        "default_model": "deepseek-chat",
-        "models": ["deepseek-chat", "deepseek-reasoner"],
+        "default_model": "deepseek-v4-flash",
+        "models": ["deepseek-v4-flash", "deepseek-v4-pro"],
         "key_prefix": "sk-",
     },
     "openrouter": {
         "base_url": "https://openrouter.ai/api/v1",
         "api_key_env": "OPEN_ROUTER_KEY",
-        "default_model": "deepseek/deepseek-chat",   # DeepSeek is the default
+        "default_model": "deepseek/deepseek-v4-flash",   # DeepSeek is the default
         "models": [
-            "deepseek/deepseek-chat",                # default
+            "deepseek/deepseek-v4-flash",                # default
             "openai/gpt-4o-mini",
             "anthropic/claude-3.5-sonnet",
             "google/gemini-3-flash",
@@ -82,7 +82,7 @@ PROVIDERS = {
 ```
 
 > Verify the exact OpenRouter model slugs against its live catalog before
-> shipping (`google/gemini-3-flash` and `deepseek/deepseek-chat` in particular) —
+> shipping (`google/gemini-3-flash` and `deepseek/deepseek-v4-flash` in particular) —
 > the dropdown must only offer ids OpenRouter actually serves.
 
 **Provider vs. model selection (UX rule).** The user always picks a **model**;
@@ -95,7 +95,7 @@ implied:
 - **At generation time** the provider follows from state: on trial it is forced
   to DeepSeek (operator key); with a saved key it is that key's provider.
 - **On trial, nothing is selectable** — provider and model are hard-forced to
-  DeepSeek / `deepseek-chat`; the model dropdown is inactive until a key exists.
+  DeepSeek / `deepseek-v4-flash`; the model dropdown is inactive until a key exists.
 - **With a saved key**, the model dropdown becomes the live generation control:
   user-selectable among that provider's `models`, defaulting to `default_model`.
 
@@ -131,7 +131,7 @@ New precedence, replacing the current `REQUIRE_USER_KEY`-only logic:
    comes from the user's selection (their key, their cost — any model in that
    provider's list is fine). No trial counting.
 2. **No key, trial remaining** (anon `used < 1`, or user `used < 10`) → use the
-   operator `DEEP_SEEK_KEY` with `provider="deepseek"` **and** `model="deepseek-chat"`,
+   operator `DEEP_SEEK_KEY` with `provider="deepseek"` **and** `model="deepseek-v4-flash"`,
    both hard-forced (any provider/model in the request is ignored on trial, so
    nobody runs an expensive model on the operator's key). Increment the counter
    **only on a successful generation** (failed calls don't burn the quota).

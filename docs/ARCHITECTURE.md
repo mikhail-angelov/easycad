@@ -155,7 +155,7 @@ Defence in depth for untrusted, LLM-generated code (hosted mode):
   returning user is never logged out; only a full year of inactivity ends it.
 - **Key resolution** per generation (SPEC14): a saved BYOK key (user DB when
   authed, in-memory session when anonymous) is used as-is; otherwise a free-trial
-  call runs on the operator's `DEEP_SEEK_KEY` (forced to `deepseek-chat`) until
+  call runs on the operator's `DEEP_SEEK_KEY` (forced to `deepseek-v4-flash`) until
   the grant is spent, after which `/api/chat` returns 402 asking for a key. The
   key is used by the app to call the LLM and is **never** passed to the worker.
 - **Anonymous vs authed settings:** anonymous settings live in the in-memory

@@ -200,7 +200,7 @@ Request:
   "prompt": "Сделай бортик по верхней кромке",
   "current_code": "import cadquery as cq\n...",
   "provider": "deepseek",
-  "model": "deepseek-chat"
+  "model": "deepseek-v4-flash"
 }
 ```
 
@@ -223,7 +223,7 @@ Request:
   "prompt": "Add an inner ledge...",
   "current_code": "import cadquery as cq\n...",
   "provider": "deepseek",
-  "model": "deepseek-chat"
+  "model": "deepseek-v4-flash"
 }
 ```
 
@@ -266,7 +266,7 @@ Request:
   "current_code": "...",
   "step_number": 3,
   "provider": "deepseek",
-  "model": "deepseek-chat",
+  "model": "deepseek-v4-flash",
   "auto_refine": true
 }
 ```
@@ -317,7 +317,7 @@ Download STL file for a specific step.
 - Vanilla CSS or Tailwind (layout)
 
 **LLM Providers (via OpenAI-compatible API):**
-- DeepSeek (deepseek-chat — best results in POC)
+- DeepSeek (deepseek-v4-flash — best results in POC)
 - OpenRouter (access to GPT-4o, Gemini, Claude, etc.)
 - Direct OpenAI
 
@@ -329,12 +329,12 @@ Download STL file for a specific step.
 
 | Model | Step Success Rate | Code Quality | Notes |
 |---|---|---|---|
-| deepseek-chat | 5/5 | Best | Idiomatic CadQuery, correct coordinate math |
+| deepseek-v4-flash | 5/5 | Best | Idiomatic CadQuery, correct coordinate math |
 | deepseek-coder | 4/5 | Good | Failed on fillet (used non-existent API) |
 | gpt-4o-mini | 5/5 | Moderate | All steps pass but geometry sometimes wrong |
 | gpt-4o | 4/5 | Moderate | Failed on fillet, not better than mini |
 
-Recommended default: **deepseek-chat**
+Recommended default: **deepseek-v4-flash**
 
 ## Error Handling
 
@@ -393,7 +393,7 @@ No database required. Sessions can be listed, resumed, duplicated, deleted.
 - Step history with undo (click to revert)
 - Manual code editing with "Run" button
 - STL export
-- deepseek-chat as default provider
+- deepseek-v4-flash as default provider
 - Auto-generated geometry info
 
 **Phase 2:**

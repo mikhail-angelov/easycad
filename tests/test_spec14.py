@@ -53,8 +53,8 @@ def _login(client: TestClient, monkeypatch, email: str) -> None:
 def test_session_exposes_provider_models():
     client = TestClient(app)
     data = client.get("/api/session").json()
-    assert data["providers"]["deepseek"]["models"] == ["deepseek-chat", "deepseek-reasoner"]
-    assert data["providers"]["openrouter"]["default_model"] == "deepseek/deepseek-chat"
+    assert data["providers"]["deepseek"]["models"] == ["deepseek-v4-flash", "deepseek-v4-pro"]
+    assert data["providers"]["openrouter"]["default_model"] == "deepseek/deepseek-v4-flash"
     # openai is kept in code but hidden from the UI dropdown.
     assert "openai" not in data["providers"]
 
@@ -189,9 +189,9 @@ def test_put_settings_rejects_off_list_model():
 def test_put_settings_accepts_allow_listed_model():
     client = TestClient(app)
     client.get("/api/session")
-    r = client.put("/api/settings", json={"provider": "deepseek", "model": "deepseek-reasoner", "key": "sk-x"})
+    r = client.put("/api/settings", json={"provider": "deepseek", "model": "deepseek-v4-pro", "key": "sk-x"})
     assert r.status_code == 200
-    assert r.json()["model"] == "deepseek-reasoner"
+    assert r.json()["model"] == "deepseek-v4-pro"
 
 
 # ── Exhaustion copy carries the configured limit ───────────────────────────────

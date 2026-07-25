@@ -23,17 +23,17 @@ PROVIDERS = {
     "deepseek": {
         "base_url": "https://api.deepseek.com",
         "api_key_env": "DEEP_SEEK_KEY",
-        "default_model": "deepseek-chat",  # best results in POC
-        "models": ["deepseek-chat", "deepseek-reasoner"],
+        "default_model": "deepseek-v4-flash",  # best results in POC
+        "models": ["deepseek-v4-flash", "deepseek-v4-pro"],
         "key_prefix": "sk-",
         "ui": True,
     },
     "openrouter": {
         "base_url": "https://openrouter.ai/api/v1",
         "api_key_env": "OPEN_ROUTER_KEY",
-        "default_model": "deepseek/deepseek-chat",  # DeepSeek is the default
+        "default_model": "deepseek/deepseek-v4-flash",  # DeepSeek is the default
         "models": [
-            "deepseek/deepseek-chat",
+            "deepseek/deepseek-v4-flash",
             "openai/gpt-4o-mini",
             "anthropic/claude-sonnet-4.5",
             "google/gemini-2.5-flash",
@@ -56,7 +56,7 @@ DEFAULT_PROVIDER = "deepseek"
 # On trial, provider AND model are hard-forced to the operator's DeepSeek key so
 # nobody runs an expensive model on our dime (SPEC14).
 TRIAL_PROVIDER = "deepseek"
-TRIAL_MODEL = "deepseek-chat"
+TRIAL_MODEL = "deepseek-v4-flash"
 
 
 def ui_providers() -> dict:

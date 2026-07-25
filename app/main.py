@@ -365,7 +365,7 @@ def _resolve_llm(session: Session, request: Request, req_provider: str | None, r
       1. Saved key → use it. Provider is the key's provider; model is the user's
          selection (their key, their cost). No trial counting (`trial_ident=None`).
       2. No key, trial remaining → operator DeepSeek key, provider+model hard-
-         forced to deepseek/deepseek-chat (any request-supplied provider/model is
+         forced to deepseek/deepseek-v4-flash (any request-supplied provider/model is
          ignored so nobody runs an expensive model on our key). `trial_ident` is
          returned so the caller increments the counter on success only.
       3. No key, trial exhausted → 402 with a machine-readable code.

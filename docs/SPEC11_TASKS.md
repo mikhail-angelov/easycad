@@ -4,7 +4,7 @@ Rebuilding EasyCAD as the SPEC11 "CadQuery Chat" — a text-only, single-screen
 incremental 3D model builder. Old image-recognition app fully removed.
 
 Runtime: backend runs in `.venv-poc` (has cadquery 2.8.0). LLM keys in `.env`
-(`DEEP_SEEK_KEY`, `OPEN_ROUTER_KEY`). Default provider: deepseek-chat.
+(`DEEP_SEEK_KEY`, `OPEN_ROUTER_KEY`). Default provider: deepseek-v4-flash.
 
 ## Tasks
 
@@ -13,7 +13,7 @@ Runtime: backend runs in `.venv-poc` (has cadquery 2.8.0). LLM keys in `.env`
       Kept all spec*.md, scaffolding, poc_cadquery_chat.py, styles.css palette. Added .DS_Store to .gitignore.
 - [x] **Task 1 — Backend core.** DONE. `app/cq_worker.py` (isolated worker), `app/cadquery_exec.py`
       (subprocess executor + geometry info), `app/llm.py` (providers + code generator, default
-      deepseek-chat). `tests/test_cadquery_exec.py` — 5 passing. Installed fastapi/uvicorn/pytest
+      deepseek-v4-flash). `tests/test_cadquery_exec.py` — 5 passing. Installed fastapi/uvicorn/pytest
       into .venv-poc via uv. requirements.txt + Makefile PYTHON now point at .venv-poc.
 - [x] **Task 2 — Backend API.** DONE. `app/store.py` (SessionStore/Step) + `app/main.py` FastAPI:
       `/api/session`(+reset), `/api/steps`, `/api/steps/{id}`(+revert), `/api/execute`(stateless),
