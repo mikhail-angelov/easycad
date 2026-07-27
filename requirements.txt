@@ -9,9 +9,11 @@ python-dotenv
 cadquery
 # easycad_geom + bench harness (shared measurement package, bench-SPEC §2.7, §6).
 # trimesh: mesh normalization, watertight, surface-to-surface distance.
+# rtree: trimesh surface proximity queries used by bench grade tests.
 # pyyaml:  scenario.yaml parsing. matplotlib (renders) is optional — render.py
 # degrades gracefully when it is absent.
 trimesh
+rtree
 pyyaml
 # dev
 pytest
