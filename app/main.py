@@ -678,6 +678,11 @@ def _base_code(store, current_code: str | None) -> str:
     return current.code if current else INITIAL_CODE
 
 
+def _is_initial_model(store, code: str) -> bool:
+    current = store.current()
+    return current is not None and current.kind == "initial" and code == current.code
+
+
 # ── Auth endpoints ────────────────────────────────────────────────────────────
 
 
@@ -958,7 +963,10 @@ def _generate_and_step(
     metrics.incr("gen_attempts")
     _t0 = time.time()
     try:
-        code = generate_code(base_code, gen_prompt, provider, model, api_key=api_key, skills=skills)
+        generate_kwargs = {"api_key": api_key, "skills": skills}
+        if _is_initial_model(session.store, base_code):
+            generate_kwargs["replace_initial"] = True
+        code = generate_code(base_code, gen_prompt, provider, model, **generate_kwargs)
     except LLMError as exc:
         raise _provider_error("LLM error", exc) from exc
 
@@ -1034,6 +1042,14 @@ def api_chat(
     base_code = _base_code(session.store, req.current_code)
     provider, model, api_key, trial_ident = _resolve_llm(session, request, req.provider, req.model)
 
+    # The starter box is a disposable visual placeholder. The first user request
+    # always defines the actual model, so bypass triage and replace it directly.
+    if _is_initial_model(session.store, base_code):
+        return _generate_and_step(
+            session, request, base_code, req.prompt, req.prompt, None,
+            provider, model, api_key, trial_ident,
+        )
+
     if not req.auto_refine:
         # No triage this turn. Skills come ONLY from the server-side pending
         # refinement stored by the triage that returned confirm_refine — never
@@ -1092,7 +1108,7 @@ def api_variations(
     gen_prompt = req.prompt
     refined_prompt: str | None = None
     skills: list[str] | None = None
-    if req.auto_refine:
+    if req.auto_refine and not _is_initial_model(session.store, base_code):
         if not _charge_operator_call(trial_ident):  # triage is an operator call
             raise _budget_exhausted_error()
         try:
@@ -1120,7 +1136,10 @@ def api_variations(
             break
         metrics.incr("gen_attempts")
         try:
-            code = generate_code(base_code, gen_prompt, provider, model, temperature=0.7, api_key=api_key, skills=skills)
+            generate_kwargs = {"temperature": 0.7, "api_key": api_key, "skills": skills}
+            if _is_initial_model(session.store, base_code):
+                generate_kwargs["replace_initial"] = True
+            code = generate_code(base_code, gen_prompt, provider, model, **generate_kwargs)
         except LLMError as exc:
             metrics.incr("provider_errors")  # so variations feed the failure rate
             candidates.append(

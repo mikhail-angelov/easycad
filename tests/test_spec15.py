@@ -82,6 +82,7 @@ def test_chat_passes_interface_language_to_triage(monkeypatch):
 
     monkeypatch.setattr(m, "triage", fake_triage)
     client = TestClient(app)
+    client.post("/api/execute-manual", json={"code": BOX})
     r = client.post("/api/chat", json={
         "prompt": "add a hole", "auto_refine": True, "current_code": BOX,
         "response_language": "ru",
@@ -97,6 +98,28 @@ def test_triage_uses_interface_language_for_prompt_and_fallback_reason():
     assert _parse('{"verdict": "invalid"}', "ru").reason == (
         "Запрос, похоже, не соответствует текущей модели."
     )
+
+
+def test_first_chat_treats_the_starter_box_as_replaceable(monkeypatch):
+    seen: dict = {}
+
+    def fake_triage(*args, **kwargs):
+        raise AssertionError("the first request must skip triage")
+
+    def fake_generate(*args, **kwargs):
+        seen["replace_initial"] = kwargs["replace_initial"]
+        return BOX
+
+    monkeypatch.setattr(m, "triage", fake_triage)
+    monkeypatch.setattr(m, "generate_code", fake_generate)
+    client = TestClient(app)
+    r = client.post("/api/chat", json={
+        "prompt": "Create a 100 by 60 millimeter plate, 5 millimeters thick, with four holes near the corners.",
+        "auto_refine": True,
+    }, headers={"x-real-ip": "3.3.3.6"})
+
+    assert r.status_code == 200, r.text
+    assert seen == {"replace_initial": True}
 
 
 def test_confirm_refine_carries_skills_server_side(monkeypatch):

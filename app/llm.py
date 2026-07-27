@@ -181,6 +181,12 @@ SYSTEM_PROMPT = textwrap.dedent("""\
       pass combine=False — NOT cut=False.
 """)
 
+INITIAL_REPLACEMENT_PROMPT = """\
+This is the first request for a new project. The current box is only a starter
+placeholder, not part of the user's model. Replace the starter code entirely
+with code for the requested model; do not append features to the placeholder.
+"""
+
 
 class LLMError(Exception):
     """Raised when an LLM provider call fails or is misconfigured."""
@@ -244,6 +250,7 @@ def generate_code(
     temperature: float = 0.2,
     api_key: str | None = None,
     skills: list[str] | None = None,
+    replace_initial: bool = False,
 ) -> str:
     """Ask the LLM to append the requested modification to `current_code`.
 
@@ -259,6 +266,8 @@ def generate_code(
         f"Modification request: {prompt}"
     )
     messages = [{"role": "system", "content": SYSTEM_PROMPT}]
+    if replace_initial:
+        messages.append({"role": "system", "content": INITIAL_REPLACEMENT_PROMPT})
     skill_prompt = skills_render(skills)
     if skill_prompt:
         messages.append({"role": "system", "content": skill_prompt})
