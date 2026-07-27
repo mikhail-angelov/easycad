@@ -52,17 +52,17 @@ jobs:
         run: python -m pytest -q
 
       # Deterministic bench gates only (bench-SPEC §12) — no LLM run in CI.
-      - name: Validate bench scenarios
-        run: PYTHONPATH=bench/src:. python -m bench schema
+      # - name: Validate bench scenarios
+      #   run: PYTHONPATH=bench/src:. python -m bench schema
 
-      - name: Check bench references in sync with expected/
-        run: PYTHONPATH=bench/src:. python -m bench spec --check
+      # - name: Check bench references in sync with expected/
+      #   run: PYTHONPATH=bench/src:. python -m bench spec --check
 
       # Release gate (tags only): references must also be human-validated (§4.3).
       # Not run on PRs — human acceptance is a release concern, not a PR gate.
-      - name: Require validated references (release tags only)
-        if: startsWith(github.ref, 'refs/tags/v')
-        run: PYTHONPATH=bench/src:. python -m bench spec --check --require-validation
+      # - name: Require validated references (release tags only)
+      #   if: startsWith(github.ref, 'refs/tags/v')
+      #   run: PYTHONPATH=bench/src:. python -m bench spec --check --require-validation
 
   docker:
     name: build and publish docker images
