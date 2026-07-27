@@ -1242,10 +1242,18 @@ def export_step_step(
     data = export_model(step.code, "step")
     if not data:
         raise HTTPException(502, "Could not export STEP for this model.")
+    # Content hash so a client (e.g. the bench harness) can verify the download
+    # is complete and unaltered end-to-end — a proxy truncation or stale body is
+    # otherwise measured as if it were the current model.
+    import hashlib
+    digest = hashlib.sha256(data).hexdigest()
     return Response(
         content=data,
         media_type="application/step",
-        headers={"Content-Disposition": f'attachment; filename="model_step_{step_id}.step"'},
+        headers={
+            "Content-Disposition": f'attachment; filename="model_step_{step_id}.step"',
+            "X-Content-SHA256": digest,
+        },
     )
 
 

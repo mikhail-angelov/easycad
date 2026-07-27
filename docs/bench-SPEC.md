@@ -420,8 +420,10 @@ easycad/
 class TurnResult:
     code: str | None
     raw_response: str
-    artifacts: dict           # {"step": {"url": ..., "sha256": ...}, "stl": {...}}
     error: str | None
+    error_stage: str | None   # "generate" | "execute" | None
+    step_bytes: bytes | None  # integrity-verified STEP (see below)
+    stl_bytes: bytes | None   # integrity-verified STL  (see below)
     cost_usd: float
     latency_ms: int
     internal_retries: int
@@ -433,10 +435,15 @@ class Session(Protocol):
 class Backend(Protocol):
     name: str
     config: dict              # {"quality_loop": {"enabled": bool}}
-    def start_session(self, scenario_id: str) -> Session: ...
+    def start_session(self, scenario: Scenario) -> Session: ...
 ```
 
-Артефакты приезжают **по URL с sha256**, не путями в файловой системе: воркер живёт в контейнере, локальных путей у бенчмарка нет. Адаптер скачивает в директорию прогона и сверяет хеш.
+**Целостность обоих измеряемых артефактов проверяется по server-provided SHA-256** — воркер живёт в контейнере, локальных путей у бенчмарка нет, а прокси на пути может тихо повредить байты. Требование — целостная доставка; конкретный транспорт у STEP и STL разный (реализация против реального публичного API EasyCAD):
+
+- **STEP** приезжает отдельным запросом `GET /api/export/{id}/step`; сервер отдаёт заголовок `X-Content-SHA256`, адаптер скачивает и сверяет. Отсутствие заголовка или несовпадение — ошибка артефакта (fail-closed; opt-out `--allow-unverified-artifacts` для старого сервера).
+- **STL** приезжает **inline base64** в ответе `/api/chat` вместе с полем `stl_sha256`; адаптер декодирует и сверяет тем же контрактом. Inline не хуже отдельного URL: байты уже в ответе, целостность проверяется хешем — и это на один round-trip меньше. Отдельный `GET /api/export/{id}` (STL) существует, но при уже проверяемом хеше избыточен.
+
+Оба варианта дают одну гарантию: измеряется ровно то, что произвёл сервер. Хеши скачанного/декодированного также пишутся в `facts`/`gen.json` прогона.
 
 Ablation — **тот же бэкенд с другим флагом конфига**, не вторая реализация. Иначе через месяц они разойдутся по модели, промпту, парсеру или лимитам, и разница перестанет означать то, что нужно.
 

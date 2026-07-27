@@ -1,0 +1,21 @@
+id: 004-l-bracket
+title: L-bracket, flanges 60×40 and 40×40, 5 mm thick, four Ø5.5 holes
+spec: complete
+tags: [boolean, orientation, explicit-dims]
+timeout_s: 120
+
+turns:
+  - prompt: >
+      Create an L-shaped bracket, 5 mm wall thickness throughout, standing so it
+      sits on the XY plane (Z up), centered on XY by its overall bounding box.
+      The horizontal flange is 60 mm long (X) by 40 mm wide (Y) by 5 mm thick,
+      lying on the XY plane. The vertical flange is 40 mm tall (Z) by 40 mm wide
+      (Y) by 5 mm thick, rising from the short edge at one end of the horizontal
+      flange, flush with it in Y. Both flanges share the 40 mm width.
+      Holes, all 5.5 mm diameter, drilled through the 5 mm thickness:
+      in the horizontal flange, two holes on a line 15 mm from the far short
+      edge (the end away from the vertical flange), one on each side of the
+      flange centerline at ±10 mm in Y; in the vertical flange, two holes 25 mm
+      above the XY plane, one on each side of the flange centerline at ±10 mm
+      in Y.
+    reference: reference-1.py

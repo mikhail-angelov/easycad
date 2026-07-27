@@ -1,0 +1,13 @@
+id: 009-slot-plate
+title: Plate 80×30×4, central 30×6 rounded-end slot
+spec: complete
+tags: [slots]
+timeout_s: 120
+
+turns:
+  - prompt: >
+      Create a rectangular plate 80 × 30 × 4 mm, centered on XY with its bottom
+      face at Z = 0. Cut a through slot with rounded ends through the center: the
+      slot is 30 mm long overall and 6 mm wide, its long axis along X, centered on
+      the plate.
+    reference: reference-1.py

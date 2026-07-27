@@ -7,5 +7,11 @@ pydantic
 openai
 python-dotenv
 cadquery
+# easycad_geom + bench harness (shared measurement package, bench-SPEC §2.7, §6).
+# trimesh: mesh normalization, watertight, surface-to-surface distance.
+# pyyaml:  scenario.yaml parsing. matplotlib (renders) is optional — render.py
+# degrades gracefully when it is absent.
+trimesh
+pyyaml
 # dev
 pytest

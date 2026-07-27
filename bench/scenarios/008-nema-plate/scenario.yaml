@@ -1,0 +1,13 @@
+id: 008-nema-plate
+title: NEMA 17 mount plate 45×45×5, central Ø22, four Ø3.4 on 31×31
+spec: complete
+tags: [standard-component, patterns]
+timeout_s: 120
+
+turns:
+  - prompt: >
+      Create a NEMA 17 motor mounting plate: 45 × 45 × 5 mm, centered on XY with
+      its bottom face at Z = 0. Add a central through hole 22 mm in diameter, and
+      four through holes 3.4 mm in diameter whose centers form a 31 × 31 mm
+      square centered on the plate.
+    reference: reference-1.py

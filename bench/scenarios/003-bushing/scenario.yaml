@@ -1,0 +1,12 @@
+id: 003-bushing
+title: Bushing OD 20, bore Ø8.2, length 15
+spec: complete
+tags: [cylinders, revolve]
+timeout_s: 120
+
+turns:
+  - prompt: >
+      Create a cylindrical bushing standing upright: outer diameter 20 mm,
+      length 15 mm, with a concentric through hole 8.2 mm in diameter. Center it
+      on XY with its bottom face at Z = 0.
+    reference: reference-1.py

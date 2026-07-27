@@ -1,0 +1,11 @@
+id: 007-chamfer-block
+title: Block 40×40×20, 2 mm chamfer on the top edges
+spec: complete
+tags: [chamfer, edge-selection]
+timeout_s: 120
+
+turns:
+  - prompt: >
+      Create a rectangular block 40 × 40 × 20 mm, centered on XY with its bottom
+      face at Z = 0. Add a 2 mm chamfer to all four edges of the top face.
+    reference: reference-1.py

@@ -14,3 +14,4 @@ node_modules
 static
 worker/cq_worker.py
 article*
+bench/runs/

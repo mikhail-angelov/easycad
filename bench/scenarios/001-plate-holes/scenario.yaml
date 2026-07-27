@@ -1,0 +1,12 @@
+id: 001-plate-holes
+title: Plate 60×40×5, four Ø5.5 holes on a 44×24 rectangle
+spec: complete
+tags: [primitives, explicit-dims]
+timeout_s: 120
+
+turns:
+  - prompt: >
+      Create a rectangular plate, 60 × 40 × 5 mm, centered on XY with its bottom
+      face at Z = 0. Drill four through holes, 5.5 mm diameter; their centers
+      form a 44 × 24 mm rectangle centered on the plate.
+    reference: reference-1.py

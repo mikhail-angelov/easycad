@@ -29,6 +29,17 @@ class Step:
         data = asdict(self)
         if not include_stl:
             data.pop("stl_base64", None)
+        elif self.stl_base64:
+            # Content hash of the STL bytes, so a client (e.g. the bench harness)
+            # can verify the inline base64 decoded to exactly what the server
+            # produced — a proxy bit-flip that keeps valid base64/JSON would
+            # otherwise decode to a different mesh undetected.
+            import base64
+            import hashlib
+            try:
+                data["stl_sha256"] = hashlib.sha256(base64.b64decode(self.stl_base64)).hexdigest()
+            except Exception:  # noqa: BLE001 — never let hashing break the response
+                data["stl_sha256"] = None
         return data
 
 

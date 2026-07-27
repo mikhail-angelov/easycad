@@ -1,0 +1,12 @@
+id: 006-fillet-plate
+title: Plate 50×30×6, R5 fillet on the four vertical edges
+spec: complete
+tags: [fillet, occt]
+timeout_s: 120
+
+turns:
+  - prompt: >
+      Create a rectangular plate 50 × 30 × 6 mm, centered on XY with its bottom
+      face at Z = 0. Round the four vertical edges (the ones parallel to Z) with
+      a 5 mm fillet radius.
+    reference: reference-1.py

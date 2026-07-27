@@ -1,0 +1,14 @@
+id: 005-adapter
+title: Conical adapter Ø32→Ø25, length 40, 2 mm wall, through
+spec: complete
+tags: [loft, revolve, hollow]
+timeout_s: 120
+
+turns:
+  - prompt: >
+      Create a hollow conical tube adapter standing upright, length 40 mm along
+      Z, centered on XY with its bottom face at Z = 0. The outer diameter is
+      32 mm at the bottom face and 25 mm at the top face, tapering linearly. The
+      wall is 2 mm thick everywhere, so the bore runs all the way through
+      (Ø28 at the bottom, Ø21 at the top).
+    reference: reference-1.py

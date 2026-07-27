@@ -1,0 +1,12 @@
+id: 002-open-box
+title: Open-top box, outer 80×50×25, 2 mm walls and floor
+spec: complete
+tags: [shell, hollow, volume]
+timeout_s: 120
+
+turns:
+  - prompt: >
+      Create an open-top rectangular box. Outer dimensions 80 × 50 × 25 mm,
+      centered on XY with its bottom face at Z = 0. Walls and floor are 2 mm
+      thick; the top face is fully open.
+    reference: reference-1.py

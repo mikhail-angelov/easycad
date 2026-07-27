@@ -1,0 +1,12 @@
+id: 010-counterbore
+title: Plate 50×50×10, central Ø6 through with Ø10×5 counterbore
+spec: complete
+tags: [stepped-holes, counterbore]
+timeout_s: 120
+
+turns:
+  - prompt: >
+      Create a rectangular plate 50 × 50 × 10 mm, centered on XY with its bottom
+      face at Z = 0. Add a single central through hole 6 mm in diameter, with a
+      counterbore 10 mm in diameter and 5 mm deep opening on the top face.
+    reference: reference-1.py

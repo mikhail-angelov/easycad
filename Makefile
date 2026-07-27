@@ -1,7 +1,8 @@
-.PHONY: run build install deploy release
+.PHONY: run build install deploy release bench bench-test
 
 PYTHON ?= .venv-poc/bin/python
 LOCAL_ENV = CADQUERY_WORKER_TIMEOUT_SECONDS=120 XDG_CACHE_HOME=$(CURDIR)/.cache PYTHONDONTWRITEBYTECODE=1
+BENCH_ENV = PYTHONPATH=$(CURDIR)/bench/src:$(CURDIR) XDG_CACHE_HOME=$(CURDIR)/.cache
 
 # Deploy target host, read from the local .env (add a line: HOST=your.server)
 HOST := $(shell grep '^HOST=' .env 2>/dev/null | cut -d '=' -f 2)
@@ -9,6 +10,14 @@ HOST := $(shell grep '^HOST=' .env 2>/dev/null | cut -d '=' -f 2)
 # ── local dev ────────────────────────────────────────────────────────────────
 run:
 	$(LOCAL_ENV) $(PYTHON) -m uvicorn app.main:app --host 127.0.0.1 --port 8852
+
+# ── quality harness (bench/, see bench/README.md) ────────────────────────────
+# Usage: make bench ARGS="run --set complete --backend reference"
+bench:
+	$(BENCH_ENV) $(PYTHON) -m bench $(ARGS)
+
+bench-test:
+	$(BENCH_ENV) $(PYTHON) -m pytest bench/tests -q
 
 build:
 	@echo "Building frontend (→ static/)..."
@@ -38,6 +47,8 @@ release:
 	@[ -z "$$(git status --porcelain)" ] || { echo "✗ Uncommitted or untracked changes — commit/stash first:"; git status --short; exit 1; }
 	@echo "Running tests…"
 	$(LOCAL_ENV) $(PYTHON) -m pytest -q
+	@echo "Bench release gate: references must be in sync AND human-validated (§4.3)…"
+	$(BENCH_ENV) $(PYTHON) -m bench spec --check --require-validation
 	@echo "Building frontend (→ static/)…"
 	npm run build
 	@latest=$$(git tag --list 'v*' --sort=-v:refname | head -n1); \
