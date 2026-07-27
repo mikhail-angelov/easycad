@@ -145,6 +145,7 @@ export const api = {
     model: string | undefined,
     autoRefine: boolean,
     refinedPrompt?: string,
+    responseLanguage: 'en' | 'ru' = 'en',
   ): Promise<ChatResponse> =>
     post('/api/chat', {
       prompt,
@@ -153,6 +154,7 @@ export const api = {
       model,
       auto_refine: autoRefine,
       refined_prompt: refinedPrompt,
+      response_language: responseLanguage,
     }),
 
   variations: (
@@ -162,6 +164,7 @@ export const api = {
     model: string | undefined,
     autoRefine: boolean,
     count = 3,
+    responseLanguage: 'en' | 'ru' = 'en',
   ): Promise<VariationsResponse> =>
     post('/api/variations', {
       prompt,
@@ -170,6 +173,7 @@ export const api = {
       model,
       auto_refine: autoRefine,
       count,
+      response_language: responseLanguage,
     }),
 
   commit: (code: string, originalPrompt: string | null, refinedPrompt: string | null): Promise<StepResult> =>

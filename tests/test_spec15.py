@@ -15,7 +15,7 @@ import app.main as m
 from app.main import app
 from app import skills
 from app.cadquery_exec import execute
-from app.refiner import TriageResult
+from app.refiner import TriageResult, _parse, _triage_system_prompt
 
 BOX = "import cadquery as cq\nresult = cq.Workplane('XY').box(10, 10, 10)\n"
 
@@ -70,6 +70,33 @@ def test_ready_path_passes_skills(monkeypatch):
                     headers={"x-real-ip": "3.3.3.3"})
     assert r.status_code == 200, r.text
     assert seen["skills"] == ["thread"]
+
+
+def test_chat_passes_interface_language_to_triage(monkeypatch):
+    seen: dict = {}
+    monkeypatch.setattr(m, "generate_code", lambda *a, **k: BOX)
+
+    def fake_triage(*args, **kwargs):
+        seen["response_language"] = kwargs["response_language"]
+        return TriageResult("ready")
+
+    monkeypatch.setattr(m, "triage", fake_triage)
+    client = TestClient(app)
+    r = client.post("/api/chat", json={
+        "prompt": "add a hole", "auto_refine": True, "current_code": BOX,
+        "response_language": "ru",
+    }, headers={"x-real-ip": "3.3.3.5"})
+
+    assert r.status_code == 200, r.text
+    assert seen["response_language"] == "ru"
+
+
+def test_triage_uses_interface_language_for_prompt_and_fallback_reason():
+    assert 'reason" in Russian' in _triage_system_prompt("ru")
+    assert 'reason" in English' in _triage_system_prompt("en")
+    assert _parse('{"verdict": "invalid"}', "ru").reason == (
+        "Запрос, похоже, не соответствует текущей модели."
+    )
 
 
 def test_confirm_refine_carries_skills_server_side(monkeypatch):

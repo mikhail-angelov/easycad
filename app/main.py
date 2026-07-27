@@ -18,6 +18,7 @@ import time
 from contextlib import asynccontextmanager
 from dataclasses import dataclass
 from pathlib import Path
+from typing import Literal
 
 from dotenv import load_dotenv
 from fastapi import Depends, FastAPI, HTTPException, Request
@@ -552,6 +553,7 @@ class ChatRequest(BaseModel):
     model: str | None = Field(default=None, max_length=MAX_NAME)
     auto_refine: bool = True
     refined_prompt: str | None = Field(default=None, max_length=MAX_PROMPT)
+    response_language: Literal["en", "ru"] = "en"
 
 
 class RefineRequest(BaseModel):
@@ -559,6 +561,7 @@ class RefineRequest(BaseModel):
     current_code: str | None = Field(default=None, max_length=MAX_CODE)
     provider: str = Field(default=DEFAULT_PROVIDER, max_length=MAX_NAME)
     model: str | None = Field(default=None, max_length=MAX_NAME)
+    response_language: Literal["en", "ru"] = "en"
 
 
 class VariationsRequest(BaseModel):
@@ -568,6 +571,7 @@ class VariationsRequest(BaseModel):
     model: str | None = Field(default=None, max_length=MAX_NAME)
     auto_refine: bool = True
     count: int = Field(default=3, ge=1, le=4)
+    response_language: Literal["en", "ru"] = "en"
 
 
 class CommitRequest(BaseModel):
@@ -915,7 +919,8 @@ def api_refine(
     if not _charge_operator_call(trial_ident):
         raise _budget_exhausted_error()
     try:
-        t = triage(req.prompt, _base_code(session.store, req.current_code), provider, model, api_key)
+        t = triage(req.prompt, _base_code(session.store, req.current_code), provider, model, api_key,
+                   response_language=req.response_language)
     except LLMError as exc:
         raise _provider_error("Triage error", exc) from exc
     # `/api/refine` is STATELESS: it does not touch session.pending_skills.
@@ -1052,7 +1057,8 @@ def api_chat(
     if not _charge_operator_call(trial_ident):
         raise _budget_exhausted_error()
     try:
-        t = triage(req.prompt, base_code, provider, model, api_key)
+        t = triage(req.prompt, base_code, provider, model, api_key,
+                   response_language=req.response_language)
     except LLMError as exc:
         raise _provider_error("Triage error", exc) from exc
 
@@ -1090,7 +1096,8 @@ def api_variations(
         if not _charge_operator_call(trial_ident):  # triage is an operator call
             raise _budget_exhausted_error()
         try:
-            t = triage(req.prompt, base_code, provider, model, api_key)
+            t = triage(req.prompt, base_code, provider, model, api_key,
+                       response_language=req.response_language)
         except LLMError as exc:
             raise _provider_error("Triage error", exc) from exc
         skills = t.skills

@@ -13,7 +13,7 @@ against the current model and returns one of four verdicts:
              returned and nothing is generated.
 
 All human-facing text (refined_prompt, questions, reason) is produced in the
-SAME language as the user's request.
+language selected in the interface.
 """
 
 import json
@@ -26,7 +26,7 @@ from .skills import SKILL_MENU, clean_tags
 
 VERDICTS = {"ready", "refine", "clarify", "invalid"}
 
-TRIAGE_SYSTEM_PROMPT = textwrap.dedent("""\
+TRIAGE_SYSTEM_PROMPT_TEMPLATE = textwrap.dedent("""\
     You are a request triage assistant for a CadQuery code generator. You
     receive the current CadQuery code (including an auto-generated "Geometry
     info" block with the exact bounding box, size, and topology) and a user
@@ -61,8 +61,8 @@ TRIAGE_SYSTEM_PROMPT = textwrap.dedent("""\
       "reason" describing the conflict.
 
     CRITICAL: Write "refined_prompt", every "question"/"options" entry, and
-    "reason" in the SAME LANGUAGE as the user's request (Russian in -> Russian
-    out, English in -> English out).
+    "reason" in {response_language}, regardless of the language of the user's
+    request.
 
     SKILLS: independently of the verdict, decide which specialised generation
     skills the request needs, and return their tags in "skills". Available:
@@ -78,7 +78,15 @@ TRIAGE_SYSTEM_PROMPT = textwrap.dedent("""\
       "skills": ["<tag>", ...]
     }}
     Include only the fields relevant to the chosen verdict; use [] / omit the rest.
-""").format(skill_menu=SKILL_MENU)
+""")
+
+
+def _triage_system_prompt(response_language: str) -> str:
+    language = "Russian" if response_language == "ru" else "English"
+    return TRIAGE_SYSTEM_PROMPT_TEMPLATE.format(
+        skill_menu=SKILL_MENU,
+        response_language=language,
+    )
 
 
 @dataclass
@@ -106,7 +114,7 @@ def _extract_json(text: str) -> dict | None:
         return None
 
 
-def _parse(raw: str) -> TriageResult:
+def _parse(raw: str, response_language: str = "en") -> TriageResult:
     data = _extract_json(raw)
     if not isinstance(data, dict):
         # Safest fallback: treat as ready so we generate the original prompt.
@@ -136,7 +144,11 @@ def _parse(raw: str) -> TriageResult:
     if verdict == "clarify" and not questions:
         verdict = "refine" if refined else "ready"
     if verdict == "invalid" and not reason:
-        reason = "The request appears inconsistent with the current model."
+        reason = (
+            "Запрос, похоже, не соответствует текущей модели."
+            if response_language == "ru"
+            else "The request appears inconsistent with the current model."
+        )
 
     return TriageResult(verdict, refined, questions, reason, skills)
 
@@ -147,6 +159,7 @@ def triage(
     provider: str = DEFAULT_PROVIDER,
     model: str | None = None,
     api_key: str | None = None,
+    response_language: str = "en",
 ) -> TriageResult:
     """Classify a user request against the current model (one LLM call)."""
     client = make_client(provider, api_key)
@@ -159,7 +172,7 @@ def triage(
         response = client.chat.completions.create(
             model=resolved,
             messages=[
-                {"role": "system", "content": TRIAGE_SYSTEM_PROMPT},
+                {"role": "system", "content": _triage_system_prompt(response_language)},
                 {"role": "user", "content": user_msg},
             ],
             temperature=0.1,
@@ -168,4 +181,4 @@ def triage(
     except Exception as exc:  # noqa: BLE001
         raise LLMError(str(exc)) from exc
 
-    return _parse(response.choices[0].message.content or "")
+    return _parse(response.choices[0].message.content or "", response_language)

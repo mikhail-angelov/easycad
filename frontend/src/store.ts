@@ -154,10 +154,10 @@ export const useStore = create<State>((set, get) => {
 
   // Core chat round-trip shared by send / confirm / proceed-anyway.
   async function doChat(prompt: string, autoRefine: boolean, refinedOverride?: string) {
-    const { code, provider, model } = get()
+    const { code, provider, model, lang } = get()
     set({ busy: true, busyKind: 'gen', error: null, notice: null })
     try {
-      const res = await api.chat(prompt, code, provider, model || undefined, autoRefine, refinedOverride)
+      const res = await api.chat(prompt, code, provider, model || undefined, autoRefine, refinedOverride, lang)
       set({ steps: res.session.steps, currentId: res.session.current_id })
       applyTrial(res.session)
 
@@ -388,10 +388,10 @@ export const useStore = create<State>((set, get) => {
     dismissInvalid: () => set({ invalidNotice: null }),
 
     async sendVariations(prompt) {
-      const { code, provider, model, autoRefine } = get()
+      const { code, provider, model, autoRefine, lang } = get()
       set({ busy: true, busyKind: 'gen', error: null, notice: null, pending: null, proposal: null, invalidNotice: null, variations: null, selectedVariation: null })
       try {
-        const res = await api.variations(prompt, code, provider, model || undefined, autoRefine)
+        const res = await api.variations(prompt, code, provider, model || undefined, autoRefine, 3, lang)
         if (res.action === 'clarify') {
           set({ pending: { originalPrompt: prompt, questions: res.questions } })
           return
