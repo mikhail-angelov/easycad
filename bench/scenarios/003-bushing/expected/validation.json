@@ -1,0 +1,11 @@
+{
+  "validator": "ma",
+  "date": "2026-07-27",
+  "per_turn": [
+    {
+      "turn": 1,
+      "reference_sha256": "6a985da880e3dc3091d03b5a3fe7da4f41bbd7b20af6dff8715ef19a1c62d898",
+      "accepted": true
+    }
+  ]
+}

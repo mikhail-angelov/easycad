@@ -1,7 +1,7 @@
 {
   "generated_by": "bench spec",
   "turn": 1,
-  "reference_sha256": "475702e95feec8436d660407cc346b99a680786872a8ca1a687f7d1ffe0a080f",
+  "reference_sha256": "00129c1a55f332ec5bad890259250b7ffb0ec66129e6ffc5bfb4add2caf1fe68",
   "toolchain": {
     "cadquery": "2.8.0",
     "OCP": "7.9.3.1.1",
@@ -16,7 +16,7 @@
     45.0,
     5.0
   ],
-  "volume_mm3": 8133.544416889365,
+  "volume_mm3": 8042.752389200618,
   "solids": 1,
   "bodies": 1,
   "valid": true,
@@ -34,11 +34,11 @@
   "artifacts": {
     "step": {
       "file": "turn-1.step",
-      "sha256": "2321cf1c85ec980974bd0e24eb01d2d587baa1a81bc779bc0d6e2e7a5f4093c9"
+      "sha256": "0349d1e5dc817e8fe8862c3ecd492c0f4bb61bc987ef355b8ebca98cb7436cbf"
     },
     "stl": {
       "file": "turn-1.stl",
-      "sha256": "aa5c4bce96f2e4dca5e48eefa7221c30003a276ee36c94e3b5cd7b66f5a2c6ff"
+      "sha256": "f26aab3a5d80849e99d5d135a2d06dce93f9704ecb11ee7a0b4477052181ac0f"
     }
   }
 }
