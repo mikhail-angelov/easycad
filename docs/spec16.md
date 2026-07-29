@@ -45,8 +45,8 @@ have a vision model. They must be ablated **separately** (`--fact-repair` vs
 | 1 | Default-assumptions block in the system prompt (§4.1) | **tried → reverted** (§4.3) |
 | 2 | Standard-component dimensions in the prompt (§4.1) | **tried → reverted** (§4.3) |
 | 3 | Anti-fragility idioms: operation order, coplanar-face overlap (§4.2) | **tried → reverted** (§4.3) |
-| 4 | Fact-based repair: feed measured geometry into the repair prompt (§5) | planned |
-| 5 | Repair failure-class hint from a 7-class taxonomy (§6) | planned |
+| 4 | Fact-based repair: feed measured geometry into the repair prompt (§5) | **descoped — no-op** (§5) |
+| 5 | Repair failure-class hint from a 7-class taxonomy (§6) | **implemented — measured net-positive, keep** (§6) |
 | 6 | Clarification policy: act + state assumptions, rewrite `open` rubric (§7) | planned (needs `open` scenarios) |
 | 7 | Standard-component STEP/CadQuery snippet library (§8) | later |
 
@@ -139,33 +139,73 @@ a borrowed idea transfers to our stack.
 
 ---
 
-## 5. Planned — fact-based repair (`review.md` P1#2)
+## 5. Descoped — fact-based repair is a no-op on our architecture
 
-Today the repair loop (SPEC: in-turn repair, `app/main.py _generate_and_step`) feeds
-back only `{code, error}`. Extend the feedback with **measured geometry**, mirroring
-text-to-cad's fact packet — never the bench reference (that would make the metric an
-oracle, `bench/SPEC.md §2.5`).
-
-Design nuance (why this is not a one-liner): the repair loop fires on an **execution
-failure**, where the *failed* attempt produced no geometry. The useful measured
-facts are therefore the **current model's** (`base_code`, before the edit): tell the
-model "the model you are editing measures bbox X, volume V, N bodies — your edit must
-keep/reach the requested geometry." This gives the repair a measured anchor without
-inventing a runtime oracle. Empirically (004×5) repair converts crashes into
-executable code but not into *correct* geometry; measured anchoring is the cheapest
-lever we have short of a vision oracle, and its payoff must be measured, not assumed.
-
-Ablation: `bench run --fact-repair on/off`.
+The `review.md` P1#2 idea was to feed measured geometry into the repair prompt. On
+inspection this adds **nothing** here: `base_code` (the model being edited, passed to
+`generate_code` unchanged on every repair attempt) **already carries its "Geometry
+info" comment block** — `code_with_geometry`, appended by `append_geometry_block`
+and stored on each step. So the model already sees the current model's measured
+bbox/volume/topology every attempt. And the *failed* attempt produced no geometry to
+measure. There is no third source of measured facts short of a runtime oracle (a
+reference we don't have; bench-only). **Descoped** — superseded by §6, which injects
+a targeted *fix hint* instead of re-feeding geometry the prompt already contains.
 
 ---
 
-## 6. Planned — repair failure-class taxonomy
+## 6. Implemented — repair failure-class hint (`app/llm.py _repair_hint`)
 
-`references/repair-loop.md` classifies a failure before fixing it. Adopt the seven
-classes as (a) an optional hint injected into the repair prompt and (b) a grader
-dimension in bench: source/syntax · geometry-invalidity · fillet/chamfer · scale
-(radius/diameter, units) · missing-feature · **selector-fragility** · positioning/
-datum. "Selector-fragility" as a first-class category corroborates §4.2.
+`references/repair-loop.md` classifies a failure before fixing it. We map the
+measured error text of a failed repair attempt to a short, relevant fix hint,
+appended to the repair feedback (`generate_code`). Unknown class → no hint (model
+sees the raw error).
+
+**Five classes, not seven — deliberate.** text-to-cad's taxonomy has seven classes,
+but four of them (scale/units, missing-feature, positioning/datum, selector-
+fragility) are *correctness* failures: the code **executes fine** and produces the
+wrong geometry, so they never reach the repair loop and there is no error text to
+classify. Only the classes that surface as a runtime error are actionable here:
+
+1. **missing `result`** → "assign the finished model to `result`".
+2. **non-existent API** (`AttributeError` / unexpected keyword argument) → "use only
+   the real fluent API"; a specific swap is appended ONLY when the error names a
+   method we know (`.slot()`→rounded-rectangle cut, counterbore→`.cboreHole`,
+   countersink→`.cskHole`), so an unrelated attribute error gets the general hint,
+   not irrelevant slot/cbore advice (review P1#2).
+3. **NameError** → declare it in the Parameters block.
+4. **SyntaxError** → return complete valid Python.
+5. **kernel/BREP** (`BREP_API command not done`, `StdFail`, `Standard_…`) → the
+   three common causes (fillet radius too large / coincident cut face / unclosed
+   profile). This one lists a few causes because the kernel error text is opaque and
+   does not disambiguate them; it is the one class where a single instruction is not
+   derivable.
+
+**Why this and not the §4 blanket prompt:** the same anti-fragility facts that
+measured net-negative when bolted onto the base `SYSTEM_PROMPT` (§4.3) are here
+delivered **only on the attempt that actually hit that error** — conditional and
+relevant, not permanent prompt bloat. This is the disciplined re-test of those facts.
+
+Tested: `tests/test_repair.py::test_repair_hint_classifies_known_errors`.
+
+**Measured result (2026-07-29) — keep.** Repair path, `MAX_REPAIR=2`, crash-prone
+scenarios {004, 005, 009, 010}, `--attempts 5` (20 samples/side), hint OFF (HEAD) vs
+ON:
+
+| metric | hint OFF | hint ON |
+|---|---|---|
+| execution-recovery (crash → executes) | 17/20 (2 `empty_result` crashes survived) | **20/20 — zero crashes** |
+| pass rate (20 attempts) | 11/20 = 55% | 12/20 = 60% |
+| 009-slot-plate (`.slot()` hallucination) | 3/5 | **5/5** |
+| 004-l-bracket | 0/5 | 0/5 |
+
+The hint does exactly its job: the `empty_result` class is **eliminated**
+(2 → 0) and 009's API-hallucination class improves. Pass rate is +5 pp, within
+noise (n=20) — the rescued 004 executes into geometrically-wrong output, the same
+"repair fixes crashes, not correctness" ceiling (no runtime oracle, §5). No
+regression, and the hint costs nothing when it doesn't fire (appended only on a
+matched error). Unlike §4's blanket prompt (net-negative bloat), this targeted,
+conditional delivery is net-neutral-to-positive and removes a whole class of
+user-visible "generation failed". **Decision: keep.**
 
 ---
 

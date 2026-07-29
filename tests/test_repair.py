@@ -15,6 +15,32 @@ from fastapi.testclient import TestClient
 import app.main as m
 from app.main import app
 from app import db, metrics
+from app.llm import _repair_hint
+
+
+def test_repair_hint_classifies_known_errors():
+    # Each dominant failure class maps to a targeted fix hint (SPEC16 §6).
+    assert "result" in _repair_hint("Code executed but no 'result' variable was defined.").lower()
+    assert "cborehole" in _repair_hint(
+        "TypeError: Workplane.hole() got an unexpected keyword argument 'counterbore'").lower()
+    assert "slot" in _repair_hint("AttributeError: 'Workplane' object has no attribute 'slot'").lower()
+    assert "parameters block" in _repair_hint("NameError: name 'VERT_X' is not defined").lower()
+    assert "syntax" in _repair_hint("SyntaxError: '(' was never closed").lower()
+    assert "kernel" in _repair_hint("BREP_API command not done").lower()
+    # Unknown class → no hint (model just sees the raw error).
+    assert _repair_hint("some totally novel error") is None
+    assert _repair_hint(None) is None
+
+
+def test_repair_hint_api_branch_is_targeted_not_blanket():
+    # An unrelated attribute error gets the general "that name doesn't exist" hint
+    # but NOT the irrelevant slot/counterbore specifics (review P1#2).
+    h = _repair_hint("AttributeError: 'Workplane' object has no attribute 'combineSolids'")
+    assert "real fluent" in h.lower()
+    assert "slot" not in h.lower() and "cborehole" not in h.lower()
+    # A counterbore error DOES get the specific spelling appended.
+    assert "cborehole" in _repair_hint(
+        "AttributeError: 'Workplane' object has no attribute 'counterbore'").lower()
 
 BOX = "import cadquery as cq\nresult = cq.Workplane('XY').box(10, 10, 10)\n"
 BROKEN = "x = 1\n"  # runs but never defines `result` → execute() reports failure

@@ -242,6 +242,53 @@ def strip_markdown_fences(text: str) -> str:
     return text.strip()
 
 
+def _repair_hint(error: str | None) -> str | None:
+    """Classify a failed-execution error and return a short, relevant fix hint for
+    the in-turn repair prompt (SPEC16 §6). Covers the FIVE classes that a runtime
+    error text can actually distinguish — missing `result`, non-existent API,
+    NameError, syntax, kernel/BREP. The other text-to-cad taxonomy classes (scale,
+    missing-feature, positioning, selector-fragility) are correctness failures that
+    execute fine and never reach this loop, so there is no error to classify.
+
+    Delivered only on the repair attempt that hit this error, so the guidance is
+    conditional and relevant instead of bloating the base system prompt (a blanket
+    version of this advice measured net-negative, SPEC16 §4.3). Returns None when
+    the error doesn't match a known class — then the model just sees the raw error.
+    """
+    if not error:
+        return None
+    e = error.lower()
+    if "result" in e and ("not defined" in e or "no 'result'" in e):
+        return ("Your script ran but never assigned `result`. The final statement "
+                "MUST bind the finished model to `result`, e.g. `result = part`.")
+    if "unexpected keyword argument" in e or "has no attribute" in e:
+        # General case: whatever name you used doesn't exist. Append a specific
+        # swap ONLY when the error names a method we know the real spelling of, so
+        # an unrelated attribute error doesn't get irrelevant slot/cbore advice.
+        tip = ""
+        if "slot" in e:
+            tip = " There is no `.slot()` — cut an oversized rounded rectangle instead."
+        elif "counterbore" in e or "cbore" in e:
+            tip = " Counterbores are `.cboreHole(diameter, cboreDiameter, cboreDepth)`."
+        elif "countersink" in e or "csk" in e:
+            tip = " Countersinks are `.cskHole(diameter, cskDiameter, cskAngle)`."
+        return ("You called a CadQuery method or keyword argument that does not "
+                "exist — use ONLY the real fluent Workplane API and do not invent "
+                "names." + tip)
+    if "nameerror" in e:
+        return ("A name is undefined. Declare every dimension as a constant in the "
+                "Parameters block before use, and don't reference undefined variables.")
+    if "syntaxerror" in e or "invalid syntax" in e or "never closed" in e:
+        return "The code has a Python syntax error — return complete, valid Python."
+    if "brep_api" in e or "command not done" in e or "stdfail" in e or "standard_" in e:
+        return ("A geometry-kernel op failed. Likely causes: a fillet/chamfer radius "
+                "larger than the local edge (reduce it, or fillet fewer edges "
+                "separately); a cut tool face coincident/coplanar with a target face "
+                "(extend the tool ~1 mm past both faces); or an unclosed profile "
+                "(call `.close()` before `.extrude()`/`.revolve()`).")
+    return None
+
+
 def generate_code(
     current_code: str,
     prompt: str,
@@ -263,7 +310,8 @@ def generate_code(
     `feedback` (in-turn repair): when a prior attempt this turn failed,
     `{"code": <failed script>, "error": <message>}` is appended so the model can
     fix its own mistake — the text-mode equivalent of an agentic tool loop. The
-    model only ever sees its own code + the measured error, never a reference.
+    model only ever sees its own code + the measured error, never a reference. A
+    matched error class also gets ONE targeted fix hint (`_repair_hint`, SPEC16 §6).
     """
     client = make_client(provider, api_key)
     resolved = resolve_model(provider, model)
@@ -272,12 +320,16 @@ def generate_code(
         f"Modification request: {prompt}"
     )
     if feedback:
+        err = feedback.get("error", "unknown error")
         user_msg += (
             "\n\nYour previous attempt this turn did NOT work — do not repeat the "
             "same mistake. Return corrected, complete code.\n"
             f"Failed attempt:\n```python\n{feedback.get('code', '')}\n```\n"
-            f"Problem: {feedback.get('error', 'unknown error')}"
+            f"Problem: {err}"
         )
+        hint = _repair_hint(err)
+        if hint:
+            user_msg += f"\nHint: {hint}"
     messages = [{"role": "system", "content": SYSTEM_PROMPT}]
     if replace_initial:
         messages.append({"role": "system", "content": INITIAL_REPLACEMENT_PROMPT})
