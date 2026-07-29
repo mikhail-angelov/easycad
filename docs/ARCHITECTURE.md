@@ -246,6 +246,7 @@ Components: cadquery_exec(RemoteExecutor), worker/main, code_guard, worker/limit
 | `EASYCAD_DB_PATH` | SQLite accounts DB path |
 | `EASYCAD_SESSION_TTL`, `EASYCAD_MAX_SESSIONS` | Session eviction / cap |
 | `EASYCAD_TRIAL_ANON` / `EASYCAD_TRIAL_USER` | Free-trial generations on the operator key (default 1 / 10; both 0 disables) |
+| `EASYCAD_MAX_REPAIR` | In-turn repair attempts after an exec failure — feed the error back and let the model fix its own code (default 2; 0 = one-shot) |
 | `EASYCAD_SECURE_COOKIES`, `EASYCAD_GEN_RATE_LIMIT` | Secure cookies; per-session generation rate |
 
 ---

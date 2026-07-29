@@ -48,6 +48,11 @@ from .session_registry import Session, build_registry
 ROOT = Path(__file__).resolve().parent.parent
 STATIC_DIR = ROOT / "static"
 
+# Load .env BEFORE the module-level os.getenv() config block below — otherwise
+# every tunable read at import (SECURE_COOKIES, TRIAL_*, MAX_REPAIR, …) would miss
+# values set only in .env and silently fall back to its default (local-dev bug).
+load_dotenv(ROOT / ".env")
+
 SESSION_COOKIE = "easycad_session"
 AUTH_COOKIE = "auth_token"
 SECURE_COOKIES = os.getenv("EASYCAD_SECURE_COOKIES") == "1"
@@ -77,6 +82,12 @@ TRIAL_DAILY_BUDGET = int(os.getenv("EASYCAD_TRIAL_DAILY_BUDGET", "0"))
 GEN_RATE_LIMIT_IP = int(os.getenv("EASYCAD_GEN_RATE_LIMIT_IP", "60"))
 # Max concurrent LLM/worker generation requests on this instance.
 MAX_INFLIGHT_GEN = int(os.getenv("EASYCAD_MAX_INFLIGHT_GEN", "0"))
+# In-turn repair loop: on an execution failure, feed the error back to the model
+# and let it fix its own code, up to this many EXTRA attempts (0 = one-shot, the
+# pre-repair behaviour — also the bench ablation baseline, bench-SPEC §6.1).
+# max(0, …): a negative value would make `range(MAX_REPAIR + 1)` empty, so the
+# generate/execute loop never runs and `res` stays None → 500. Clamp to one-shot.
+MAX_REPAIR = max(0, int(os.getenv("EASYCAD_MAX_REPAIR", "2")))
 # Observability: shared token gating /api/admin/stats (unset → endpoint hidden).
 ADMIN_TOKEN = os.getenv("EASYCAD_ADMIN_TOKEN")
 # Optional ops address alerted (once/day) when the budget kill-switch trips.
@@ -101,8 +112,6 @@ MAX_PROMPT = 20_000
 MAX_CODE = 200_000
 MAX_NAME = 500
 MAX_EMAIL = 320
-
-load_dotenv(ROOT / ".env")
 
 
 def _check_required_env() -> None:
@@ -958,38 +967,61 @@ def _generate_and_step(
     skills: list[str] | None = None,
     consume_pending: bool = False,
 ) -> dict:
-    if not _charge_operator_call(trial_ident):
-        raise _budget_exhausted_error()
-    metrics.incr("gen_attempts")
     _t0 = time.time()
-    try:
-        generate_kwargs = {"api_key": api_key, "skills": skills}
-        if _is_initial_model(session.store, base_code):
-            generate_kwargs["replace_initial"] = True
-        code = generate_code(base_code, gen_prompt, provider, model, **generate_kwargs)
-    except LLMError as exc:
-        raise _provider_error("LLM error", exc) from exc
+    generate_kwargs = {"api_key": api_key, "skills": skills}
+    if _is_initial_model(session.store, base_code):
+        generate_kwargs["replace_initial"] = True
 
-    # The LLM produced code (operator tokens spent) → this trial turn counts.
-    # A failed provider call raised above, so the quota is only burned on success.
-    # NB: charged on generation, not on a successful CadQuery execute — spending
-    # is at the LLM call, and a per-execute gate would let bad-code prompts burn
-    # operator tokens for free. See docs/CODE_REVIEW_HEAD.md (Spec #5).
-    if trial_ident is not None:
-        _charge_trial(trial_ident)
+    # In-turn repair loop: generate → execute; on failure feed the error back and
+    # let the model fix its own code, up to MAX_REPAIR extra attempts. The text-
+    # mode equivalent of an agentic tool loop — the model only ever sees its own
+    # code + the measured error, never a reference (bench-SPEC §2.5).
+    feedback: dict | None = None
+    code = None
+    res = None
+    charged_trial = False
+    # max(1, …): always at least ONE attempt, so a non-positive MAX_REPAIR (config
+    # is clamped at import, but guard the use site too) can't leave `res` None → 500.
+    for attempt in range(max(1, MAX_REPAIR + 1)):
+        # Each generate is one operator-key LLM call → charge the daily budget per
+        # attempt (BYOK is free). Budget exhausted: raise on the first attempt,
+        # otherwise stop and keep the best result produced so far.
+        if not _charge_operator_call(trial_ident):
+            if attempt == 0:
+                raise _budget_exhausted_error()
+            break
+        metrics.incr("gen_attempts")
+        try:
+            code = generate_code(base_code, gen_prompt, provider, model,
+                                 feedback=feedback, **generate_kwargs)
+        except LLMError as exc:
+            if attempt == 0:
+                raise _provider_error("LLM error", exc) from exc
+            break  # a repair attempt failed at the provider → keep best-so-far
+        # The trial quota (lifetime free-N) is charged ONCE per turn, on the first
+        # produced code — repairs ride the operator daily budget, not the grant.
+        if trial_ident is not None and not charged_trial:
+            _charge_trial(trial_ident)
+            charged_trial = True
+        res = execute(code)
+        if res.success:
+            break
+        if attempt < MAX_REPAIR:
+            metrics.incr("gen_repair")
+            log.info("chat.gen repair attempt=%d error=%s", attempt + 1, (res.error or "")[:120])
+        feedback = {"code": code, "error": res.error}
 
-    res = execute(code)
     dur_ms = int((time.time() - _t0) * 1000)
     metrics.incr("gen_ms_total", dur_ms)
     metrics.incr("gen_ms_count")
-    metrics.incr("gen_ok" if res.success else "gen_exec_fail")
+    ok = bool(res and res.success)
+    metrics.incr("gen_ok" if ok else "gen_exec_fail")
     log.info(
         "chat.gen provider=%s model=%s trial=%s exec_%s dur_ms=%d",
-        provider, model, trial_ident is not None,
-        "ok" if res.success else "fail", dur_ms,
+        provider, model, trial_ident is not None, "ok" if ok else "fail", dur_ms,
     )
-    if not res.success:
-        log.warning("chat.gen exec error: %s", (res.error or "")[:300])
+    if not ok:
+        log.warning("chat.gen exec error: %s", ((res.error if res else "no result") or "")[:300])
     # Consume the pending refinement only on a FULLY successful confirm turn.
     # Provider/budget errors raise before here and an exec failure leaves it set,
     # so the user can retry the same confirmation and still get the recipe.

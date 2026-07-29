@@ -43,6 +43,11 @@ def build_parser() -> argparse.ArgumentParser:
     rn.add_argument("--url", default="http://127.0.0.1:8852", help="product API base url")
     rn.add_argument("--provider", help="LLM provider override")
     rn.add_argument("--model", help="LLM model override")
+    rn.add_argument("--quality-loop", choices=["on", "off"], default=None,
+                    help="declare the server's in-turn repair loop state for the "
+                         "manifest (on = EASYCAD_MAX_REPAIR > 0). bench cannot detect "
+                         "it over HTTP, so an ablation must set this; unset records "
+                         "enabled=null (undeclared).")
     rn.add_argument("--seed", type=int, default=0, help="surface-sampling seed (§6.3)")
     rn.add_argument("--system-prompt-file", help="record this exact system prompt in the manifest (self-hosted)")
     rn.add_argument("--temperature", type=float, help="record the sampling temperature in the manifest")

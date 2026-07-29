@@ -46,7 +46,7 @@ def _capture_generate(monkeypatch):
     seen: dict = {"skills": "unset"}
 
     def fake_generate(base_code, prompt, provider, model=None, temperature=0.2,
-                      api_key=None, skills=None):
+                      api_key=None, skills=None, feedback=None):
         seen["skills"] = skills
         return BOX
 
@@ -210,6 +210,8 @@ def test_failed_exec_keeps_pending_then_retry_gets_recipe(monkeypatch):
     # a valid model (execute().success is False, not an exception). Pending must
     # survive so the retry still loads the recipe — end-to-end through the worker.
     monkeypatch.setattr(m, "TRIAL_ANON", 100)  # allow two generations in one session
+    monkeypatch.setattr(m, "MAX_REPAIR", 0)    # one-shot: no in-turn repair, so the
+    #                    failed turn genuinely fails (the manual-retry flow under test)
     monkeypatch.setattr(
         m, "triage",
         lambda *a, **k: TriageResult("refine", refined_prompt="rp", skills=["thread"]),
@@ -218,7 +220,7 @@ def test_failed_exec_keeps_pending_then_retry_gets_recipe(monkeypatch):
     BROKEN = "x = 1\n"  # executes but defines no `result` → execute() reports failure
 
     def fake_generate(base_code, prompt, provider, model=None, temperature=0.2,
-                      api_key=None, skills=None):
+                      api_key=None, skills=None, feedback=None):
         calls.append(skills)
         return BROKEN if len(calls) == 1 else BOX
 
@@ -318,7 +320,7 @@ def test_variations_passes_skills(monkeypatch):
     seen = {"skills": "unset"}
 
     def fake_generate(base_code, prompt, provider, model=None, temperature=0.2,
-                      api_key=None, skills=None):
+                      api_key=None, skills=None, feedback=None):
         seen["skills"] = skills
         return BOX
 
@@ -355,7 +357,7 @@ def test_client_cannot_forge_skills(monkeypatch):
     seen = {"skills": "unset"}
 
     def fake_generate(base_code, prompt, provider, model=None, temperature=0.2,
-                      api_key=None, skills=None):
+                      api_key=None, skills=None, feedback=None):
         seen["skills"] = skills
         return BOX
 

@@ -251,6 +251,7 @@ def generate_code(
     api_key: str | None = None,
     skills: list[str] | None = None,
     replace_initial: bool = False,
+    feedback: dict | None = None,
 ) -> str:
     """Ask the LLM to append the requested modification to `current_code`.
 
@@ -258,6 +259,11 @@ def generate_code(
     distinct candidates for the retry-with-variations flow. `skills` are
     specialised recipe tags (from triage) injected as an extra system message
     only when relevant — see `app/skills.py` (SPEC15).
+
+    `feedback` (in-turn repair): when a prior attempt this turn failed,
+    `{"code": <failed script>, "error": <message>}` is appended so the model can
+    fix its own mistake — the text-mode equivalent of an agentic tool loop. The
+    model only ever sees its own code + the measured error, never a reference.
     """
     client = make_client(provider, api_key)
     resolved = resolve_model(provider, model)
@@ -265,6 +271,13 @@ def generate_code(
         f"Current CadQuery code:\n```python\n{current_code}\n```\n\n"
         f"Modification request: {prompt}"
     )
+    if feedback:
+        user_msg += (
+            "\n\nYour previous attempt this turn did NOT work — do not repeat the "
+            "same mistake. Return corrected, complete code.\n"
+            f"Failed attempt:\n```python\n{feedback.get('code', '')}\n```\n"
+            f"Problem: {feedback.get('error', 'unknown error')}"
+        )
     messages = [{"role": "system", "content": SYSTEM_PROMPT}]
     if replace_initial:
         messages.append({"role": "system", "content": INITIAL_REPLACEMENT_PROMPT})

@@ -55,5 +55,11 @@ report   → markdown, highlights flipped scenarios
 ## What's here (M0)
 
 10 single-turn `complete` scenarios (`scenarios/`), the measurers + grader with
-golden-fixture tests, and `spec`/`validate`/`run`/`grade`/`report`. No repair
-loop, no open scenarios yet — see SPEC §14 for M1/M2.
+golden-fixture tests, and `spec`/`validate`/`run`/`grade`/`report`. No open
+scenarios yet — see SPEC §14 for M1/M2.
+
+**Repair-loop ablation.** The product's in-turn repair loop lives on the server
+(`EASYCAD_MAX_REPAIR`); bench can't observe it over HTTP. Declare it so the
+manifest records it honestly: run the server with `EASYCAD_MAX_REPAIR=0` and
+`bench run … --quality-loop off`, then `=2` with `--quality-loop on`. Unset →
+`config.quality_loop.enabled = null` (undeclared), never a blind `false`.

@@ -238,7 +238,9 @@ class ProductBackend:
         # Accept a STEP with no X-Content-SHA256 (older server); off = fail closed.
         self.allow_unverified = allow_unverified
         self.name = "product"
-        self.config = config or {"quality_loop": {"enabled": False}}
+        # None (undeclared) by default — bench can't observe the server's repair
+        # loop over HTTP, so never assume it's off. `bench run --quality-loop` sets it.
+        self.config = config or {"quality_loop": {"enabled": None}}
 
     def start_session(self, scenario: Scenario) -> Session:
         return ProductSession(self)

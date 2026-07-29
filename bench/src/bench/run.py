@@ -242,9 +242,15 @@ def _record_known_config(manifest: dict, args) -> None:
 def _backend_from_args(args) -> Backend:
     if args.backend == "reference":
         return make_backend("reference")
+    # The repair loop lives on the server (EASYCAD_MAX_REPAIR); bench can't detect
+    # it over HTTP, so the operator declares it here and we stamp it in the manifest
+    # config. Unset → enabled=null (undeclared), NOT False — never claim off blindly.
+    ql = getattr(args, "quality_loop", None)
+    config = {"quality_loop": {"enabled": {"on": True, "off": False}.get(ql)}}
     return make_backend("product", base_url=args.url, provider=args.provider,
                         model=args.model, est_cost_per_turn=getattr(args, "cost_per_turn", 0.0),
-                        allow_unverified=getattr(args, "allow_unverified_artifacts", False))
+                        allow_unverified=getattr(args, "allow_unverified_artifacts", False),
+                        config=config)
 
 
 def _mark_skipped(sdir: Path, reason: str) -> None:

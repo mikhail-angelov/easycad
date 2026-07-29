@@ -20,7 +20,7 @@ def _stub_llm(monkeypatch, code: str = BOX):
     """Replace the LLM generator with a deterministic stub; count invocations."""
     calls = {"n": 0}
 
-    def fake_generate(base_code, prompt, provider, model=None, temperature=0.2, api_key=None, skills=None):
+    def fake_generate(base_code, prompt, provider, model=None, temperature=0.2, api_key=None, skills=None, feedback=None):
         calls["n"] += 1
         return code
 
