@@ -1,0 +1,23 @@
+id: 011-phone-stand
+title: Phone stand
+spec: open
+tags: [open, everyday]
+timeout_s: 120
+
+turns:
+  - prompt: >
+      A stand to hold a smartphone at a comfortable viewing angle on a desk.
+
+# Visual items — graded by the vision judge from four renders (binary, no size).
+rubric:
+  - The object presents an inclined face or channel that would hold a phone
+    leaning back at an angle — neither lying flat nor standing fully vertical.
+  - There is a lip, ledge, or groove along the lower front edge that would stop
+    a phone from sliding off the incline.
+
+# Geometric checks — auto-verified from measured facts (an unscaled render can't
+# show absolute size or true topology, so these never go to the judge).
+checks:
+  - { measure: bodies, op: eq, value: 1 }
+  - { measure: largest_dim_mm, op: between, value: [60, 160] }
+  - { measure: z_min_mm, op: approx, value: 0, tol: 1.0 }

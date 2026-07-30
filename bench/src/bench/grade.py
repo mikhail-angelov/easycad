@@ -222,6 +222,77 @@ def _grade_turn_dir(sc, i: int, tdir: Path, seed: int) -> dict:
     return grade_turn({"facts": facts}, expected, tol, dev, aligned)
 
 
+def _open_result(verdict: str, primary, items) -> dict:
+    return {"verdict": verdict, "primary_failure": primary,
+            "turns": [{"turn": 1, "verdict": verdict, "primary_failure": primary,
+                       "checks": items}]}
+
+
+def _grade_open_attempt(sc, adir: Path, judge_run_id: str | None) -> dict:
+    """Grade one open attempt from its cached vision verdict (§4, M1) — no judge
+    call, so `grade` stays pure. Trust model: the FACT items (§8 invariants + the
+    geometric checks) are RECOMPUTED from the current `facts.json` and never read
+    from the cache, so a hand-edited fact `pass` can't slip an invalid model
+    through; only the VISUAL verdicts are cache-trusted (they need the model), and
+    only when the cache carries the manifest's current judge_run_id and matches the
+    exact facts.json/out.stl it was judged on. A missing/unparseable/stale/wrong-id
+    cache → 'unjudged'; a missing visual answer for a rubric line → fail-closed."""
+    from .judge import compute_fact_items, sha256_or_none
+
+    def unjudged(reason):
+        return {"verdict": "unjudged", "primary_failure": reason, "turns": []}
+
+    jp = adir / "judge.json"
+    if not jp.exists():
+        return {"verdict": "unjudged", "primary_failure": None, "turns": []}
+    try:  # an untrusted artifact: never let a corrupt file abort the whole regrade
+        j = json.loads(jp.read_text())
+    except (ValueError, OSError):
+        return unjudged("malformed_judge")
+    if not isinstance(j, dict) or not isinstance(j.get("judge"), dict):
+        return unjudged("malformed_judge")
+
+    cache_id = j["judge"].get("judge_run_id")
+    if not judge_run_id or not cache_id or cache_id != judge_run_id:
+        return unjudged("stale_judge")
+
+    tdir = adir / "turn-1"
+    facts_p, stl_p = tdir / "facts.json", tdir / "out.stl"
+    if not facts_p.exists() or not stl_p.exists():
+        return _open_result("fail", "empty_result", [])   # no artifact → genuine fail
+    try:
+        facts = json.loads(facts_p.read_text())
+    except (ValueError, OSError):
+        return unjudged("malformed_judge")
+    if not isinstance(facts, dict) or facts.get("error"):
+        return _open_result("fail", "invalid_geometry", [])
+
+    # The visual verdict was computed on a specific render → bind it to the exact
+    # facts/STL it saw. A changed input (tampered or regenerated) makes it stale.
+    inputs = j.get("inputs")
+    if not isinstance(inputs, dict) or inputs.get("stl_sha") != sha256_or_none(stl_p) \
+            or inputs.get("facts_sha") != sha256_or_none(facts_p):
+        return unjudged("stale_judge")
+
+    fact_items = compute_fact_items(facts, sc)   # deterministic, never from cache
+    cached_visual = {it.get("text"): it for it in (j.get("items") or [])
+                     if isinstance(it, dict) and it.get("kind") == "visual"}
+    visual_items = []
+    for line in sc.rubric:
+        it = cached_visual.get(line)
+        # A missing visual answer (render failure, or a stripped cache) fails closed.
+        visual_items.append({"kind": "visual", "text": line,
+                             "pass": bool(it.get("pass") is True) if isinstance(it, dict) else False,
+                             "why": (it.get("why", "") if isinstance(it, dict) else "no visual answer")})
+
+    items = fact_items + visual_items
+    first_fail = next((x for x in items if not x["pass"]), None)
+    verdict = "fail" if first_fail else "pass"
+    primary = None if first_fail is None else (
+        "fact_check_fail" if first_fail["kind"] == "fact" else "rubric_fail")
+    return _open_result(verdict, primary, items)
+
+
 def _grade_attempt(sc, adir: Path, seed: int) -> dict:
     """Grade every turn of an attempt; attempt passes iff all turns pass."""
     turns = []
@@ -248,6 +319,7 @@ def grade_run(run_dir: Path) -> dict:
     run_dir = Path(run_dir)
     manifest = json.loads((run_dir / "manifest.json").read_text()) if (run_dir / "manifest.json").exists() else {}
     seed = int(manifest.get("sampling_seed", 0))
+    judge_run_id = (manifest.get("judge") or {}).get("judge_run_id")
     results_lines: list[str] = []
     scenario_results: list[dict] = []
 
@@ -263,7 +335,8 @@ def grade_run(run_dir: Path) -> dict:
         graded = {}
         for adir in attempts:
             n = int(adir.name.split("-")[1])
-            graded[n] = _grade_attempt(sc, adir, seed)
+            graded[n] = (_grade_open_attempt(sc, adir, judge_run_id) if sc.spec == "open"
+                         else _grade_attempt(sc, adir, seed))
         first = graded.get(1)
         if first is None:
             # Selected but never attempted (e.g. a --max-cost partial run stopped
@@ -292,6 +365,12 @@ def grade_run(run_dir: Path) -> dict:
     # (or deflate) the headline behind an unadvertised denominator.
     attempted = [r for r in scenario_results if r["spec"] == "complete" and r["verdict"] in ("pass", "fail")]
     passed = [r for r in attempted if r["verdict"] == "pass"]
+    # Open scenarios grade via the vision judge (§4, M1), reported on their OWN
+    # metric — never mixed into scenario_pass_rate, whose denominator is the
+    # auto-graded complete set. 'unjudged' (no judge.json yet) is surfaced, not counted.
+    open_att = [r for r in scenario_results if r["spec"] == "open" and r["verdict"] in ("pass", "fail")]
+    open_passed = [r for r in open_att if r["verdict"] == "pass"]
+    unjudged = [r["id"] for r in scenario_results if r["verdict"] == "unjudged"]
     skipped = [r for r in scenario_results if r["verdict"] not in ("pass", "fail") and r["spec"] is None]
     not_run = [r["id"] for r in scenario_results if r["verdict"] == "not_run"]
     stab = [r["stability"] for r in attempted if r["stability"] is not None]
@@ -310,9 +389,15 @@ def grade_run(run_dir: Path) -> dict:
         "artifact_integrity": manifest.get("artifact_integrity"),
         "product_metric_compliant": manifest.get("product_metric_compliant"),
         "scenario_pass_rate": {"k": len(passed), "n": len(attempted)},
+        # EXPERIMENTAL automatic metric — NOT the SPEC's human `open_pass_rate`
+        # (§5.4). Deliberately keyed distinctly so it can never masquerade as the
+        # blind-review number; the human methodology remains canonical (§56).
+        "open_pass_rate_judge": {"k": len(open_passed), "n": len(open_att)},
+        "judge": manifest.get("judge") or None,
         "stability": {"same": sum(1 for s in stab if s), "n": len(stab)},
         "primary_failures": dict(sorted(prim.items(), key=lambda kv: -kv[1])),
         "skipped_unvalidated": [r["id"] for r in skipped],
+        "unjudged": unjudged,
         "not_run": not_run,
         "scenarios": scenario_results,
     }
@@ -333,6 +418,14 @@ def print_summary(summary: dict) -> None:
     if summary.get("artifact_integrity") == "unverified-allowed":
         print("  ⚠ artifact integrity NOT enforced — NOT product-metric compliant")
     print(f"  scenario_pass_rate   {stats.format_rate(sp['k'], sp['n'])}")
+    op = summary.get("open_pass_rate_judge") or {"k": 0, "n": 0}
+    if op["n"]:
+        jm = (summary.get("judge") or {}).get("model", "?")
+        print(f"  open_pass_rate@judge {stats.format_rate(op['k'], op['n'])}  (judge: {jm})")
+        print("  ⚠ EXPERIMENTAL auto metric — bench-SPEC §5.4 mandates human review; not the SPEC number")
+    if summary.get("unjudged"):
+        print(f"  unjudged             {len(summary['unjudged'])} open (run `bench judge`): "
+              f"{', '.join(summary['unjudged'])}")
     st = summary["stability"]
     if st["n"]:
         print(f"  stability            {round(100 * st['same'] / st['n'])}%  (n={st['n']})")

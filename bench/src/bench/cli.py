@@ -60,6 +60,22 @@ def build_parser() -> argparse.ArgumentParser:
     gr = sub.add_parser("grade", help="regrade a saved run (no generation)")
     gr.add_argument("run", help="path to runs/<id>")
 
+    # judge — vision-grade open scenarios in a saved run, then regrade
+    ju = sub.add_parser("judge", help="vision-judge the open scenarios of a saved run")
+    ju.add_argument("run", help="path to runs/<id>")
+    ju.add_argument("--judge-model", default="google/gemma-3-27b-it",
+                    help="OpenRouter vision model id (default google/gemma-3-27b-it); "
+                         "use a DIFFERENT family than the generator (anti-self-confirmation)")
+    ju.add_argument("--allow-same-family", action="store_true",
+                    help="override the refusal when judge and generator share a model "
+                         "family (records the override in the run's judge provenance)")
+    ju.add_argument("--allow-unknown-generator", action="store_true",
+                    help="grade even though the manifest didn't record the generator "
+                         "model (family_gate=generator-unknown-override; stays unattested)")
+    ju.add_argument("--force", action="store_true",
+                    help="re-judge attempts that already have a cached verdict "
+                         "(spends money again and supersedes the cache)")
+
     # report — markdown summary
     rp = sub.add_parser("report", help="markdown report for a run")
     rp.add_argument("run")
@@ -86,6 +102,9 @@ def main(argv: list[str] | None = None) -> int:
     if args.cmd == "grade":
         from .grade import cmd_grade
         return cmd_grade(args)
+    if args.cmd == "judge":
+        from .judge import cmd_judge
+        return cmd_judge(args)
     if args.cmd == "report":
         from .report import cmd_report
         return cmd_report(args)

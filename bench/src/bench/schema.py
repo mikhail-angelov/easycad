@@ -23,6 +23,17 @@ DEFAULT_TOLERANCES = {
     "frac_over_tol": 0.005,
 }
 
+# The measures an open-scenario `check` may assert against. Schema owns this
+# vocabulary so a typo fails the CI schema gate, not silently at judge time
+# (a mis-typed measure would otherwise read as a model failure). Kept in sync
+# with `judge._measure` by `bench/tests/test_judge.py`.
+CHECK_MEASURES = {
+    "bodies", "volume_mm3", "largest_dim_mm", "smallest_dim_mm",
+    "x_mm", "y_mm", "z_mm", "z_min_mm", "watertight", "valid",
+}
+BOOL_MEASURES = {"watertight", "valid"}   # true/false measures — only `eq` a bool
+_NUMERIC = (int, float)
+
 
 class SchemaError(ValueError):
     """A scenario.yaml that violates the schema (bench-SPEC §4)."""
@@ -44,7 +55,8 @@ class Scenario:
     timeout_s: int
     turns: list[Turn]
     tolerances: dict
-    rubric: list[str]
+    rubric: list[str]                # open: VISUAL items graded by the vision judge
+    checks: list[dict]               # open: geometric assertions auto-checked from facts
     dir: Path
 
     @property
@@ -85,9 +97,47 @@ def _parse(scenario_id: str, raw: dict, d: Path) -> Scenario:
                           preserve=t.get("preserve") or []))
 
     rubric = raw.get("rubric") or []
+    _require(isinstance(rubric, list) and all(isinstance(r, str) and r.strip() for r in rubric),
+             f"{scenario_id}: rubric must be a list of non-empty strings "
+             "(a bare string would be graded character-by-character)")
+    checks = raw.get("checks") or []
+    # A measure's TYPE determines its legal operators & value shape (bool subclass
+    # of int means untyped validation would pass nonsense like `watertight ge 1`).
+    _NUM_OPS = {"eq", "ge", "le", "gt", "lt", "between", "approx"}
+
+    def _isnum(v) -> bool:  # numeric, but NOT a bool (which is an int subclass)
+        return isinstance(v, _NUMERIC) and not isinstance(v, bool)
+
+    for j, c in enumerate(checks, 1):
+        _require(isinstance(c, dict), f"{scenario_id}: check {j} must be a mapping")
+        measure = c.get("measure")
+        _require(measure in CHECK_MEASURES,
+                 f"{scenario_id}: check {j} measure '{measure}' not in {sorted(CHECK_MEASURES)}")
+        _require("value" in c, f"{scenario_id}: check {j} needs a 'value'")
+        op, val = c.get("op"), c["value"]
+        if measure in BOOL_MEASURES:
+            _require(op == "eq" and isinstance(val, bool),
+                     f"{scenario_id}: check {j} boolean measure '{measure}' takes only "
+                     "op 'eq' with a true/false value")
+            continue
+        _require(op in _NUM_OPS, f"{scenario_id}: check {j} op '{op}' not in {sorted(_NUM_OPS)}")
+        if op == "between":
+            _require(isinstance(val, list) and len(val) == 2 and all(_isnum(v) for v in val)
+                     and val[0] <= val[1],
+                     f"{scenario_id}: check {j} 'between' value must be [lo, hi] numeric with lo<=hi")
+        else:
+            _require(_isnum(val), f"{scenario_id}: check {j} '{op}' value must be a number (not bool)")
+            if op == "approx":
+                tol = c.get("tol", 0.5)
+                _require(_isnum(tol) and tol >= 0,
+                         f"{scenario_id}: check {j} 'tol' must be a non-negative number")
     if spec == "open":
-        _require(bool(rubric), f"{scenario_id}: open scenario needs a rubric")
-        _require(4 <= len(rubric) <= 6, f"{scenario_id}: rubric must have 4–6 items (§4.1)")
+        # A hybrid rubric: visual items (judge) + geometric checks (auto from facts).
+        # Absolute size/topology aren't legible in an unscaled render, so they live
+        # in `checks`, not `rubric`. Together they form the 4–6 item checklist (§4.1).
+        _require(bool(rubric), f"{scenario_id}: open scenario needs at least one visual rubric item")
+        total = len(rubric) + len(checks)
+        _require(4 <= total <= 6, f"{scenario_id}: rubric + checks must total 4–6 items (§4.1)")
         _require(len(turns) == 1, f"{scenario_id}: open scenarios are single-turn (§4.1)")
 
     tol = dict(DEFAULT_TOLERANCES)
@@ -96,7 +146,7 @@ def _parse(scenario_id: str, raw: dict, d: Path) -> Scenario:
     return Scenario(
         id=scenario_id, title=raw.get("title", scenario_id), spec=spec,
         tags=raw.get("tags") or [], timeout_s=int(raw.get("timeout_s", 120)),
-        turns=turns, tolerances=tol, rubric=rubric, dir=d,
+        turns=turns, tolerances=tol, rubric=rubric, checks=checks, dir=d,
     )
 
 

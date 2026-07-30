@@ -1,0 +1,21 @@
+id: 012-wall-hook
+title: Wall hook
+spec: open
+tags: [open, everyday]
+timeout_s: 120
+
+turns:
+  - prompt: >
+      A hook that screws to a wall to hang a coat or a bag.
+
+# Visual items — graded by the vision judge from four renders.
+rubric:
+  - There is a flat back plate that would sit flush against a wall.
+  - A hook or arm projects outward and curves or angles upward so a hung item
+    would be retained rather than slide off.
+  - The back plate has at least one hole for a mounting screw.
+
+# Geometric checks — auto-verified from measured facts.
+checks:
+  - { measure: bodies, op: eq, value: 1 }
+  - { measure: largest_dim_mm, op: between, value: [30, 120] }

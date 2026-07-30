@@ -41,12 +41,12 @@ def _ver(pkg: str) -> str:
 
 
 def _select_scenarios(which: str, ids: list[str] | None) -> list[Scenario]:
+    # Explicit --ids override the --set spec filter (naming a scenario means run
+    # it, whatever its spec); the filter only applies when selecting by set.
     if ids:
-        chosen = ids
-    else:
-        chosen = all_scenario_ids()
+        return [load_scenario(sid) for sid in ids]
     out = []
-    for sid in chosen:
+    for sid in all_scenario_ids():
         sc = load_scenario(sid)
         if which == "complete" and not sc.is_complete:
             continue

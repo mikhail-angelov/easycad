@@ -38,6 +38,18 @@ def cmd_report(args) -> int:
         lines.append("- ⚠️ reference backend — pipeline self-test, **not** a product measurement")
     lines.append("")
     lines.append(f"**scenario_pass_rate**: {stats.format_rate(sp['k'], sp['n'])}")
+    op = summary.get("open_pass_rate_judge") or {"k": 0, "n": 0}
+    if op["n"]:
+        jd = summary.get("judge") or {}
+        jm = jd.get("model", "?")
+        gate = jd.get("family_gate", "")
+        flag = f" · ⚠️ {gate}" if gate in ("same-family-override", "generator-unknown-override") else ""
+        lines.append(f"**open_pass_rate@judge**: {stats.format_rate(op['k'], op['n'])} "
+                     f"(judge: {jm} · requested ids, unattested{flag})")
+        lines.append("> ⚠️ EXPERIMENTAL — automatic vision-judge grading contradicts "
+                     "bench-SPEC §2.3/§5.4 (human blind-review). Not the SPEC metric.")
+    if summary.get("unjudged"):
+        lines.append(f"**unjudged** (run `bench judge`): {', '.join(summary['unjudged'])}")
     st = summary["stability"]
     if st["n"]:
         lines.append(f"**stability**: {round(100 * st['same'] / st['n'])}% (n={st['n']})")

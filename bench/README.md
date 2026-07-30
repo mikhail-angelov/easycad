@@ -52,11 +52,48 @@ report   → markdown, highlights flipped scenarios
 - `bench spec --check` runs in CI so a CadQuery/OCCT bump can't silently move
   the metric.
 
-## What's here (M0)
+## What's here (M0 + open scenarios)
 
 10 single-turn `complete` scenarios (`scenarios/`), the measurers + grader with
-golden-fixture tests, and `spec`/`validate`/`run`/`grade`/`report`. No open
-scenarios yet — see SPEC §14 for M1/M2.
+golden-fixture tests, and `spec`/`validate`/`run`/`grade`/`report`/`judge`.
+
+## Open scenarios + the vision judge (M1) — EXPERIMENTAL
+
+> ⚠ **Contradicts the current `bench-SPEC` and is not yet a sanctioned metric.**
+> §2.3/§56 deliberately *rejected* automatic open grading — both max-similarity to
+> references AND per-scenario functional checks — as a return to per-scenario
+> complexity, and §5.4 defines `open_pass_rate` as **blind human review**. This
+> feature (vision judge + a small declarative `checks` DSL) is a *proposed*
+> alternative: the visual rubric needs no per-scenario code (just prose), which
+> weakens the original objection, but it adds a non-deterministic instrument that
+> must be calibrated against humans. Its number is reported separately as
+> **`open_pass_rate@judge`**, never as the SPEC's human `open_pass_rate`. Adopting
+> it as canonical requires an agreed `bench-SPEC` amendment; until then, treat it
+> as an exploratory signal, and the human blind-review path (§5.4) stays canonical
+> and unbuilt.
+
+`spec: open` scenarios (e.g. `011-phone-stand`) have no ground-truth reference —
+everyday objects with no single right answer. They grade on a **hybrid rubric**:
+
+- `checks` — geometric assertions auto-verified from measured facts (`bodies`,
+  `largest_dim_mm`, `z_min_mm`, …). Absolute size/topology aren't legible in an
+  unscaled render, so they never go to the judge.
+- `rubric` — binary VISUAL items a vision model answers from four renders.
+
+The judge is an explicit, cached step so `grade` stays pure/free (§2.8):
+
+```
+bench run  --ids 011-phone-stand --backend product --url … --max-cost 0
+bench judge runs/<id> --judge-model google/gemma-3-27b-it   # renders + vision-grades + regrades
+```
+
+`bench judge` renders four views, sends the visual items to an OpenRouter vision
+model (needs `OPEN_ROUTER_KEY`), caches `attempt-N/judge.json`, and stamps the
+model in the manifest. Result: `open_pass_rate@judge` (separate from
+`scenario_pass_rate`; never mixed). Use a judge from a **different model family**
+than the generator (anti-self-confirmation), and validate it against a human
+sample before trusting it at scale — a cheap vision model reads gross shape well
+but is not an oracle.
 
 **Repair-loop ablation.** The product's in-turn repair loop lives on the server
 (`EASYCAD_MAX_REPAIR`); bench can't observe it over HTTP. Declare it so the

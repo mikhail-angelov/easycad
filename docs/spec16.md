@@ -47,7 +47,7 @@ have a vision model. They must be ablated **separately** (`--fact-repair` vs
 | 3 | Anti-fragility idioms: operation order, coplanar-face overlap (§4.2) | **tried → reverted** (§4.3) |
 | 4 | Fact-based repair: feed measured geometry into the repair prompt (§5) | **descoped — no-op** (§5) |
 | 5 | Repair failure-class hint from a 7-class taxonomy (§6) | **implemented — measured net-positive, keep** (§6) |
-| 6 | Clarification policy: act + state assumptions, rewrite `open` rubric (§7) | planned (needs `open` scenarios) |
+| 6 | Clarification policy: act + state assumptions, rewrite `open` rubric (§7) | **tried → reverted** (§7) |
 | 7 | Standard-component STEP/CadQuery snippet library (§8) | later |
 
 **Items 1–3 were implemented, measured, and reverted — see §4.3.** The borrowed
@@ -209,15 +209,47 @@ user-visible "generation failed". **Decision: keep.**
 
 ---
 
-## 7. Planned — clarification policy (needs `open` scenarios)
+## 7. Tried → reverted — clarification policy (needs `open` scenarios to validate)
 
 `SKILL.md` rule: ask **one** focused question only when the missing info makes the
 model impossible or is fit/safety/compliance-critical; otherwise **act and list the
-assumptions**. This supersedes a "prefer to clarify" reflex.
+assumptions**. Implemented as a triage-prompt change in `app/refiner.py` (bias
+`clarify`→`refine`, "prefer acting over asking").
 
-Bench impact: the `spec: open` rubric must reward "assumptions stated explicitly",
-and the current `clarification_rate` metric is dropped. Deferred because bench M0 has
-no `open` scenarios yet (arrives with M1, `bench/SPEC.md §14`).
+**Measured (triage-verdict A/B, real DeepSeek, temp 0.1, direct `triage()` calls —
+bench can't validate this: `ProductBackend` runs with `auto_refine: False` and
+bypasses triage entirely). Reverted.** On 7 representative prompts, old vs new:
+
+- Intended shift happened but is **unstable**: a vague "make it nicer" that OLD
+  deterministically sent to `clarify` came back `['clarify','refine','ready']` on
+  three NEW runs — including `ready`, which would generate the literal vague prompt
+  (a worse outcome than the question it replaced).
+- **Stable side effect**: "make it a 100 mm sphere" (vs a 50×80×30 box) moved
+  `invalid`→`ready` on all 3 runs. Debatable (a full replacement isn't really a
+  *contradiction*, so `ready` may even be correct), but the "prefer acting" framing
+  demonstrably bled past the clarify/refine boundary into the `invalid` guard, which
+  was not intended.
+
+Net: an **unmeasurable** change (bench bypasses triage; triage verdicts are noisy at
+temp 0.1) whose benefit is unproven and whose blast radius reaches the `invalid`
+guard. Same trap as §4 — reverted rather than shipped on faith.
+
+**Prerequisite to retry:** a way to measure quality on underspecified prompts.
+**Prototyped 2026-07-30 (EXPERIMENTAL):** `spec: open` scenarios + a hybrid rubric
+graded by an OpenRouter vision judge (`bench judge`, `bench/judge.py`) — see
+`bench/README.md`. It yields an automated `open_pass_rate@judge`, but **contradicts
+`bench-SPEC` §2.3/§56**, which deliberately rejected automatic open grading; the
+canonical human blind-review metric (§5.4) is still unbuilt.
+
+**Decision (2026-07-30): keep it EXPERIMENTAL** — not adopted as canonical, not
+reverted. The judge stays as an exploratory tool with its own separate key
+(`open_pass_rate@judge`), loud EXPERIMENTAL labels, and the anti-self-confirmation /
+provenance / fail-closed guards from the two review passes. bench-SPEC §56 now
+carries a non-normative note disclosing it. Making it canonical would require a
+calibration pass against a human on 10–20 models AND an agreed bench-SPEC amendment;
+until both, `open_pass_rate@judge` is a signal, never the number. Still missing for a full §7 retry regardless: the bench must exercise the
+triage/`auto_refine` path (today `ProductBackend` runs `auto_refine: False`) and
+score the clarify-vs-act *verdict* itself. §7 stays reverted until then.
 
 ---
 
