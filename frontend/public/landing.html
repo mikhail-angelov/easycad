@@ -24,6 +24,7 @@
 <meta name="twitter:title" content="EasyCAD — Опиши. Напечатай.">
 <meta name="twitter:description" content="Фраза → печатаемая 3D-модель. Параметрический CAD простыми словами.">
 <meta name="twitter:image" content="https://easycad.bconf.com/og-image.png">
+<!--@METRICA@-->
 <style>
   :root {
     --paper: #ECEAE4;
@@ -675,6 +676,16 @@ result = cq.Workplane(<span class="c">"XY"</span>).box(WIDTH, DEPTH, HEIGHT)</di
       })
       .catch(function () {});
   })();
+
+  /* Funnel entry point: fire a Metrica goal when a visitor clicks through to the
+     app. No-op unless the counter was injected (window.ym present). */
+  document.querySelectorAll('a[href="/app"]').forEach(function (a) {
+    a.addEventListener("click", function () {
+      if (window.__ymId && typeof window.ym === "function") {
+        window.ym(window.__ymId, "reachGoal", "landing_cta");
+      }
+    });
+  });
 })();
 </script>
 </body>

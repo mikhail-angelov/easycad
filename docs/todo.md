@@ -27,23 +27,34 @@ records the direction.
 
 ## Analytics / product metrics
 
-### Usage analytics (Google Analytics / Yandex.Metrica)  · M
+### Usage analytics (Google Analytics / Yandex.Metrica)  · M — **partially DONE**
 **Why:** We have no visibility into how people actually use the app — whether
 they onboard correctly, where they drop off, and whether the SPEC14 onboarding
 (trial pill, starter chips, welcome) actually converts. Need data to tune it.
-**What:** Integrate a web analytics provider (Google Analytics and/or
-Yandex.Metrica) and track a small, meaningful event set, not just pageviews:
-- onboarding funnel: landing → open `/app` → first prompt sent → first
-  **successful** step (the key "aha") → trial exhausted → sign-in / add-key;
-- interaction signals: starter-chip click vs. free-typed prompt, refine
-  confirm/dismiss, ×3 variations used, revert, manual `Run`, export, language
-  switch (en/ru);
-- health signals: generation failure rate, clarify/invalid verdict rate.
-**Open (decide later):** which provider(s); **privacy/consent** — the app is
-currently tracker-free and sets only privacy-preserving cookies, so adding
-third-party analytics needs a consent banner (GDPR) and a CSP review; whether to
-prefer a self-hosted/cookieless option (Plausible/Umami) over GA/Metrica; keep
-event names in one taxonomy module so they don't drift.
+
+**DONE (2026-07-30, for the ProductHunt launch):** Yandex.Metrica integrated on
+**both** surfaces (landing + SPA shell) with Webvisor + click/link maps. The
+counter is injected server-side into each page's `<head>` (`_serve_html` in
+`app/main.py`) via a `<!--@METRICA@-->` placeholder, gated on the
+`YANDEX_METRICA_ID` env var — unset ⇒ both surfaces stay tracker-free. Funnel
+goals live in one taxonomy module (`frontend/src/analytics.ts`, `track()`
+reading `window.__ymId`) and are wired in `store.ts`: `landing_cta` → `app_open`
+→ `prompt_sent` (chat/variations) → `step_success` (the "aha", chat/variation/
+manual) → `trial_exhausted`; plus health signals `generation_failed`,
+`clarify_verdict`, `invalid_verdict`.
+
+**Still TODO:**
+- **Consent banner (GDPR)** — deliberately shipped **without** one for the
+  launch (decision 2026-07-30: max data first, banner right after). Webvisor
+  masks the CadQuery editor (`.code-host.ym-hide-content`) but records the chat.
+  Must add a proper consent gate before the tracker loads; also a **CSP review**
+  (app has no CSP header today — if one is added, allow `mc.yandex.ru` +
+  webvisor hosts).
+- **Google Analytics** — not added; Metrica-only for now. Decide if GA (or a
+  cookieless Plausible/Umami) is also wanted.
+- **Remaining interaction signals** — not yet tracked: starter-chip vs.
+  free-typed prompt, refine confirm/dismiss, ×3 variations *used*, revert,
+  export, language switch (en/ru). Add on the second pass.
 
 ---
 

@@ -60,7 +60,10 @@ export function Editor() {
           {t('editor.run')}
         </button>
       </header>
-      <div class="code-host" ref={hostRef} />
+      {/* ym-hide-content: mask the CadQuery source in Yandex.Metrica Webvisor
+          recordings — it can be a user's proprietary geometry (the chat, which
+          drives onboarding analysis, stays visible). */}
+      <div class="code-host ym-hide-content" ref={hostRef} />
     </section>
   )
 }

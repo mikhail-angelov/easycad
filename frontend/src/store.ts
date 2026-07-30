@@ -11,6 +11,7 @@ import {
   type ValidateKeyResult,
 } from './api'
 import { LANG_KEY, type Lang, detectLang, translate } from './i18n'
+import { track } from './analytics'
 
 // Orange warning banner (SPEC14), distinct from the red `error`.
 export interface Notice {
@@ -121,6 +122,17 @@ interface State {
 }
 
 export const useStore = create<State>((set, get) => {
+  // Fire `trial_exhausted` at most once per page load, from whichever path sees
+  // it first: the successful last-trial generation that drives remaining → 0
+  // (`depleted`), or a later rejected request (`rejected`) as a fallback. The
+  // flag dedupes so the two don't double-count.
+  let trialExhaustedFired = false
+  function fireTrialExhausted(via: 'depleted' | 'rejected') {
+    if (trialExhaustedFired) return
+    trialExhaustedFired = true
+    track('trial_exhausted', { via })
+  }
+
   // Sync editor + viewer to a session's current step.
   function applySession(session: SessionPayload) {
     const cur = session.current
@@ -135,19 +147,29 @@ export const useStore = create<State>((set, get) => {
     applyTrial(session)
   }
 
-  // Keep the trial tier/remaining fresh from any payload carrying settings.
+  // Keep the trial tier/remaining fresh, and detect the >0 → 0 transition (the
+  // moment a generation uses up the last free run). Guarded on a numeric prior
+  // so a fresh load of an already-exhausted user (null → 0) doesn't count.
+  function setTrial(tier: TrialTier | null, remaining: number | null) {
+    const prev = get().trialRemaining
+    if (typeof prev === 'number' && prev > 0 && remaining === 0) fireTrialExhausted('depleted')
+    set({ trialTier: tier, trialRemaining: remaining })
+  }
+
   function applyTrial(session: SessionPayload) {
-    set({
-      trialTier: session.settings.trial_tier ?? null,
-      trialRemaining: session.settings.trial_remaining ?? null,
-    })
+    setTrial(session.settings.trial_tier ?? null, session.settings.trial_remaining ?? null)
   }
 
   // Map a thrown API error to either the orange trial notice or the red error.
-  function reportError(e: unknown) {
+  // Generation call sites pass `genSource` so a network/provider failure (a
+  // thrown error, not a returned unsuccessful step) still counts as a health
+  // signal; non-generation callers omit it.
+  function reportError(e: unknown, genSource?: string) {
     if (e instanceof ApiError && e.code && TRIAL_CODES.has(e.code)) {
+      fireTrialExhausted('rejected')
       set({ notice: { message: e.message, code: e.code } })
     } else {
+      if (genSource) track('generation_failed', { source: genSource })
       set({ error: e instanceof Error ? e.message : String(e) })
     }
   }
@@ -162,6 +184,7 @@ export const useStore = create<State>((set, get) => {
       applyTrial(res.session)
 
       if (res.action === 'clarify') {
+        track('clarify_verdict', { source: 'chat' })
         set({ pending: { originalPrompt: prompt, questions: res.questions } })
         return
       }
@@ -170,6 +193,7 @@ export const useStore = create<State>((set, get) => {
         return
       }
       if (res.action === 'invalid') {
+        track('invalid_verdict', { source: 'chat' })
         set({ invalidNotice: { originalPrompt: prompt, reason: res.reason ?? translate(get().lang, 'chat.inconsistent') } })
         return
       }
@@ -183,12 +207,14 @@ export const useStore = create<State>((set, get) => {
         ],
       })
       if (step.success) {
+        track('step_success', { source: 'chat' })
         set({ code: step.code, stlBase64: step.stl_base64, geometryInfo: step.geometry_info, error: null })
       } else {
+        track('generation_failed', { source: 'chat' })
         set({ code: step.code, error: step.error })
       }
     } catch (e) {
-      reportError(e)
+      reportError(e, 'chat')
     } finally {
       set({ busy: false, busyKind: null })
     }
@@ -228,6 +254,7 @@ export const useStore = create<State>((set, get) => {
       try {
         const session = await api.session()
         applySession(session)
+        track('app_open', { tier: session.settings.trial_tier ?? 'unknown' })
         set({
           provider: session.settings.provider || session.default_provider,
           model: session.settings.model ?? '',
@@ -355,6 +382,7 @@ export const useStore = create<State>((set, get) => {
     setAutoRefine: (autoRefine) => set({ autoRefine }),
 
     async sendChat(prompt) {
+      track('prompt_sent', { mode: 'chat' })
       set({ pending: null, proposal: null, invalidNotice: null })
       await doChat(prompt, get().autoRefine)
     },
@@ -389,27 +417,33 @@ export const useStore = create<State>((set, get) => {
 
     async sendVariations(prompt) {
       const { code, provider, model, autoRefine, lang } = get()
+      track('prompt_sent', { mode: 'variations' })
       set({ busy: true, busyKind: 'gen', error: null, notice: null, pending: null, proposal: null, invalidNotice: null, variations: null, selectedVariation: null })
       try {
         const res = await api.variations(prompt, code, provider, model || undefined, autoRefine, 3, lang)
         if (res.action === 'clarify') {
+          track('clarify_verdict', { source: 'variations' })
           set({ pending: { originalPrompt: prompt, questions: res.questions } })
           return
         }
         if (res.action === 'invalid') {
+          track('invalid_verdict', { source: 'variations' })
           set({ invalidNotice: { originalPrompt: prompt, reason: res.reason ?? translate(get().lang, 'chat.inconsistent') } })
           return
         }
         // Apply the server's post-charge trial status (no session payload here);
         // the client does not re-derive the "charge once" rule (SPEC14).
         if (res.trial_tier !== undefined) {
-          set({ trialTier: res.trial_tier, trialRemaining: res.trial_remaining ?? null })
+          setTrial(res.trial_tier, res.trial_remaining ?? null)
+        }
+        if (!res.candidates.some((c) => c.success)) {
+          track('generation_failed', { source: 'variations' })
         }
         set({
           variations: { candidates: res.candidates, originalPrompt: prompt, refined: res.refined_prompt },
         })
       } catch (e) {
-        reportError(e)
+        reportError(e, 'variations')
       } finally {
         set({ busy: false, busyKind: null })
       }
@@ -447,10 +481,11 @@ export const useStore = create<State>((set, get) => {
           selectedVariation: null,
         })
         if (step.success) {
+          track('step_success', { source: 'variation' })
           set({ code: step.code, stlBase64: step.stl_base64, geometryInfo: step.geometry_info })
         }
       } catch (e) {
-        reportError(e)
+        reportError(e, 'variation')
       } finally {
         set({ busy: false })
       }
@@ -470,12 +505,14 @@ export const useStore = create<State>((set, get) => {
         const { step, session } = await api.executeManual(code)
         set({ steps: session.steps, currentId: session.current_id })
         if (step.success) {
+          track('step_success', { source: 'manual' })
           set({ stlBase64: step.stl_base64, geometryInfo: step.geometry_info, code: step.code, error: null })
         } else {
+          track('generation_failed', { source: 'manual' })
           set({ error: step.error })
         }
       } catch (e) {
-        reportError(e)
+        reportError(e, 'manual')
       } finally {
         set({ busy: false })
       }

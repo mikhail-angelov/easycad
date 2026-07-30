@@ -22,7 +22,7 @@ from typing import Literal
 
 from dotenv import load_dotenv
 from fastapi import Depends, FastAPI, HTTPException, Request
-from fastapi.responses import FileResponse, JSONResponse, RedirectResponse, Response
+from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, RedirectResponse, Response
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
 
@@ -1319,6 +1319,56 @@ def export_step_step(
 # (/app) and API are heavy/interactive and are kept off-limits to crawlers.
 _SITE_URL = os.getenv("APP_URL", "https://easycad.bconf.com").rstrip("/")
 
+# ── Web analytics (Yandex.Metrica) ──────────────────────────────────────────
+# The counter is injected into both HTML surfaces (landing + SPA shell) only
+# when a numeric counter id is configured, so dev/self-hosting stay tracker-free
+# by default. The snippet enables Webvisor + click/link maps — the point of the
+# ProductHunt launch is watching where real visitors get stuck. It also exposes
+# `window.__ymId`, which the SPA's analytics module reads to send funnel goals.
+#
+# The id is interpolated raw into a <script>, so it must be a plain counter
+# number — anything else is a config error (and, if the env were tampered with,
+# an HTML/JS injection vector). Reject non-numeric values: no tag, loud log.
+_raw_metrica_id = os.getenv("YANDEX_METRICA_ID", "").strip()
+# ASCII digits only: `isdecimal()` alone accepts non-ASCII digits (e.g. Arabic
+# ١٢٣), which are injection-safe but form a broken `window.__ymId = …` literal.
+if _raw_metrica_id and not (_raw_metrica_id.isascii() and _raw_metrica_id.isdecimal()):
+    log.warning("YANDEX_METRICA_ID=%r is not a numeric counter id — analytics disabled.", _raw_metrica_id)
+    _raw_metrica_id = ""
+YANDEX_METRICA_ID = _raw_metrica_id
+
+
+def _metrica_snippet(counter_id: str) -> str:
+    # The vendor-generated snippet with the id threaded from YANDEX_METRICA_ID.
+    # `window.__ymId` is our addition — the SPA analytics module reads it to send
+    # funnel goals (reachGoal); the rest is Metrica's standard init.
+    return (
+        "<!-- Yandex.Metrika counter -->\n"
+        '<script type="text/javascript">\n'
+        "   (function(m,e,t,r,i,k,a){\n"
+        "       m[i]=m[i]||function(){(m[i].a=m[i].a||[]).push(arguments)};\n"
+        "       m[i].l=1*new Date();\n"
+        "       for (var j = 0; j < document.scripts.length; j++) {if (document.scripts[j].src === r) { return; }}\n"
+        "       k=e.createElement(t),a=e.getElementsByTagName(t)[0],k.async=1,k.src=r,a.parentNode.insertBefore(k,a)\n"
+        f"   }})(window, document,'script','https://mc.yandex.ru/metrika/tag.js?id={counter_id}', 'ym');\n"
+        "\n"
+        f"   ym({counter_id}, 'init', {{ssr:true, webvisor:true, clickmap:true, ecommerce:\"dataLayer\", referrer: document.referrer, url: location.href, accurateTrackBounce:true, trackLinks:true}});\n"
+        f"   window.__ymId = {counter_id};\n"
+        "</script>\n"
+        f'<noscript><div><img src="https://mc.yandex.ru/watch/{counter_id}" style="position:absolute; left:-9999px;" alt="" /></div></noscript>\n'
+        "<!-- /Yandex.Metrika counter -->"
+    )
+
+
+# Both HTML sources carry the `<!--@METRICA@-->` placeholder in <head>; swap it
+# for the counter (or strip it when unconfigured). Reads per request so a
+# `make build` while the server is running is picked up without a restart.
+def _serve_html(path: Path, cache_control: str) -> HTMLResponse:
+    html = path.read_text(encoding="utf-8")
+    snippet = _metrica_snippet(YANDEX_METRICA_ID) if YANDEX_METRICA_ID else ""
+    html = html.replace("<!--@METRICA@-->", snippet)
+    return HTMLResponse(html, headers={"Cache-Control": cache_control})
+
 
 @app.get("/robots.txt")
 def robots() -> Response:
@@ -1347,10 +1397,10 @@ if STATIC_DIR.exists():
     _LANDING = STATIC_DIR / "landing.html"
 
     @app.get("/")
-    def landing() -> FileResponse:
+    def landing() -> HTMLResponse:
         if _LANDING.exists():
-            return FileResponse(_LANDING, headers={"Cache-Control": "public, max-age=300"})
-        return FileResponse(_INDEX, headers={"Cache-Control": "no-cache"})
+            return _serve_html(_LANDING, "public, max-age=300")
+        return _serve_html(_INDEX, "no-cache")
 
     # Static-root assets referenced by the landing (no global catch-all serves them).
     @app.get("/og-image.png")
@@ -1364,5 +1414,5 @@ if STATIC_DIR.exists():
 
     @app.get("/app")
     @app.get("/app/{_path:path}")
-    def spa(_path: str = "") -> FileResponse:
-        return FileResponse(_INDEX, headers={"Cache-Control": "no-cache"})
+    def spa(_path: str = "") -> HTMLResponse:
+        return _serve_html(_INDEX, "no-cache")
