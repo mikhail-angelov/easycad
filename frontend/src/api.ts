@@ -191,6 +191,9 @@ export const api = {
 
   importProject: (project: unknown): Promise<SessionPayload> => post('/api/project/import', project),
 
+  sendFeedback: (message: string, rating: number | null, email: string | null): Promise<{ ok: boolean }> =>
+    post('/api/feedback', { message, rating, email }),
+
   // ── Auth & settings (SPEC13) ──
   me: (): Promise<AuthInfo & { settings: SettingsInfo }> => fetch('/api/auth/me').then((r) => r.json()),
 

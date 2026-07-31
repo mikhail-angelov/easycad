@@ -12,6 +12,7 @@ import base64
 import json
 import logging
 import os
+import re
 import secrets
 import threading
 import time
@@ -21,7 +22,7 @@ from pathlib import Path
 from typing import Literal
 
 from dotenv import load_dotenv
-from fastapi import Depends, FastAPI, HTTPException, Request
+from fastapi import BackgroundTasks, Depends, FastAPI, HTTPException, Request
 from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, RedirectResponse, Response
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
@@ -88,10 +89,10 @@ MAX_INFLIGHT_GEN = int(os.getenv("EASYCAD_MAX_INFLIGHT_GEN", "0"))
 # max(0, …): a negative value would make `range(MAX_REPAIR + 1)` empty, so the
 # generate/execute loop never runs and `res` stays None → 500. Clamp to one-shot.
 MAX_REPAIR = max(0, int(os.getenv("EASYCAD_MAX_REPAIR", "2")))
-# Observability: shared token gating /api/admin/stats (unset → endpoint hidden).
-ADMIN_TOKEN = os.getenv("EASYCAD_ADMIN_TOKEN")
-# Optional ops address alerted (once/day) when the budget kill-switch trips.
-ALERT_EMAIL = os.getenv("EASYCAD_ALERT_EMAIL")
+# The single operator identity. Admin pages/endpoints require being signed in as
+# this email; feedback and ops alerts are sent here. Unset → admin is hidden and
+# no ops mail is sent. This is the ONLY admin/ops address the app uses.
+ADMIN_EMAIL = (os.getenv("ADMIN_EMAIL") or "").strip().lower()
 
 # ── Logging setup ─────────────────────────────────────────────────────────────
 # Without this, `logging.getLogger("easycad")` inherits the root WARNING level and
@@ -112,6 +113,7 @@ MAX_PROMPT = 20_000
 MAX_CODE = 200_000
 MAX_NAME = 500
 MAX_EMAIL = 320
+MAX_FEEDBACK = 4_000
 
 
 def _check_required_env() -> None:
@@ -294,6 +296,18 @@ def locked_session(session: Session = Depends(current_session)):
         yield session
 
 
+def require_admin(session: Session = Depends(current_session)) -> Session:
+    """Admin gate: the caller must be signed in as `ADMIN_EMAIL`. Returns 404
+    (not 403) when unset or mismatched, so the admin surface never reveals that
+    it exists to anyone but the operator."""
+    if not ADMIN_EMAIL or not session.user_id:
+        raise HTTPException(404, "Not found")
+    user = db.get_user(session.user_id)
+    if not user or user["email"].strip().lower() != ADMIN_EMAIL:
+        raise HTTPException(404, "Not found")
+    return session
+
+
 def _check_capacity(session: Session) -> None:
     if session.store.at_capacity():
         raise HTTPException(429, f"Session step limit reached ({session.store.MAX_STEPS}).")
@@ -328,10 +342,10 @@ def _budget_alert() -> None:
             return
         _alert_day = day
     log.warning("Daily trial budget (%s) exhausted — trials paused until UTC midnight.", TRIAL_DAILY_BUDGET)
-    if ALERT_EMAIL:
+    if ADMIN_EMAIL:
         try:
             send_mail(
-                ALERT_EMAIL,
+                ADMIN_EMAIL,
                 "text2part: daily trial budget exhausted",
                 f"The operator-key trial budget ({TRIAL_DAILY_BUDGET}/day) is spent; "
                 "trials are paused until UTC midnight. Users are asked to add their own key.",
@@ -608,6 +622,12 @@ class ValidateKeyRequest(BaseModel):
     key: str = Field(max_length=MAX_NAME)
 
 
+class FeedbackRequest(BaseModel):
+    message: str = Field(min_length=1, max_length=MAX_FEEDBACK)
+    rating: int | None = Field(default=None, ge=1, le=5)
+    email: str | None = Field(default=None, max_length=MAX_EMAIL)
+
+
 # ── CAD session helpers ───────────────────────────────────────────────────────
 
 
@@ -822,14 +842,70 @@ def validate_key(req: ValidateKeyRequest, request: Request, session: Session = D
 # ── Ops / observability ───────────────────────────────────────────────────────
 
 
+_EMAIL_RE = re.compile(r"^[^@\s]+@[^@\s]+\.[^@\s]+$")
+
+
+def _looks_like_email(s: str) -> bool:
+    """Cheap sanity check for an optional contact address (the frontend input is
+    not inside a <form>, so native validation may not run before submit)."""
+    return bool(_EMAIL_RE.match(s.strip()))
+
+
+def _notify_feedback(fid: int, email: str | None, rating: int | None, message: str, ip: str) -> None:
+    """Best-effort operator email; runs as a background task so a slow SMTP
+    round-trip never delays the user's confirmation. Only ever called when
+    ADMIN_EMAIL is configured — never falls back to another mailbox."""
+    try:
+        who = email or f"anonymous ({ip})"
+        stars = f" · {rating}★" if rating else ""
+        send_mail(
+            ADMIN_EMAIL,
+            f"[text2part] feedback #{fid}{stars} from {who}",
+            f"{message}\n\n— from {who}",
+        )
+    except Exception:  # noqa: BLE001
+        log.warning("feedback notify email failed")
+
+
+@app.post("/api/feedback")
+def submit_feedback(
+    req: FeedbackRequest,
+    request: Request,
+    background_tasks: BackgroundTasks,
+    session: Session = Depends(current_session),
+) -> dict:
+    """Accept in-app feedback from any visitor (anonymous or signed-in). Stored in
+    SQLite; the operator email is sent in the background. Rate-limited by IP."""
+    ip = _client_ip(request)
+    if not limiter.allow(f"feedback:{ip}", 5, 3600):
+        raise HTTPException(429, "Too many messages. Please try again later.")
+    message = req.message.strip()
+    if not message:
+        raise HTTPException(400, "Message is empty.")
+
+    # Prefer the signed-in user's verified email; else the optional one they typed
+    # (kept only if it looks like an email — invalid values are discarded).
+    email: str | None = None
+    if session.user_id:
+        user = db.get_user(session.user_id)
+        email = user["email"] if user else None
+    if not email and req.email and _looks_like_email(req.email):
+        email = req.email.strip().lower()[:MAX_EMAIL]
+
+    fid = db.add_feedback(message, email, req.rating)
+    metrics.incr("feedback")
+    # Notify only when an operator identity is configured — never send to a
+    # fallback mailbox in a deployment that intentionally leaves ADMIN_EMAIL unset.
+    if ADMIN_EMAIL:
+        background_tasks.add_task(_notify_feedback, fid, email, req.rating, message, ip)
+    return {"ok": True}
+
+
 @app.get("/api/admin/stats")
-def admin_stats(request: Request) -> dict:
+def admin_stats(session: Session = Depends(require_admin)) -> dict:
     """Operator snapshot: counters, avg chat-generation latency, today's operator-
-    key budget, live session count. Gated by a shared token (`EASYCAD_ADMIN_TOKEN`);
-    hidden (404) unless the token is configured and matches, so it never leaks on
-    the public surface. High-privilege — keep the token off the client."""
-    if not ADMIN_TOKEN or request.headers.get("x-admin-token") != ADMIN_TOKEN:
-        raise HTTPException(404, "Not found")
+    key budget, live session count, and recent feedback. Requires being signed in
+    as `ADMIN_EMAIL` (hidden with 404 otherwise)."""
     counts = metrics.snapshot()
     # Scoped, honestly named: this is the /api/chat generation-turn latency only —
     # NOT triage, variations, manual execute, or lazy STL restore.
@@ -841,6 +917,7 @@ def admin_stats(request: Request) -> dict:
         "avg_chat_gen_ms": avg_ms,
         "budget_today": budget,
         "sessions_live": registry.count(),
+        "feedback": {"count": db.count_feedback(), "recent": db.list_feedback(30)},
     }
 
 

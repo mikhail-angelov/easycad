@@ -198,6 +198,57 @@ body {
   color: var(--blue);
 }
 
+/* ── Feedback (topbar dropdown) ──────────────────────────── */
+.feedback {
+  position: relative;
+}
+.feedback-panel {
+  width: 300px;
+  gap: 10px;
+}
+.feedback-text {
+  width: 100%;
+  box-sizing: border-box;
+  resize: vertical;
+  min-height: 84px;
+  padding: 8px 10px;
+  font: inherit;
+  color: var(--ink);
+  background: #fff;
+  border: 1px solid rgba(0, 0, 0, 0.2);
+  border-radius: 6px;
+}
+.feedback-stars {
+  display: flex;
+  gap: 4px;
+}
+.feedback-stars .star {
+  border: none;
+  background: transparent;
+  padding: 0 2px;
+  font-size: 20px;
+  line-height: 1;
+  color: rgba(0, 0, 0, 0.25);
+  cursor: pointer;
+  transition: color 0.1s;
+}
+.feedback-stars .star.on {
+  color: #e8a13a;
+}
+.feedback-send {
+  padding: 8px 12px;
+  border: none;
+  border-radius: 6px;
+  background: var(--blue);
+  color: #fff;
+  font: 600 13px inherit;
+  cursor: pointer;
+}
+.feedback-send:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+
 /* ── Icon buttons (header) ───────────────────────────────── */
 .icon-button {
   position: relative;

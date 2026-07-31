@@ -398,35 +398,37 @@ def test_lazy_stl_respects_concurrency_cap(monkeypatch):
 # ── Observability ──────────────────────────────────────────────────────────────
 
 
-def test_admin_stats_hidden_without_token(monkeypatch):
-    monkeypatch.setattr(m, "ADMIN_TOKEN", "s3cret")
+def test_admin_stats_requires_admin_email(monkeypatch):
+    monkeypatch.setattr(m, "ADMIN_EMAIL", "admin@example.com")
     client = TestClient(app)
-    assert client.get("/api/admin/stats").status_code == 404  # no token
-    assert client.get("/api/admin/stats", headers={"x-admin-token": "wrong"}).status_code == 404
-    r = client.get("/api/admin/stats", headers={"x-admin-token": "s3cret"})
+    assert client.get("/api/admin/stats").status_code == 404  # anonymous
+    _login(client, monkeypatch, "admin@example.com")
+    r = client.get("/api/admin/stats")
     assert r.status_code == 200
     assert "counters" in r.json() and "budget_today" in r.json()
 
 
-def test_admin_stats_disabled_when_no_token(monkeypatch):
-    monkeypatch.setattr(m, "ADMIN_TOKEN", None)
+def test_admin_stats_disabled_when_no_admin_email(monkeypatch):
+    monkeypatch.setattr(m, "ADMIN_EMAIL", "")
     client = TestClient(app)
-    assert client.get("/api/admin/stats", headers={"x-admin-token": "anything"}).status_code == 404
+    _login(client, monkeypatch, "anyone@example.com")
+    assert client.get("/api/admin/stats").status_code == 404
 
 
 def test_metrics_count_generation_and_spend(monkeypatch):
     from app import metrics
 
     _stub_llm(monkeypatch)
-    monkeypatch.setattr(m, "ADMIN_TOKEN", "tok")
+    monkeypatch.setattr(m, "ADMIN_EMAIL", "admin@example.com")
     client = TestClient(app)
     assert _chat(client, ip="30.1.1.1").status_code == 200
     snap = metrics.snapshot()
     assert snap.get("gen_ok", 0) >= 1
     assert snap.get("trial_spend", 0) >= 1  # operator-key spend recorded
     assert snap.get("gen_ms_count", 0) >= 1
-    # And it surfaces through the admin endpoint.
-    body = client.get("/api/admin/stats", headers={"x-admin-token": "tok"}).json()
+    # And it surfaces through the admin endpoint (signed in as the admin).
+    _login(client, monkeypatch, "admin@example.com")
+    body = client.get("/api/admin/stats").json()
     assert body["counters"]["gen_ok"] >= 1
     assert body["avg_chat_gen_ms"] is not None
 

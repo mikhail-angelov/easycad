@@ -5,6 +5,7 @@ import { useStore, useT } from './store'
 import { Chat } from './components/Chat'
 import { Timeline } from './components/Timeline'
 import { Account } from './components/Account'
+import { Feedback } from './components/Feedback'
 import { LangToggle } from './components/LangToggle'
 import { IconSave, IconLoad, IconNew } from './components/Icons'
 
@@ -64,6 +65,7 @@ export function App() {
             style="display:none"
             onChange={onFile}
           />
+          <Feedback />
           <Account />
         </div>
       </header>

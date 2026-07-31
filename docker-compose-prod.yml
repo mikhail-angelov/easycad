@@ -9,11 +9,7 @@ services:
     ports:
       - "127.0.0.1:8852:8852"
     env_file:
-      - ./.env
-    environment:
-      - EASYCAD_WORKER_URL=http://worker:8853
-      - EASYCAD_DB_PATH=/data/easycad.db      # accounts + settings (SPEC13)
-      - EASYCAD_SECURE_COOKIES=1
+      - ./.env           # ALL app config + secrets live here — see .env.prod.example
     volumes:
       - ./data:/data     # accounts DB persists here (CAD sessions are in-memory)
     mem_limit: 1g        # bound app-tier memory against oversized payloads (review C1)
@@ -49,10 +45,10 @@ services:
     tmpfs:
       - /tmp:size=256m
     environment:
-      # SPEC18: zygote-fork execution — import CadQuery once, fork a one-shot
-      # child per request (see docs/spec18.md). Enabled for prod validation.
-      # The zygote socket + lock live on the /tmp tmpfs above. Requires a SINGLE
-      # worker process (enforced by a startup flock — no uvicorn --workers).
+      # SPEC18 zygote-fork execution (docs/spec18.md). Value comes from .env via
+      # substitution — nothing hardcoded here — and the worker receives ONLY this
+      # var (no env_file) so it stays secret-free. Requires a SINGLE worker
+      # process (enforced by a startup flock — no uvicorn --workers).
       - EASYCAD_WORKER_ZYGOTE=1
     cap_drop:
       - ALL

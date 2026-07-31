@@ -62,6 +62,19 @@ def _get() -> sqlite3.Connection:
             )
             """
         )
+        # User feedback (in-app "leave feedback" button). email/rating optional;
+        # anonymous feedback keeps email NULL.
+        _conn.execute(
+            """
+            CREATE TABLE IF NOT EXISTS feedback (
+                id         INTEGER PRIMARY KEY AUTOINCREMENT,
+                email      TEXT,
+                message    TEXT NOT NULL,
+                rating     INTEGER,
+                created_at TEXT DEFAULT CURRENT_TIMESTAMP
+            )
+            """
+        )
         _migrate_add_trial_used(_conn)
         _conn.commit()
         _conn_path = path
@@ -198,10 +211,44 @@ def sweep_anon_trial(max_age_seconds: float) -> int:
         return cur.rowcount
 
 
+# ── Feedback ──────────────────────────────────────────────────────────────────
+
+
+def add_feedback(message: str, email: str | None = None, rating: int | None = None) -> int:
+    """Store one feedback entry; return its id."""
+    with _lock:
+        conn = _get()
+        cur = conn.execute(
+            "INSERT INTO feedback (email, message, rating) VALUES (?, ?, ?)",
+            (email, message, rating),
+        )
+        conn.commit()
+        return cur.lastrowid
+
+
+def list_feedback(limit: int = 50) -> list[dict]:
+    """Most recent feedback first (for the admin view)."""
+    with _lock:
+        conn = _get()
+        rows = conn.execute(
+            "SELECT id, email, message, rating, created_at FROM feedback "
+            "ORDER BY id DESC LIMIT ?",
+            (limit,),
+        ).fetchall()
+        return [dict(r) for r in rows]
+
+
+def count_feedback() -> int:
+    with _lock:
+        conn = _get()
+        return conn.execute("SELECT COUNT(*) AS n FROM feedback").fetchone()["n"]
+
+
 def _reset_for_tests() -> None:
     """Drop all rows (test isolation)."""
     with _lock:
         conn = _get()
         conn.execute("DELETE FROM users")
         conn.execute("DELETE FROM anon_trial")
+        conn.execute("DELETE FROM feedback")
         conn.commit()
