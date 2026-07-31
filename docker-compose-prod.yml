@@ -21,10 +21,10 @@ services:
     labels:
       monic.enabled: "true"
       monic.check: "http"
-      monic.check_http_url: "https://easycad.bconf.com"
-      monic.name: "easycad"
+      monic.check_http_url: "https://text2part.bconf.com"
+      monic.name: "text2part"
       redoproxy.enabled: "true"
-      redoproxy.domain: "easycad.bconf.com"
+      redoproxy.domain: "text2part.bconf.com"
       redoproxy.port: 8852
       # /api/chat runs an LLM generation turn that can take longer than the proxy's
       # 30s default — without this the edge reset the (HTTP/2) connection mid-turn

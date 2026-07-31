@@ -1,29 +1,29 @@
 <!doctype html>
-<html lang="ru">
+<html lang="en">
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>EasyCAD — Опиши. Напечатай.</title>
-<meta name="description" content="EasyCAD превращает фразу в печатаемую 3D-модель: опиши изменение простыми словами — он пишет CadQuery, исполняет его и показывает результат. Параметрический CAD для 3D-печати.">
-<link rel="canonical" href="https://easycad.bconf.com/">
+<title>text2part — Describe it. Print it.</title>
+<meta name="description" content="text2part turns a sentence into a printable 3D model: describe one change in plain words — it writes CadQuery, runs it, and shows the result. Parametric CAD for 3D printing.">
+<link rel="canonical" href="https://text2part.bconf.com/">
 <link rel="icon" href="/favicon.svg" type="image/svg+xml">
 <meta name="theme-color" content="#ECEAE4" media="(prefers-color-scheme: light)">
 <meta name="theme-color" content="#0F1114" media="(prefers-color-scheme: dark)">
 <meta property="og:type" content="website">
-<meta property="og:site_name" content="EasyCAD">
-<meta property="og:title" content="EasyCAD — Опиши. Напечатай.">
-<meta property="og:description" content="Фраза → печатаемая 3D-модель. Параметрический CAD простыми словами, по одному изменению за раз.">
-<meta property="og:url" content="https://easycad.bconf.com/">
-<meta property="og:image" content="https://easycad.bconf.com/og-image.png">
+<meta property="og:site_name" content="text2part">
+<meta property="og:title" content="text2part — Describe it. Print it.">
+<meta property="og:description" content="A sentence → a printable 3D model. Parametric CAD in plain language, one change at a time.">
+<meta property="og:url" content="https://text2part.bconf.com/">
+<meta property="og:image" content="https://text2part.bconf.com/og-image.png">
 <meta property="og:image:width" content="1200">
 <meta property="og:image:height" content="630">
-<meta property="og:image:alt" content="EasyCAD — изометрический чертёж коробки с размерами">
-<meta property="og:locale" content="ru_RU">
-<meta property="og:locale:alternate" content="en_US">
+<meta property="og:image:alt" content="text2part — isometric drawing of a box with dimensions">
+<meta property="og:locale" content="en_US">
+<meta property="og:locale:alternate" content="ru_RU">
 <meta name="twitter:card" content="summary_large_image">
-<meta name="twitter:title" content="EasyCAD — Опиши. Напечатай.">
-<meta name="twitter:description" content="Фраза → печатаемая 3D-модель. Параметрический CAD простыми словами.">
-<meta name="twitter:image" content="https://easycad.bconf.com/og-image.png">
+<meta name="twitter:title" content="text2part — Describe it. Print it.">
+<meta name="twitter:description" content="A sentence → a printable 3D model. Parametric CAD in plain language.">
+<meta name="twitter:image" content="https://text2part.bconf.com/og-image.png">
 <!--@METRICA@-->
 <style>
   :root {
@@ -221,19 +221,17 @@
 <header class="hero" id="top">
   <div class="wrap hero-grid">
     <div>
-      <span class="eyebrow reveal" data-i18n="hero.eyebrow">Параметрический CAD · простыми словами</span>
-      <h1 class="reveal" data-i18n="hero.h1"><span class="dimframe">Опиши&nbsp;словами.</span><br><span class="b">Напечатай.</span></h1>
-      <p class="lead reveal" data-i18n="hero.lead">EasyCAD превращает фразу в печатаемую 3D-модель. Описывай по одному
-        изменению за раз — он пишет CadQuery, исполняет его и показывает результат.
-        Смотри, как деталь растёт, и отправляй на принтер.</p>
+      <span class="eyebrow reveal" data-i18n="hero.eyebrow">Parametric CAD · in plain language</span>
+      <h1 class="reveal" data-i18n="hero.h1"><span class="dimframe">Describe&nbsp;it.</span><br><span class="b">Print&nbsp;it.</span></h1>
+      <p class="lead reveal" data-i18n="hero.lead">text2part turns a sentence into a printable 3D model. Describe one change at a time — it writes the CadQuery, runs it, and shows the result. Watch your part grow, then send it to the printer.</p>
       <div class="cta-row reveal">
-        <a class="btn primary" href="/app" target="_blank" rel="noopener" data-i18n="btn.open">Открыть EasyCAD →</a>
-        <a class="btn ghost" href="https://github.com/mikhail-angelov/easycad" target="_blank" rel="noopener" data-i18n="btn.github">Смотреть на GitHub</a>
+        <a class="btn primary" href="/app" target="_blank" rel="noopener" data-i18n="btn.open">Open text2part →</a>
+        <a class="btn ghost" href="https://github.com/mikhail-angelov/easycad" target="_blank" rel="noopener" data-i18n="btn.github">View on GitHub</a>
       </div>
     </div>
     <div class="stage reveal">
-      <span class="tag" data-i18n="tag.fig1">РИС. 01 — результат</span>
-      <span class="tag br" data-i18n="tag.iso">изометрия · мм</span>
+      <span class="tag" data-i18n="tag.fig1">FIG. 01 — result</span>
+      <span class="tag br" data-i18n="tag.iso">isometric · mm</span>
       <canvas id="hero-canvas" aria-label="Isometric drawing of a box"></canvas>
     </div>
   </div>
@@ -243,13 +241,9 @@
 
 <section>
   <div class="wrap">
-    <span class="eyebrow reveal" data-i18n="origin.eyebrow">С чего началось</span>
-    <h2 class="reveal" data-i18n="origin.h2">Всё началось с салфетки.</h2>
-    <p class="lead reveal muted" style="margin-top:22px" data-i18n="origin.lead">Я нарисовал деталь от руки, отдал фото ИИ — и он с первого раза выдал
-      почти точную 3D-модель. Задача была сделать это повторяемым: точно,
-      редактируемо, по-моему. Много попыток спустя ответ оказался до неловкости
-      прямым: <b>пусть модель пишет CadQuery-код — по одному маленькому изменению
-      за раз — и показывает геометрию после каждого шага.</b></p>
+    <span class="eyebrow reveal" data-i18n="origin.eyebrow">The origin</span>
+    <h2 class="reveal" data-i18n="origin.h2">It started with a napkin.</h2>
+    <p class="lead reveal muted" style="margin-top:22px" data-i18n="origin.lead">I sketched a part by hand, handed the photo to an AI, and it produced a nearly-correct 3D model on the first try. The trick was making that repeatable — precise, editable, mine. Many attempts later, the answer was almost embarrassingly direct: <b>let the model write CadQuery code, one small change at a time, and show the geometry after every step.</b></p>
   </div>
 </section>
 
@@ -257,23 +251,23 @@
 
 <section>
   <div class="wrap">
-    <span class="eyebrow reveal" data-i18n="work.eyebrow">Рабочее место</span>
-    <h2 class="reveal" data-i18n="work.h2">Ты описываешь. Оно пишет код. Оно строит.</h2>
+    <span class="eyebrow reveal" data-i18n="work.eyebrow">The workspace</span>
+    <h2 class="reveal" data-i18n="work.h2">You describe. It codes. It builds.</h2>
     <div class="cards">
       <div class="card reveal">
-        <span class="n" data-i18n="card1.n">01 · Чат</span>
-        <h3 data-i18n="card1.h">Скажи одно изменение</h3>
-        <p data-i18n="card1.p">Простыми словами, по одной фиче за раз. «Сделай стенки 2 мм». Он уточняет расплывчатые формулировки и переспрашивает, когда запрос правда неоднозначен.</p>
+        <span class="n" data-i18n="card1.n">01 · Chat</span>
+        <h3 data-i18n="card1.h">Say one change</h3>
+        <p data-i18n="card1.p">Plain language, one feature at a time. “Give it 2 mm walls.” It refines vague prompts and asks when a request is truly ambiguous.</p>
       </div>
       <div class="card reveal">
-        <span class="n" data-i18n="card2.n">02 · Код</span>
-        <h3 data-i18n="card2.h">Настоящий CadQuery</h3>
-        <p data-i18n="card2.p">Редактируемый Python, который можно читать и править руками. Ключевые размеры вынесены в именованные константы вверху — никаких магических чисел по всему коду.</p>
+        <span class="n" data-i18n="card2.n">02 · Code</span>
+        <h3 data-i18n="card2.h">Real CadQuery</h3>
+        <p data-i18n="card2.p">Editable Python you can read and tweak by hand. Primary dimensions live as named constants at the top — never buried as magic numbers.</p>
       </div>
       <div class="card reveal">
-        <span class="n" data-i18n="card3.n">03 · Вьювер</span>
-        <h3 data-i18n="card3.h">Мгновенное 3D</h3>
-        <p data-i18n="card3.p">Каждый шаг исполняется и рендерится сразу, а таймлайн можно отмотать назад. Готово — экспортируй STL.</p>
+        <span class="n" data-i18n="card3.n">03 · Viewer</span>
+        <h3 data-i18n="card3.h">Instant 3D</h3>
+        <p data-i18n="card3.p">Every step executes and renders immediately, with a timeline you can rewind. Export STL when the part looks right.</p>
       </div>
     </div>
   </div>
@@ -283,15 +277,15 @@
 
 <section>
   <div class="wrap">
-    <span class="eyebrow reveal" data-i18n="build.eyebrow">По одной фразе за раз</span>
-    <h2 class="reveal" data-i18n="build.h2">От бруска до детали за пять фраз.</h2>
+    <span class="eyebrow reveal" data-i18n="build.eyebrow">One sentence at a time</span>
+    <h2 class="reveal" data-i18n="build.h2">From a block to a part in five prompts.</h2>
     <div class="steps">
-      <div class="step reveal"><div class="idx" data-i18n="step.0">ШАГ 0</div><div><div class="prompt" data-i18n="step0.p">Стартовый брусок 50 × 80 × 30</div><div class="cap" data-i18n="step0.c">Каждый проект начинается с одного параметрического бруска.</div></div></div>
-      <div class="step reveal"><div class="idx" data-i18n="step.1">ШАГ 1</div><div><div class="prompt" data-i18n="step1.p">› сделай открытую коробку со стенками 2 мм</div><div class="cap" data-i18n="step1.c">Выдолблено размер-сохраняющим булевым вырезом.</div></div></div>
-      <div class="step reveal"><div class="idx" data-i18n="step.2">ШАГ 2</div><div><div class="prompt" data-i18n="step2.p">› скругли четыре вертикальных угла радиусом 4 мм</div><div class="cap" data-i18n="step2.c">Вертикальные рёбра выбраны через .edges("|Z").</div></div></div>
-      <div class="step reveal"><div class="idx" data-i18n="step.3">ШАГ 3</div><div><div class="prompt" data-i18n="step3.p">› добавь бортик 1.5 мм по внутренней верхней кромке под крышку</div><div class="cap" data-i18n="step3.c">Внутренний бортик, чтобы села крышка.</div></div></div>
-      <div class="step reveal"><div class="idx" data-i18n="step.4">ШАГ 4</div><div><div class="prompt" data-i18n="step4.p">› прорежь кабель-слот 20 × 6 мм внизу стенки</div><div class="cap" data-i18n="step4.c">Пробито увеличенным резаком.</div></div></div>
-      <div class="step reveal"><div class="idx" data-i18n="step.5">ШАГ 5</div><div><div class="prompt" data-i18n="step5.p">› сними фаску 1 мм с верхней внешней кромки</div><div class="cap" data-i18n="step5.c">Аккуратный скос — можно печатать.</div></div></div>
+      <div class="step reveal"><div class="idx" data-i18n="step.0">STEP 0</div><div><div class="prompt" data-i18n="step0.p">50 × 80 × 30 starting block</div><div class="cap" data-i18n="step0.c">Every project begins from the same parametric block.</div></div></div>
+      <div class="step reveal"><div class="idx" data-i18n="step.1">STEP 1</div><div><div class="prompt" data-i18n="step1.p">› make an open box with 2 mm walls</div><div class="cap" data-i18n="step1.c">Hollowed with a size-preserving boolean cut.</div></div></div>
+      <div class="step reveal"><div class="idx" data-i18n="step.2">STEP 2</div><div><div class="prompt" data-i18n="step2.p">› round the four vertical corners, 4 mm fillet</div><div class="cap" data-i18n="step2.c">Vertical edges selected with .edges("|Z").</div></div></div>
+      <div class="step reveal"><div class="idx" data-i18n="step.3">STEP 3</div><div><div class="prompt" data-i18n="step3.p">› add a 1.5 mm ledge inside the top edge for a lid</div><div class="cap" data-i18n="step3.c">An inner rim to seat a cover.</div></div></div>
+      <div class="step reveal"><div class="idx" data-i18n="step.4">STEP 4</div><div><div class="prompt" data-i18n="step4.p">› cut a 20 × 6 mm cable slot at the bottom of a wall</div><div class="cap" data-i18n="step4.c">Punched through with an oversized cutter.</div></div></div>
+      <div class="step reveal"><div class="idx" data-i18n="step.5">STEP 5</div><div><div class="prompt" data-i18n="step5.p">› chamfer the top outer edge 1 mm</div><div class="cap" data-i18n="step5.c">A clean bevel — ready to print.</div></div></div>
     </div>
   </div>
 </section>
@@ -300,20 +294,18 @@
 
 <section>
   <div class="wrap">
-    <span class="eyebrow reveal" data-i18n="param.eyebrow">Параметрично по умолчанию</span>
-    <h2 class="reveal" data-i18n="param.h2">Все размеры собраны вместе.</h2>
+    <span class="eyebrow reveal" data-i18n="param.eyebrow">Parametric by default</span>
+    <h2 class="reveal" data-i18n="param.h2">Every dimension in one place.</h2>
     <div class="param-grid">
       <div class="reveal">
-        <p class="lead muted" data-i18n="param.lead">Потяни значение — и вся модель следом, потому что код держит ключевые
-          размеры именованными константами вверху. Правишь ширину один раз, а не в
-          десятке разбросанных чисел.</p>
+        <p class="lead muted" data-i18n="param.lead">Drag a value and the whole model follows — because the code keeps its primary dimensions as named constants up top. Fix the width once, not in a dozen scattered numbers.</p>
         <div class="controls">
           <div class="control">
-            <label><span data-i18n="ctrl.width">Ширина — X</span><b id="w-val">50</b></label>
+            <label><span data-i18n="ctrl.width">Width — X</span><b id="w-val">50</b></label>
             <input id="w-range" type="range" min="30" max="90" value="50" aria-label="Width">
           </div>
           <div class="control">
-            <label><span data-i18n="ctrl.height">Высота — Z</span><b id="h-val">30</b></label>
+            <label><span data-i18n="ctrl.height">Height — Z</span><b id="h-val">30</b></label>
             <input id="h-range" type="range" min="15" max="60" value="30" aria-label="Height">
           </div>
         </div>
@@ -325,8 +317,8 @@ DEPTH  = 80   <span class="c"># Y, mm</span>
 result = cq.Workplane(<span class="c">"XY"</span>).box(WIDTH, DEPTH, HEIGHT)</div>
       </div>
       <div class="stage reveal" style="aspect-ratio: 1 / 0.88;">
-        <span class="tag" data-i18n="tag.fig2">РИС. 02 — вживую</span>
-        <span class="tag br" id="dim-tag">50 × 80 × 30 мм</span>
+        <span class="tag" data-i18n="tag.fig2">FIG. 02 — live</span>
+        <span class="tag br" id="dim-tag">50 × 80 × 30 mm</span>
         <canvas id="param-canvas" aria-label="Isometric box resized by sliders"></canvas>
       </div>
     </div>
@@ -337,11 +329,9 @@ result = cq.Workplane(<span class="c">"XY"</span>).box(WIDTH, DEPTH, HEIGHT)</di
 
 <section>
   <div class="wrap">
-    <span class="eyebrow reveal" data-i18n="arch.eyebrow">Безопасно by design</span>
-    <h2 class="reveal" data-i18n="arch.h2">Твоя фраза пишет код. Код исполняется в изолированном контуре.</h2>
-    <p class="lead muted reveal" style="margin-top:22px" data-i18n="arch.lead">Сгенерированный код небезопасен, поэтому он никогда не исполняется рядом с
-      твоими данными. Приложение хранит ключ и общается с моделью; отдельный
-      воркер считает геометрию — без сети, без секретов и с жёсткими лимитами.</p>
+    <span class="eyebrow reveal" data-i18n="arch.eyebrow">Safe by design</span>
+    <h2 class="reveal" data-i18n="arch.h2">Your prompt writes code. The code runs in a sealed box.</h2>
+    <p class="lead muted reveal" style="margin-top:22px" data-i18n="arch.lead">Generated code is untrusted, so it never runs next to your data. The app holds your key and talks to the model; a separate worker executes the geometry with no network, no secrets, and strict limits.</p>
     <div class="diagram reveal">
       <svg viewBox="0 0 720 210" role="img" aria-label="Architecture diagram">
         <g class="dg" stroke-width="1.5" fill="none">
@@ -354,15 +344,15 @@ result = cq.Workplane(<span class="c">"XY"</span>).box(WIDTH, DEPTH, HEIGHT)</di
           <path class="accent" d="M548 99 L558 104 L548 109"></path>
         </g>
         <g class="labels">
-          <text data-i18n="dg.you" x="99" y="100" text-anchor="middle" font-size="13" font-weight="700">ТЫ</text>
-          <text data-i18n="dg.you2" class="m" x="99" y="118" text-anchor="middle" font-size="10">фраза</text>
-          <text data-i18n="dg.app" x="370" y="94" text-anchor="middle" font-size="13" font-weight="700">СЕРВЕР</text>
-          <text data-i18n="dg.app2" class="m" x="370" y="112" text-anchor="middle" font-size="10">пишет CadQuery</text>
-          <text data-i18n="dg.app3" class="m" x="370" y="126" text-anchor="middle" font-size="10">хранит ключ</text>
-          <text data-i18n="dg.wrk" class="a" x="635" y="94" text-anchor="middle" font-size="13" font-weight="700">ВОРКЕР</text>
-          <text data-i18n="dg.wrk2" class="m" x="635" y="112" text-anchor="middle" font-size="10">считает геометрию</text>
-          <text data-i18n="dg.wrk3" class="m" x="635" y="126" text-anchor="middle" font-size="10">без сети · без ключа</text>
-          <text data-i18n="dg.seal" class="a" x="506" y="92" text-anchor="middle" font-size="9" letter-spacing="0.12em">ИЗОЛЯЦИЯ</text>
+          <text data-i18n="dg.you" x="99" y="100" text-anchor="middle" font-size="13" font-weight="700">YOU</text>
+          <text data-i18n="dg.you2" class="m" x="99" y="118" text-anchor="middle" font-size="10">a sentence</text>
+          <text data-i18n="dg.app" x="370" y="94" text-anchor="middle" font-size="13" font-weight="700">APP</text>
+          <text data-i18n="dg.app2" class="m" x="370" y="112" text-anchor="middle" font-size="10">writes CadQuery</text>
+          <text data-i18n="dg.app3" class="m" x="370" y="126" text-anchor="middle" font-size="10">holds your key</text>
+          <text data-i18n="dg.wrk" class="a" x="635" y="94" text-anchor="middle" font-size="13" font-weight="700">WORKER</text>
+          <text data-i18n="dg.wrk2" class="m" x="635" y="112" text-anchor="middle" font-size="10">runs geometry</text>
+          <text data-i18n="dg.wrk3" class="m" x="635" y="126" text-anchor="middle" font-size="10">no net · no key</text>
+          <text data-i18n="dg.seal" class="a" x="506" y="92" text-anchor="middle" font-size="9" letter-spacing="0.12em">SEALED</text>
         </g>
       </svg>
     </div>
@@ -373,26 +363,24 @@ result = cq.Workplane(<span class="c">"XY"</span>).box(WIDTH, DEPTH, HEIGHT)</di
 
 <section>
   <div class="wrap">
-    <span class="eyebrow reveal" data-i18n="pricing.eyebrow">Начни бесплатно</span>
-    <h2 class="reveal" data-i18n="pricing.h2">Попробуй без ключа. Заведёшь свой — когда захочешь.</h2>
-    <p class="lead muted reveal" style="margin-top:22px" data-i18n="pricing.lead">Ничего не нужно настраивать, чтобы начать. Первые модели считаются на нашем
-      ключе — просто опиши деталь. Войдёшь во вкус — подключишь свой ключ и работаешь
-      без ограничений.</p>
+    <span class="eyebrow reveal" data-i18n="pricing.eyebrow">Start free</span>
+    <h2 class="reveal" data-i18n="pricing.h2">Try it with no key. Bring your own whenever you like.</h2>
+    <p class="lead muted reveal" style="margin-top:22px" data-i18n="pricing.lead">Nothing to set up to begin. Your first models run on our key — just describe a part. Once you're hooked, add your own key and work with no limits.</p>
     <div class="cards">
       <div class="card reveal">
-        <span class="n" data-i18n="tier1.n">01 · Гость</span>
-        <h3 data-i18n="tier1.h">1 модель бесплатно</h3>
-        <p data-i18n="tier1.p">Без регистрации и без ключа. Открой приложение, опиши деталь и получи результат — сразу.</p>
+        <span class="n" data-i18n="tier1.n">01 · Guest</span>
+        <h3 data-i18n="tier1.h">1 model free</h3>
+        <p data-i18n="tier1.p">No signup, no key. Open the app, describe a part, and get the result — right away.</p>
       </div>
       <div class="card reveal">
-        <span class="n" data-i18n="tier2.n">02 · Аккаунт</span>
-        <h3 data-i18n="tier2.h">10 моделей бесплатно</h3>
-        <p data-i18n="tier2.p">Войди по e-mail — и получи 10 бесплатных генераций на нашем ключе. Пароли не нужны, ссылка придёт на почту.</p>
+        <span class="n" data-i18n="tier2.n">02 · Account</span>
+        <h3 data-i18n="tier2.h">10 models free</h3>
+        <p data-i18n="tier2.p">Sign in by e-mail and get 10 free generations on our key. No passwords — a link lands in your inbox.</p>
       </div>
       <div class="card reveal">
-        <span class="n" data-i18n="tier3.n">03 · Свой ключ</span>
-        <h3 data-i18n="tier3.h">Без ограничений</h3>
-        <p data-i18n="tier3.p">Подключи ключ DeepSeek или OpenRouter — выбери провайдера и модель в пару кликов. Дальше платишь только своему провайдеру.</p>
+        <span class="n" data-i18n="tier3.n">03 · Your key</span>
+        <h3 data-i18n="tier3.h">No limits</h3>
+        <p data-i18n="tier3.p">Add a DeepSeek or OpenRouter key — pick provider and model in a couple of clicks. From there you only pay your own provider.</p>
       </div>
     </div>
   </div>
@@ -402,11 +390,11 @@ result = cq.Workplane(<span class="c">"XY"</span>).box(WIDTH, DEPTH, HEIGHT)</di
 
 <section class="close">
   <div class="wrap">
-    <span class="eyebrow reveal" style="justify-content:center" data-i18n="close.eyebrow">Когда будешь готов</span>
-    <h2 class="reveal" data-i18n="close.h2">Опиши свою первую деталь.</h2>
+    <span class="eyebrow reveal" style="justify-content:center" data-i18n="close.eyebrow">Ready when you are</span>
+    <h2 class="reveal" data-i18n="close.h2">Describe your first part.</h2>
     <div class="cta-row reveal">
-      <a class="btn primary" href="/app" target="_blank" rel="noopener" data-i18n="btn.open">Открыть EasyCAD →</a>
-      <a class="btn ghost" href="https://github.com/mikhail-angelov/easycad" target="_blank" rel="noopener" data-i18n="btn.github">Смотреть на GitHub</a>
+      <a class="btn primary" href="/app" target="_blank" rel="noopener" data-i18n="btn.open">Open text2part →</a>
+      <a class="btn ghost" href="https://github.com/mikhail-angelov/easycad" target="_blank" rel="noopener" data-i18n="btn.github">View on GitHub</a>
     </div>
   </div>
 </section>
@@ -414,82 +402,105 @@ result = cq.Workplane(<span class="c">"XY"</span>).box(WIDTH, DEPTH, HEIGHT)</di
 <footer class="wrap">
   <span>© 2026 Mikhail Angelov</span>
   <span class="muted">CadQuery · FastAPI · Preact</span>
-  <a href="https://easycad.bconf.com" target="_blank" rel="noopener">easycad.bconf.com</a>
+  <a href="https://text2part.bconf.com" target="_blank" rel="noopener">text2part.bconf.com</a>
 </footer>
 
 <script>
 (function () {
   var reduce = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
   var themeHooks = [];
-  var UNIT = "мм";
+  var UNIT = "mm";
 
   /* ── i18n ───────────────────────────────────────── */
   var I18N = {
-    ru: {}, // Russian is authored directly in the markup (default) — filled below for switching back
-    en: {
-      "hero.eyebrow": "Parametric CAD · in plain language",
-      "hero.h1": '<span class="dimframe">Describe&nbsp;it.</span><br><span class="b">Print&nbsp;it.</span>',
-      "hero.lead": "EasyCAD turns a sentence into a printable 3D model. Describe one change at a time — it writes the CadQuery, runs it, and shows the result. Watch your part grow, then send it to the printer.",
-      "btn.open": "Open EasyCAD →",
-      "btn.openAuthed": "Open your workspace →",
-      "btn.github": "View on GitHub",
-      "tag.fig1": "FIG. 01 — result",
-      "tag.iso": "isometric · mm",
-      "origin.eyebrow": "The origin",
-      "origin.h2": "It started with a napkin.",
-      "origin.lead": "I sketched a part by hand, handed the photo to an AI, and it produced a nearly-correct 3D model on the first try. The trick was making that repeatable — precise, editable, mine. Many attempts later, the answer was almost embarrassingly direct: <b>let the model write CadQuery code, one small change at a time, and show the geometry after every step.</b>",
-      "work.eyebrow": "The workspace",
-      "work.h2": "You describe. It codes. It builds.",
-      "card1.n": "01 · Chat", "card1.h": "Say one change",
-      "card1.p": "Plain language, one feature at a time. “Give it 2 mm walls.” It refines vague prompts and asks when a request is truly ambiguous.",
-      "card2.n": "02 · Code", "card2.h": "Real CadQuery",
-      "card2.p": "Editable Python you can read and tweak by hand. Primary dimensions live as named constants at the top — never buried as magic numbers.",
-      "card3.n": "03 · Viewer", "card3.h": "Instant 3D",
-      "card3.p": "Every step executes and renders immediately, with a timeline you can rewind. Export STL when the part looks right.",
-      "build.eyebrow": "One sentence at a time",
-      "build.h2": "From a block to a part in five prompts.",
-      "step.0": "STEP 0", "step.1": "STEP 1", "step.2": "STEP 2", "step.3": "STEP 3", "step.4": "STEP 4", "step.5": "STEP 5",
-      "step0.p": "50 × 80 × 30 starting block", "step0.c": "Every project begins from the same parametric block.",
-      "step1.p": "› make an open box with 2 mm walls", "step1.c": "Hollowed with a size-preserving boolean cut.",
-      "step2.p": "› round the four vertical corners, 4 mm fillet", "step2.c": "Vertical edges selected with .edges(\"|Z\").",
-      "step3.p": "› add a 1.5 mm ledge inside the top edge for a lid", "step3.c": "An inner rim to seat a cover.",
-      "step4.p": "› cut a 20 × 6 mm cable slot at the bottom of a wall", "step4.c": "Punched through with an oversized cutter.",
-      "step5.p": "› chamfer the top outer edge 1 mm", "step5.c": "A clean bevel — ready to print.",
-      "param.eyebrow": "Parametric by default",
-      "param.h2": "Every dimension in one place.",
-      "param.lead": "Drag a value and the whole model follows — because the code keeps its primary dimensions as named constants up top. Fix the width once, not in a dozen scattered numbers.",
-      "ctrl.width": "Width — X", "ctrl.height": "Height — Z",
-      "tag.fig2": "FIG. 02 — live",
-      "arch.eyebrow": "Safe by design",
-      "arch.h2": "Your prompt writes code. The code runs in a sealed box.",
-      "arch.lead": "Generated code is untrusted, so it never runs next to your data. The app holds your key and talks to the model; a separate worker executes the geometry with no network, no secrets, and strict limits.",
-      "dg.you": "YOU", "dg.you2": "a sentence",
-      "dg.app": "APP", "dg.app2": "writes CadQuery", "dg.app3": "holds your key",
-      "dg.wrk": "WORKER", "dg.wrk2": "runs geometry", "dg.wrk3": "no net · no key",
-      "dg.seal": "SEALED",
-      "pricing.eyebrow": "Start free",
-      "pricing.h2": "Try it with no key. Bring your own whenever you like.",
-      "pricing.lead": "Nothing to set up to begin. Your first models run on our key — just describe a part. Once you're hooked, add your own key and work with no limits.",
-      "tier1.n": "01 · Guest", "tier1.h": "1 model free",
-      "tier1.p": "No signup, no key. Open the app, describe a part, and get the result — right away.",
-      "tier2.n": "02 · Account", "tier2.h": "10 models free",
-      "tier2.p": "Sign in by e-mail and get 10 free generations on our key. No passwords — a link lands in your inbox.",
-      "tier3.n": "03 · Your key", "tier3.h": "No limits",
-      "tier3.p": "Add a DeepSeek or OpenRouter key — pick provider and model in a couple of clicks. From there you only pay your own provider.",
-      "close.eyebrow": "Ready when you are",
-      "close.h2": "Describe your first part."
+    en: {}, // English is authored directly in the markup (default) — filled below for switching
+    ru: {
+      "hero.eyebrow": "Параметрический CAD · простыми словами",
+      "hero.h1": "<span class=\"dimframe\">Опиши&nbsp;словами.</span><br><span class=\"b\">Напечатай.</span>",
+      "hero.lead": "text2part превращает фразу в печатаемую 3D-модель. Описывай по одному изменению за раз — он пишет CadQuery, исполняет его и показывает результат. Смотри, как деталь растёт, и отправляй на принтер.",
+      "btn.open": "Открыть text2part →",
+      "btn.openAuthed": "Открыть рабочее пространство →",
+      "btn.github": "Смотреть на GitHub",
+      "tag.fig1": "РИС. 01 — результат",
+      "tag.iso": "изометрия · мм",
+      "origin.eyebrow": "С чего началось",
+      "origin.h2": "Всё началось с салфетки.",
+      "origin.lead": "Я нарисовал деталь от руки, отдал фото ИИ — и он с первого раза выдал почти точную 3D-модель. Задача была сделать это повторяемым: точно, редактируемо, по-моему. Много попыток спустя ответ оказался до неловкости прямым: <b>пусть модель пишет CadQuery-код — по одному маленькому изменению за раз — и показывает геометрию после каждого шага.</b>",
+      "work.eyebrow": "Рабочее место",
+      "work.h2": "Ты описываешь. Оно пишет код. Оно строит.",
+      "card1.n": "01 · Чат",
+      "card1.h": "Скажи одно изменение",
+      "card1.p": "Простыми словами, по одной фиче за раз. «Сделай стенки 2 мм». Он уточняет расплывчатые формулировки и переспрашивает, когда запрос правда неоднозначен.",
+      "card2.n": "02 · Код",
+      "card2.h": "Настоящий CadQuery",
+      "card2.p": "Редактируемый Python, который можно читать и править руками. Ключевые размеры вынесены в именованные константы вверху — никаких магических чисел по всему коду.",
+      "card3.n": "03 · Вьювер",
+      "card3.h": "Мгновенное 3D",
+      "card3.p": "Каждый шаг исполняется и рендерится сразу, а таймлайн можно отмотать назад. Готово — экспортируй STL.",
+      "build.eyebrow": "По одной фразе за раз",
+      "build.h2": "От бруска до детали за пять фраз.",
+      "step.0": "ШАГ 0",
+      "step.1": "ШАГ 1",
+      "step.2": "ШАГ 2",
+      "step.3": "ШАГ 3",
+      "step.4": "ШАГ 4",
+      "step.5": "ШАГ 5",
+      "step0.p": "Стартовый брусок 50 × 80 × 30",
+      "step0.c": "Каждый проект начинается с одного параметрического бруска.",
+      "step1.p": "› сделай открытую коробку со стенками 2 мм",
+      "step1.c": "Выдолблено размер-сохраняющим булевым вырезом.",
+      "step2.p": "› скругли четыре вертикальных угла радиусом 4 мм",
+      "step2.c": "Вертикальные рёбра выбраны через .edges(\"|Z\").",
+      "step3.p": "› добавь бортик 1.5 мм по внутренней верхней кромке под крышку",
+      "step3.c": "Внутренний бортик, чтобы села крышка.",
+      "step4.p": "› прорежь кабель-слот 20 × 6 мм внизу стенки",
+      "step4.c": "Пробито увеличенным резаком.",
+      "step5.p": "› сними фаску 1 мм с верхней внешней кромки",
+      "step5.c": "Аккуратный скос — можно печатать.",
+      "param.eyebrow": "Параметрично по умолчанию",
+      "param.h2": "Все размеры собраны вместе.",
+      "param.lead": "Потяни значение — и вся модель следом, потому что код держит ключевые размеры именованными константами вверху. Правишь ширину один раз, а не в десятке разбросанных чисел.",
+      "ctrl.width": "Ширина — X",
+      "ctrl.height": "Высота — Z",
+      "tag.fig2": "РИС. 02 — вживую",
+      "arch.eyebrow": "Безопасно by design",
+      "arch.h2": "Твоя фраза пишет код. Код исполняется в изолированном контуре.",
+      "arch.lead": "Сгенерированный код небезопасен, поэтому он никогда не исполняется рядом с твоими данными. Приложение хранит ключ и общается с моделью; отдельный воркер считает геометрию — без сети, без секретов и с жёсткими лимитами.",
+      "dg.you": "ТЫ",
+      "dg.you2": "фраза",
+      "dg.app": "СЕРВЕР",
+      "dg.app2": "пишет CadQuery",
+      "dg.app3": "хранит ключ",
+      "dg.wrk": "ВОРКЕР",
+      "dg.wrk2": "считает геометрию",
+      "dg.wrk3": "без сети · без ключа",
+      "dg.seal": "ИЗОЛЯЦИЯ",
+      "pricing.eyebrow": "Начни бесплатно",
+      "pricing.h2": "Попробуй без ключа. Заведёшь свой — когда захочешь.",
+      "pricing.lead": "Ничего не нужно настраивать, чтобы начать. Первые модели считаются на нашем ключе — просто опиши деталь. Войдёшь во вкус — подключишь свой ключ и работаешь без ограничений.",
+      "tier1.n": "01 · Гость",
+      "tier1.h": "1 модель бесплатно",
+      "tier1.p": "Без регистрации и без ключа. Открой приложение, опиши деталь и получи результат — сразу.",
+      "tier2.n": "02 · Аккаунт",
+      "tier2.h": "10 моделей бесплатно",
+      "tier2.p": "Войди по e-mail — и получи 10 бесплатных генераций на нашем ключе. Пароли не нужны, ссылка придёт на почту.",
+      "tier3.n": "03 · Свой ключ",
+      "tier3.h": "Без ограничений",
+      "tier3.p": "Подключи ключ DeepSeek или OpenRouter — выбери провайдера и модель в пару кликов. Дальше платишь только своему провайдеру.",
+      "close.eyebrow": "Когда будешь готов",
+      "close.h2": "Опиши свою первую деталь."
     }
   };
 
-  // Capture the Russian defaults straight from the markup, so switching back is lossless.
+  // Capture the English defaults straight from the markup, so switching is lossless.
   document.querySelectorAll("[data-i18n]").forEach(function (el) {
-    I18N.ru[el.getAttribute("data-i18n")] = el.innerHTML;
+    I18N.en[el.getAttribute("data-i18n")] = el.innerHTML;
   });
   // Authed-CTA label isn't in the markup (only shown to signed-in visitors).
-  I18N.ru["btn.openAuthed"] = "Открыть рабочее пространство →";
+  I18N.en["btn.openAuthed"] = "Open your workspace →";
 
   function applyLang(lang) {
-    if (!I18N[lang]) lang = "ru";
+    if (!I18N[lang]) lang = "en";
     document.documentElement.setAttribute("data-lng", lang);
     document.documentElement.setAttribute("lang", lang);
     document.querySelectorAll("[data-i18n]").forEach(function (el) {
@@ -637,17 +648,11 @@ result = cq.Workplane(<span class="c">"XY"</span>).box(WIDTH, DEPTH, HEIGHT)</di
   window.matchMedia("(prefers-color-scheme: dark)").addEventListener("change", fireThemeHooks);
 
   function pickLang() {
-    // A visitor's explicit choice always wins.
+    // English by default; a visitor's explicit choice (the RU/EN toggle) switches.
     try {
       var stored = localStorage.getItem("easycad_lang");
       if (stored === "ru" || stored === "en") return stored;
     } catch (e) {}
-    // Otherwise follow the browser: Russian speakers get RU, everyone else EN.
-    var langs = navigator.languages || [navigator.language || "en"];
-    for (var i = 0; i < langs.length; i++) {
-      if (/^ru\b/i.test(langs[i])) return "ru";
-      if (/^en\b/i.test(langs[i])) return "en";
-    }
     return "en";
   }
   applyLang(pickLang());
@@ -671,7 +676,7 @@ result = cq.Workplane(<span class="c">"XY"</span>).box(WIDTH, DEPTH, HEIGHT)</di
           a.setAttribute("data-i18n", "btn.openAuthed");
           a.removeAttribute("target");
         });
-        applyLang(document.documentElement.getAttribute("data-lng") || "ru");
+        applyLang(document.documentElement.getAttribute("data-lng") || "en");
         if (!viaBackForward && !stay) location.href = "/app";
       })
       .catch(function () {});

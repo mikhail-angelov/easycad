@@ -176,7 +176,7 @@ async def _lifespan(app: FastAPI):
         task.cancel()
 
 
-app = FastAPI(title="EasyCAD — CadQuery Chat", lifespan=_lifespan)
+app = FastAPI(title="text2part — CadQuery Chat", lifespan=_lifespan)
 
 
 # ── Session middleware & dependency ───────────────────────────────────────────
@@ -332,7 +332,7 @@ def _budget_alert() -> None:
         try:
             send_mail(
                 ALERT_EMAIL,
-                "EasyCAD: daily trial budget exhausted",
+                "text2part: daily trial budget exhausted",
                 f"The operator-key trial budget ({TRIAL_DAILY_BUDGET}/day) is spent; "
                 "trials are paused until UTC midnight. Users are asked to add their own key.",
             )
@@ -713,8 +713,8 @@ def auth_login(req: LoginRequest, request: Request) -> dict:
     try:
         send_mail(
             email,
-            "Your EasyCAD sign-in link",
-            f"Click to sign in to EasyCAD:\n{link}\n\nThis link expires in 15 minutes.",
+            "Your text2part sign-in link",
+            f"Click to sign in to text2part:\n{link}\n\nThis link expires in 15 minutes.",
         )
     except Exception as exc:  # noqa: BLE001
         raise HTTPException(502, "Could not send the email. Try again later.") from exc
@@ -1244,7 +1244,7 @@ def export_project(session: Session = Depends(current_session)) -> Response:
     return Response(
         content=body,
         media_type="application/json; charset=utf-8",
-        headers={"Content-Disposition": 'attachment; filename="easycad-project.json"'},
+        headers={"Content-Disposition": 'attachment; filename="text2part-project.json"'},
     )
 
 
@@ -1317,7 +1317,7 @@ def export_step_step(
 
 # The landing page at "/" is light static content and may be indexed; the app
 # (/app) and API are heavy/interactive and are kept off-limits to crawlers.
-_SITE_URL = os.getenv("APP_URL", "https://easycad.bconf.com").rstrip("/")
+_SITE_URL = os.getenv("APP_URL", "https://text2part.bconf.com").rstrip("/")
 
 # ── Web analytics (Yandex.Metrica) ──────────────────────────────────────────
 # The counter is injected into both HTML surfaces (landing + SPA shell) only

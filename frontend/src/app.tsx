@@ -38,7 +38,7 @@ export function App() {
       <header class="topbar">
         <div class="brand">
           <span class="brand-mark" />
-          EasyCAD
+          text2part
           <span class="project-name">{t('app.projectName')}</span>
         </div>
         <div class="topbar-actions">
