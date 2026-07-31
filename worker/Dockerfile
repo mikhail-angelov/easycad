@@ -26,7 +26,7 @@ RUN pip install --no-cache-dir -r requirements.txt
 COPY app/cq_worker.py ./cq_worker.py
 COPY app/code_guard.py ./code_guard.py
 # Worker service code.
-COPY worker/main.py worker/limits.py ./
+COPY worker/main.py worker/limits.py worker/zygote.py ./
 
 # Non-root, matching the compose `user:` and a fixed uid for tmpfs ownership.
 RUN useradd --uid 10001 --create-home appuser

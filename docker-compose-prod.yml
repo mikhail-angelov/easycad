@@ -48,6 +48,12 @@ services:
     read_only: true
     tmpfs:
       - /tmp:size=256m
+    environment:
+      # SPEC18: zygote-fork execution — import CadQuery once, fork a one-shot
+      # child per request (see docs/spec18.md). Enabled for prod validation.
+      # The zygote socket + lock live on the /tmp tmpfs above. Requires a SINGLE
+      # worker process (enforced by a startup flock — no uvicorn --workers).
+      - EASYCAD_WORKER_ZYGOTE=1
     cap_drop:
       - ALL
     security_opt:
