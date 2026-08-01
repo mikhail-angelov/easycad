@@ -68,22 +68,22 @@ export function Viewer() {
           </label>
           {currentId != null && (
             <div class="export-menu" ref={dlRef}>
-              <button data-testid="viewer-download" class="text-button" onClick={() => setDlOpen((v) => !v)}>
+              <button id="viewer-download" data-testid="viewer-download" class="text-button" onClick={() => setDlOpen((v) => !v)}>
                 <IconDownload /> {t('viewer.download')} <span class="caret">▾</span>
               </button>
               {dlOpen && (
                 <div class="export-dropdown">
-                  <a class="export-item" href={api.exportUrl(currentId)} download onClick={() => setDlOpen(false)}>
+                  <a id="export-stl" class="export-item" href={api.exportUrl(currentId)} download onClick={() => setDlOpen(false)}>
                     <IconMesh />
                     <span class="export-fmt">STL</span>
                     <span class="export-hint">{t('viewer.hintMesh')}</span>
                   </a>
-                  <a class="export-item" href={api.exportStepUrl(currentId)} download onClick={() => setDlOpen(false)}>
+                  <a id="export-step" class="export-item" href={api.exportStepUrl(currentId)} download onClick={() => setDlOpen(false)}>
                     <IconCube />
                     <span class="export-fmt">STEP</span>
                     <span class="export-hint">{t('viewer.hintCad')}</span>
                   </a>
-                  <a class="export-item" href={api.exportSourceUrl(currentId)} download onClick={() => setDlOpen(false)}>
+                  <a id="export-source" class="export-item" href={api.exportSourceUrl(currentId)} download onClick={() => setDlOpen(false)}>
                     <IconCode />
                     <span class="export-fmt">.py</span>
                     <span class="export-hint">{t('viewer.hintSource')}</span>

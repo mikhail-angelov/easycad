@@ -25,16 +25,16 @@ export function Notice() {
       <span class="notice-msg">{message}</span>
       <span class="notice-actions">
         {isTrial && isAnon && (
-          <button class="notice-cta" onClick={openKeyForm}>
+          <button id="notice-sign-in" class="notice-cta" onClick={openKeyForm}>
             {t('notice.signIn')}
           </button>
         )}
         {isTrial && (
-          <button class="notice-cta" onClick={openKeyForm}>
+          <button id="notice-add-key" class="notice-cta" onClick={openKeyForm}>
             {t('notice.addKey')}
           </button>
         )}
-        <button class="notice-dismiss" title={t('notice.dismiss')} onClick={() => dismiss()}>
+        <button id="notice-dismiss" class="notice-dismiss" title={t('notice.dismiss')} onClick={() => dismiss()}>
           ×
         </button>
       </span>

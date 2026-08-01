@@ -56,14 +56,14 @@ export function Editor() {
     <section class="panel editor-panel">
       <header>
         <h2>{t('editor.title')}</h2>
-        <button class="text-button" disabled={busy} onClick={() => runManual()}>
+        <button id="code-run" class="text-button" disabled={busy} onClick={() => runManual()}>
           {t('editor.run')}
         </button>
       </header>
       {/* ym-hide-content: mask the CadQuery source in Yandex.Metrica Webvisor
           recordings — it can be a user's proprietary geometry (the chat, which
           drives onboarding analysis, stays visible). */}
-      <div class="code-host ym-hide-content" ref={hostRef} />
+      <div id="code-editor" data-testid="code-editor" aria-label={t('editor.title')} class="code-host ym-hide-content" ref={hostRef} />
     </section>
   )
 }

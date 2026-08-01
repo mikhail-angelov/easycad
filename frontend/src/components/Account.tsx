@@ -60,6 +60,7 @@ export function Account() {
     <div class="account">
       <button
         class="icon-button"
+        id="account-toggle"
         data-testid="account-toggle"
         aria-label={authenticated ? (email ?? t('account.iconTip')) : t('account.iconTip')}
         onClick={() => setOpen(!open)}
@@ -84,6 +85,7 @@ export function Account() {
               />
               <button
                 class="primary"
+                id="account-login-submit"
                 data-testid="account-login-submit"
                 disabled={busy || !emailText.includes('@')}
                 onClick={() => login(emailText.trim())}
@@ -97,11 +99,12 @@ export function Account() {
           {authenticated && (
             <div class="account-section">
               <div class="account-title">{email}</div>
-              <button class="text-link" disabled={busy} onClick={() => logout()}>
+              <button id="account-logout" class="text-link" disabled={busy} onClick={() => logout()}>
                 {t('account.signOut')}
               </button>
               <button
                 class="text-link danger"
+                id="account-delete"
                 disabled={busy}
                 onClick={() => {
                   if (confirm(t('account.deleteConfirm'))) deleteAccount()
@@ -120,7 +123,7 @@ export function Account() {
                 : t('account.keyPrompt')}
             </div>
             {hasKey && (
-              <button class="text-link" disabled={busy} onClick={() => removeKey()}>
+              <button id="account-remove-key" class="text-link" disabled={busy} onClick={() => removeKey()}>
                 {t('account.removeKey')}
               </button>
             )}
@@ -171,14 +174,14 @@ export function Account() {
             {result && !result.ok && (
               <div class="account-warn">
                 {result.reason}
-                <button class="text-link" disabled={busy} onClick={() => onSave(true)}>
+                <button id="account-save-anyway" class="text-link" disabled={busy} onClick={() => onSave(true)}>
                   {t('account.saveAnyway')}
                 </button>
               </div>
             )}
             {result && result.ok && <div class="account-ok">{t('account.keyVerified')}</div>}
 
-            <button class="primary" disabled={busy || checking || !keyText.trim()} onClick={() => onSave()}>
+            <button id="account-save-key" class="primary" disabled={busy || checking || !keyText.trim()} onClick={() => onSave()}>
               {checking ? t('account.checking') : t('account.validateSave')}
             </button>
 
@@ -188,9 +191,9 @@ export function Account() {
           </div>
 
           <div class="account-legal">
-            <a href="/terms" target="_blank" rel="noopener">{t('account.terms')}</a>
+            <a id="account-terms" href="/terms" target="_blank" rel="noopener">{t('account.terms')}</a>
             <span aria-hidden="true"> · </span>
-            <a href="/privacy" target="_blank" rel="noopener">{t('account.privacy')}</a>
+            <a id="account-privacy" href="/privacy" target="_blank" rel="noopener">{t('account.privacy')}</a>
           </div>
         </div>
       )}

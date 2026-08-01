@@ -14,6 +14,7 @@ export function LangToggle() {
       {langs.map((l) => (
         <button
           key={l}
+          id={`lang-${l}`}
           class={`lang-opt ${lang === l ? 'active' : ''}`}
           aria-pressed={lang === l}
           onClick={() => setLang(l)}

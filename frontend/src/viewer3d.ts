@@ -30,6 +30,9 @@ export class ModelViewer {
     this.renderer.setPixelRatio(window.devicePixelRatio)
     this.renderer.setSize(w, h)
     this.renderer.setClearColor(0x000000, 0)
+    this.renderer.domElement.id = 'model-canvas'
+    this.renderer.domElement.dataset.testid = 'model-canvas'
+    this.renderer.domElement.setAttribute('aria-label', '3D model viewer')
     container.appendChild(this.renderer.domElement)
 
     this.controls = new OrbitControls(this.camera, this.renderer.domElement)

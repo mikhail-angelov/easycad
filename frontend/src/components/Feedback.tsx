@@ -58,6 +58,7 @@ export function Feedback() {
     <div class="feedback">
       <button
         class="icon-button"
+        id="feedback-toggle"
         onClick={() => (open ? close() : setOpen(true))}
         title={t('feedback.tip')}
       >
@@ -75,6 +76,7 @@ export function Feedback() {
               <>
                 <textarea
                   class="feedback-text"
+                  name="feedback-message"
                   rows={4}
                   placeholder={t('feedback.placeholder')}
                   value={message}
@@ -85,6 +87,7 @@ export function Feedback() {
                   {[1, 2, 3, 4, 5].map((n) => (
                     <button
                       type="button"
+                      id={`feedback-rating-${n}`}
                       class={'star' + (rating && n <= rating ? ' on' : '')}
                       aria-label={`${n}`}
                       onClick={() => setRating(n === rating ? null : n)}
@@ -97,6 +100,7 @@ export function Feedback() {
                 {!authenticated && (
                   <input
                     type="email"
+                    name="feedback-email"
                     placeholder={t('feedback.emailPlaceholder')}
                     value={contact}
                     onInput={(e) => setContact((e.target as HTMLInputElement).value)}
@@ -107,6 +111,7 @@ export function Feedback() {
 
                 <button
                   class="feedback-send"
+                  id="feedback-send"
                   disabled={busy || !message.trim()}
                   onClick={submit}
                 >

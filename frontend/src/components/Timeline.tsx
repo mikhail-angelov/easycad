@@ -16,6 +16,7 @@ export function Timeline() {
       {steps.map((s) => (
         <button
           key={s.id}
+          id={`timeline-step-${s.id}`}
           disabled={busy}
           class={`node ${s.id === currentId ? 'current' : ''} ${s.success ? '' : 'failed'}`}
           title={s.original_prompt ?? s.kind}
@@ -28,6 +29,7 @@ export function Timeline() {
         <span class="timeline-copy">© 2026 Mikhail Angelov</span>
         <a
           class="timeline-gh"
+          id="timeline-github"
           href={REPO_URL}
           target="_blank"
           rel="noopener noreferrer"

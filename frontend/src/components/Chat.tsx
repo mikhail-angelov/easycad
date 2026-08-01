@@ -193,6 +193,7 @@ export function Chat() {
             trialRemaining != null && (trialRemaining <= 0 ? (
               <button
                 type="button"
+                id="trial-cta"
                 data-testid="trial-cta"
                 class={`trial-pill ${trialRemaining <= 0 ? 'empty' : ''}`}
                 title={trialTier === 'anon' ? t('chat.trialAnonTip') : t('chat.trialUserTip')}
@@ -214,7 +215,7 @@ export function Chat() {
           <div class="empty-state">
             {showWelcome && (
               <div class="welcome">
-                <button class="welcome-dismiss" title={t('chat.dismiss')} onClick={dismissWelcome}>
+                <button id="welcome-dismiss" class="welcome-dismiss" title={t('chat.dismiss')} onClick={dismissWelcome}>
                   ×
                 </button>
                 <div class="welcome-title">{t('chat.welcomeTitle')}</div>
@@ -223,8 +224,8 @@ export function Chat() {
             )}
             <p class="hint">{t('chat.emptyHint')}</p>
             <div class="starter-chips">
-              {starters.map((p) => (
-                <button key={p} class="starter-chip" disabled={busy} onClick={() => runStarter(p)}>
+              {starters.map((p, i) => (
+                <button id={`starter-${i}`} key={p} class="starter-chip" disabled={busy} onClick={() => runStarter(p)}>
                   {p}
                 </button>
               ))}
@@ -236,7 +237,7 @@ export function Chat() {
             <div class="bubble user">{e.prompt}</div>
             {e.refined && (
               <details class="refined">
-                <summary>{t('chat.refinedPrompt')}</summary>
+                <summary id={`refined-prompt-${e.id}`}>{t('chat.refinedPrompt')}</summary>
                 {e.refined}
               </details>
             )}
@@ -256,6 +257,7 @@ export function Chat() {
                   {q.options.map((opt, oi) => (
                     <button
                       key={oi}
+                      id={`clarify-${qi}-${oi}`}
                       class="clarify-option"
                       disabled={busy}
                       onClick={() => answerClarification(opt)}
@@ -286,12 +288,13 @@ export function Chat() {
             <div class="proposal-actions">
               <button
                 class="primary"
+                id="proposal-use"
                 disabled={busy}
                 onClick={() => confirmProposal(proposalRef.current?.value)}
               >
                 {t('chat.use')}
               </button>
-              <button disabled={busy} onClick={() => dismissProposal()}>
+              <button id="proposal-cancel" disabled={busy} onClick={() => dismissProposal()}>
                 {t('chat.cancel')}
               </button>
             </div>
@@ -303,10 +306,10 @@ export function Chat() {
             <div class="bubble user">{invalidNotice.originalPrompt}</div>
             <div class="invalid-reason">{invalidNotice.reason}</div>
             <div class="invalid-actions">
-              <button disabled={busy} onClick={() => proceedInvalid()}>
+              <button id="invalid-generate" disabled={busy} onClick={() => proceedInvalid()}>
                 {t('chat.generateAnyway')}
               </button>
-              <button disabled={busy} onClick={() => dismissInvalid()}>
+              <button id="invalid-cancel" disabled={busy} onClick={() => dismissInvalid()}>
                 {t('chat.cancel')}
               </button>
             </div>
@@ -320,6 +323,7 @@ export function Chat() {
             {variations.candidates.map((c, i) => (
               <button
                 key={i}
+                id={`variation-${i}`}
                 class={`variation-card ${i === selectedVariation ? 'selected' : ''} ${c.success ? '' : 'failed'}`}
                 disabled={!c.success || busy}
                 onClick={() => previewVariation(i)}
@@ -333,12 +337,13 @@ export function Chat() {
             <div class="variations-actions">
               <button
                 class="primary"
+                id="variation-commit"
                 disabled={selectedVariation == null || busy}
                 onClick={() => commitVariation()}
               >
                 {t('chat.useThis')}
               </button>
-              <button disabled={busy} onClick={() => cancelVariations()}>
+              <button id="variation-cancel" disabled={busy} onClick={() => cancelVariations()}>
                 {t('chat.cancel')}
               </button>
             </div>
@@ -369,11 +374,12 @@ export function Chat() {
           <div class="chat-input-hint">{t('chat.inputHint')}</div>
         </div>
         <div class="chat-send">
-          <button data-testid="chat-send" class="primary" disabled={busy} onClick={submit}>
+          <button id="chat-send" data-testid="chat-send" class="primary" disabled={busy} onClick={submit}>
             {busy ? '…' : t('chat.send')}
           </button>
           <button
             class="variations-btn"
+            id="chat-variations"
             data-testid="chat-variations"
             disabled={busy}
             title={t('chat.variationsTip')}
