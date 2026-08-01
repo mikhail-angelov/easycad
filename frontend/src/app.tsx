@@ -65,17 +65,18 @@ export function App() {
           <span class="project-name">{t('app.projectName')}</span>
         </div>
         <div class="topbar-actions">
-          <button class="topbar-action code-toggle" onClick={toggleCode} aria-pressed={codeVisible} title={codeVisible ? t('app.hideCode') : t('app.showCode')}>
+          <button data-testid="code-toggle" class="topbar-action code-toggle" onClick={toggleCode} aria-pressed={codeVisible} title={codeVisible ? t('app.hideCode') : t('app.showCode')}>
             <span class="code-toggle-long">{codeVisible ? t('app.hideCode') : t('app.showCode')}</span>
             <span class="code-toggle-short">{t('app.code')}</span>
           </button>
           <LangToggle />
-          <a class="topbar-action" href={api.exportProjectUrl()} download title={t('app.saveProject')}>
+          <a data-testid="project-save" class="topbar-action" href={api.exportProjectUrl()} download title={t('app.saveProject')}>
             <IconSave />
             <span>{t('app.saveProject')}</span>
           </a>
           <button
             class="topbar-action"
+            data-testid="project-load"
             onClick={() => fileRef.current?.click()}
             disabled={busy}
             title={t('app.loadProject')}
@@ -83,12 +84,14 @@ export function App() {
             <IconLoad />
             <span>{t('app.loadProject')}</span>
           </button>
-          <button class="topbar-action" onClick={() => reset()} disabled={busy} title={t('app.newModel')}>
+          <button data-testid="project-new" class="topbar-action" onClick={() => reset()} disabled={busy} title={t('app.newModel')}>
             <IconNew />
             <span>{t('app.newModel')}</span>
           </button>
           <input
             ref={fileRef}
+            name="project-file"
+            data-testid="project-file"
             type="file"
             accept="application/json,.json"
             style="display:none"

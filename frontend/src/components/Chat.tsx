@@ -163,6 +163,8 @@ export function Chat() {
           <label class="refine-toggle" title={t('chat.refineTip')}>
             <input
               type="checkbox"
+              name="auto-refine"
+              data-testid="auto-refine"
               checked={autoRefine}
               onChange={(e) => setAutoRefine((e.target as HTMLInputElement).checked)}
             />
@@ -173,6 +175,8 @@ export function Chat() {
           {hasKey ? (
             <select
               class="model-select"
+              name="model"
+              data-testid="model-select"
               value={model}
               title={t('chat.modelTip', { provider })}
               disabled={busy}
@@ -189,6 +193,7 @@ export function Chat() {
             trialRemaining != null && (trialRemaining <= 0 ? (
               <button
                 type="button"
+                data-testid="trial-cta"
                 class={`trial-pill ${trialRemaining <= 0 ? 'empty' : ''}`}
                 title={trialTier === 'anon' ? t('chat.trialAnonTip') : t('chat.trialUserTip')}
                 onClick={() => setAccountOpen(true)}
@@ -271,6 +276,8 @@ export function Chat() {
             <textarea
               key={proposal.originalPrompt}
               ref={proposalRef}
+              name="refined-prompt"
+              data-testid="refined-prompt"
               class="proposal-text"
               disabled={busy}
               defaultValue={proposal.refinedPrompt}
@@ -346,6 +353,8 @@ export function Chat() {
         <div class="chat-compose">
           <textarea
             ref={inputRef}
+            name="chat-prompt"
+            data-testid="chat-prompt"
             placeholder={t('chat.inputPlaceholder')}
             value={text}
             disabled={busy}
@@ -360,11 +369,12 @@ export function Chat() {
           <div class="chat-input-hint">{t('chat.inputHint')}</div>
         </div>
         <div class="chat-send">
-          <button class="primary" disabled={busy} onClick={submit}>
+          <button data-testid="chat-send" class="primary" disabled={busy} onClick={submit}>
             {busy ? '…' : t('chat.send')}
           </button>
           <button
             class="variations-btn"
+            data-testid="chat-variations"
             disabled={busy}
             title={t('chat.variationsTip')}
             onClick={submitVariations}

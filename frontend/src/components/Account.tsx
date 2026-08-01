@@ -60,6 +60,8 @@ export function Account() {
     <div class="account">
       <button
         class="icon-button"
+        data-testid="account-toggle"
+        aria-label={authenticated ? (email ?? t('account.iconTip')) : t('account.iconTip')}
         onClick={() => setOpen(!open)}
         title={authenticated ? (email ?? t('account.iconTip')) : t('account.iconTip')}
       >
@@ -74,12 +76,15 @@ export function Account() {
               <div class="account-title">{t('account.signInTitle')}</div>
               <input
                 type="email"
+                name="login-email"
+                data-testid="account-login-email"
                 placeholder="you@example.com"
                 value={emailText}
                 onInput={(e) => setEmailText((e.target as HTMLInputElement).value)}
               />
               <button
                 class="primary"
+                data-testid="account-login-submit"
                 disabled={busy || !emailText.includes('@')}
                 onClick={() => login(emailText.trim())}
               >
@@ -123,6 +128,8 @@ export function Account() {
             <label class="account-field">
               <span>{t('account.provider')}</span>
               <select
+                name="provider"
+                data-testid="account-provider"
                 value={provider}
                 disabled={busy}
                 onChange={(e) => {
@@ -140,7 +147,7 @@ export function Account() {
 
             <label class="account-field">
               <span>{t('account.model')}</span>
-              <select value={model} disabled={busy} onChange={(e) => setModel((e.target as HTMLSelectElement).value)}>
+              <select name="model" data-testid="account-model" value={model} disabled={busy} onChange={(e) => setModel((e.target as HTMLSelectElement).value)}>
                 {models.map((mo) => (
                   <option value={mo} key={mo}>
                     {mo}
@@ -151,6 +158,8 @@ export function Account() {
 
             <input
               type="password"
+              name="api-key"
+              data-testid="account-api-key"
               placeholder={providers[provider]?.key_prefix ? `${providers[provider].key_prefix}…` : 'sk-…'}
               value={keyText}
               onInput={(e) => {

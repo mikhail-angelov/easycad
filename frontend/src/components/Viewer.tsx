@@ -59,6 +59,8 @@ export function Viewer() {
           <label class="wire-toggle">
             <input
               type="checkbox"
+              name="wireframe"
+              data-testid="viewer-wireframe"
               checked={wire}
               onChange={(e) => setWire((e.target as HTMLInputElement).checked)}
             />
@@ -66,7 +68,7 @@ export function Viewer() {
           </label>
           {currentId != null && (
             <div class="export-menu" ref={dlRef}>
-              <button class="text-button" onClick={() => setDlOpen((v) => !v)}>
+              <button data-testid="viewer-download" class="text-button" onClick={() => setDlOpen((v) => !v)}>
                 <IconDownload /> {t('viewer.download')} <span class="caret">▾</span>
               </button>
               {dlOpen && (
