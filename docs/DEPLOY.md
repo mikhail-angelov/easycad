@@ -1,4 +1,4 @@
-# Deploying EasyCAD (easycad.bconf.com)
+# Deploying EasyCAD (text2part.bconf.com)
 
 Hosted deployment is the SPEC12 two-container split: a trusted **app** (HTTP,
 LLM, user data) and an isolated **worker** that runs LLM-generated CadQuery code
@@ -24,9 +24,9 @@ make deploy    # pull latest images, docker compose down/up
    `docker network create proxy-net` (if not already present).
 3. **`redoproxy`** reverse proxy running and attached to `proxy-net`. It reads
    the app container's labels and serves TLS for the domain:
-   - `redoproxy.domain: easycad.bconf.com`
+   - `redoproxy.domain: text2part.bconf.com`
    - `redoproxy.port: 8852`
-4. **DNS**: `easycad.bconf.com` → server IP.
+4. **DNS**: `text2part.bconf.com` → server IP.
 5. **GHCR access**: the images are under `ghcr.io/mikhail-angelov/…`. If the
    packages are private, `docker login ghcr.io` on the server with a PAT
    (`read:packages`). Public packages need no login.

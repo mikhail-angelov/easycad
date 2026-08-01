@@ -4,7 +4,7 @@
 
 Proposed implementation specification. Builds on SPEC11 (chat builder) and
 SPEC12 (isolated execution worker). Turns the single-user local app into a
-multi-tenant hosted service at `easycad.bconf.com`. Does not change the
+multi-tenant hosted service at `text2part.bconf.com`. Does not change the
 chat/step/geometry UX or the SPEC12 execution isolation.
 
 ## Goal
@@ -107,7 +107,7 @@ SMTP over STARTTLS to Yandex postbox — `POST_SERVICE_URL` host, port 587,
 `POST_USER` / `POST_PASS`, and — for now — the **same sender as playground**,
 `From: no-reply@js2go.ru` (`MAIL_FROM`), reusing playground's already
 SPF/DKIM-verified domain. Python `smtplib` (stdlib) or `aiosmtplib`. (The magic
-link URL still points at `APP_URL` = `https://easycad.bconf.com`.)
+link URL still points at `APP_URL` = `https://text2part.bconf.com`.)
 
 ### JWT
 
@@ -176,7 +176,7 @@ are operator costs. In-memory limiters (single app instance):
 ## Security
 
 - Cookies: `auth_token` and `easycad_session` are httponly, `SameSite=Lax`,
-  `Secure`. Redoproxy terminates TLS (`easycad.bconf.com`).
+  `Secure`. Redoproxy terminates TLS (`text2part.bconf.com`).
 - `JWT_SECRET` and `SETTINGS_KEY` are server secrets in `.env`, never shipped to
   the client or the worker.
 - BYOK key at rest: plaintext in `/data/easycad.db` (confirmed decision, as in
@@ -188,7 +188,7 @@ are operator costs. In-memory limiters (single app instance):
 ## Config / env additions
 
 ```
-APP_URL=https://easycad.bconf.com
+APP_URL=https://text2part.bconf.com
 JWT_SECRET=...                # HS256 signing secret
 MAIL_FROM=no-reply@js2go.ru   # reuse playground's verified sender for now
 POST_SERVICE_URL=postbox.cloud.yandex.net

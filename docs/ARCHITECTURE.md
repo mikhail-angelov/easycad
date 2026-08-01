@@ -21,7 +21,7 @@ components each one touches.
 Two deployment shapes from one codebase, selected by environment:
 
 ```
-LOCAL / DESKTOP (default)                 HOSTED / SaaS (easycad.bconf.com)
+LOCAL / DESKTOP (default)                 HOSTED / SaaS (text2part.bconf.com)
 ─────────────────────────                 ─────────────────────────────────────────────
 ┌───────────────────────────┐             ┌──────────────────┐   internal   ┌────────────────────┐
 │ app process (FastAPI)      │             │ app container    │─────net─────▶│ worker container   │
@@ -255,7 +255,7 @@ Components: cadquery_exec(RemoteExecutor), worker/main, code_guard, worker/limit
 
 - **Images:** `Dockerfile` (app, ~216 MB, no CadQuery) and `worker/Dockerfile`
   (~2.1 GB, CadQuery/OCP). `docker-compose-prod.yml` wires app on `proxy-net`
-  (redoproxy TLS for `easycad.bconf.com`) + `internal` (to worker); worker on
+  (redoproxy TLS for `text2part.bconf.com`) + `internal` (to worker); worker on
   `internal` only (no egress), hardened.
 - **CI** (`.github/workflows/ci.yml`): pytest + frontend build, then build & push
   both images to `ghcr.io`.

@@ -23,7 +23,7 @@ build:
 	@echo "Building frontend (→ static/)..."
 	npm run build
 
-# ── deployment (easycad.bconf.com) ───────────────────────────────────────────
+# ── deployment (text2part.bconf.com) ───────────────────────────────────────────
 # Images are built & pushed to ghcr.io by CI (.github/workflows/ci.yml).
 # `install` seeds the server once; `deploy` pulls the latest images and restarts.
 install:
