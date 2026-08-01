@@ -49,6 +49,11 @@ class ExecResult:
     geometry_info: str | None = None
     code_with_geometry: str | None = None
     error: str | None = None
+    # Machine-readable tag for OPERATIONAL failures the user should retry rather
+    # than debug — "execution_timeout" (wall-clock) or "worker_unavailable"
+    # (transport). Left None for ordinary CadQuery/model errors, which stay in the
+    # chat as a normal failed step. The API maps this to a localized notice (W1).
+    code: str | None = None
 
 
 def strip_geometry_block(code: str) -> str:
@@ -66,7 +71,12 @@ def _result_from_worker_payload(code: str, out: dict) -> ExecResult:
     geometry_info?, error?}. Shared by both backends so local and remote agree.
     """
     if not out.get("success"):
-        return ExecResult(False, error=out.get("error") or "Unknown execution error.")
+        # Propagate an operational code the worker attached (e.g. a real
+        # wall-clock `execution_timeout`) so the API maps it to a W1 notice.
+        return ExecResult(
+            False, error=out.get("error") or "Unknown execution error.",
+            code=out.get("code"),
+        )
     info = out["geometry_info"]
     return ExecResult(
         success=True,
@@ -74,6 +84,46 @@ def _result_from_worker_payload(code: str, out: dict) -> ExecResult:
         geometry_info=info,
         code_with_geometry=append_geometry_block(code, info),
     )
+
+
+def _malformed_worker_result(out: dict) -> ExecResult | None:
+    """Guard the UNTRUSTED remote worker payload (already known to be a dict) before
+    `_result_from_worker_payload` indexes it. A hardened worker sends exactly one of:
+
+      success=True  (bool) → {stl_base64: str, geometry_info: str}
+      success=False (bool) → {error: str, code?: str}   (ordinary model failure)
+
+    Anything else is a broken/incompatible worker — a transport-level failure, not a
+    model error — so it degrades to a coded `worker_unavailable` (W1) instead of a
+    500 (KeyError/TypeError while indexing, appending geometry, or later doing
+    `res.code in _EXEC_OPERATIONAL`) or an untagged ordinary failure. Returns the
+    coded ExecResult on mismatch, else None.
+
+    Validation is strict by TYPE, not truthiness: a string/number/null `success`
+    discriminator, or a non-string `code`, is rejected. Local execution builds this
+    dict itself and is always well-formed, so this check lives at the remote boundary.
+    """
+    def unavailable(reason: str) -> ExecResult:
+        return ExecResult(False, error=f"Worker response invalid: {reason}.", code="worker_unavailable")
+
+    success = out.get("success")
+    # `success` must be exactly a bool. isinstance(True, bool) holds; a real int
+    # 0/1 is NOT a bool, so numeric discriminators are correctly rejected too.
+    if not isinstance(success, bool):
+        return unavailable("`success` is not a boolean")
+    if success:
+        if not isinstance(out.get("stl_base64"), str) or not isinstance(out.get("geometry_info"), str):
+            return unavailable("success payload missing stl_base64/geometry_info")
+        return None
+    # Failure branch: a well-formed failure carries a non-empty error string...
+    if not (isinstance(out.get("error"), str) and out.get("error")):
+        return unavailable("failure without an error message")
+    # ...and an optional `code` that, if present, must be a string — a non-string
+    # (e.g. a list) would raise `TypeError: unhashable type` at `res.code in {...}`.
+    code = out.get("code")
+    if code is not None and not isinstance(code, str):
+        return unavailable("failure `code` is not a string")
+    return None
 
 
 class LocalExecutor:
@@ -111,7 +161,10 @@ class LocalExecutor:
                     cwd=str(_ROOT),
                 )
             except subprocess.TimeoutExpired:
-                return ExecResult(False, error=f"Execution timed out after {timeout}s.")
+                return ExecResult(
+                    False, error=f"Execution timed out after {timeout}s.",
+                    code="execution_timeout",
+                )
 
             if proc.returncode != 0:
                 detail = proc.stderr.strip() or f"worker exited with code {proc.returncode}"
@@ -188,12 +241,40 @@ class RemoteExecutor:
         try:
             with urllib.request.urlopen(req, timeout=timeout) as resp:
                 out = json.loads(resp.read().decode("utf-8"))
+        except TimeoutError as exc:
+            # Round-trip exceeded the worker's own wall-clock budget + slack: treat
+            # as a too-slow model, not a dead worker.
+            return ExecResult(
+                False, error=f"Worker timed out: {exc}", code="execution_timeout",
+            )
         except urllib.error.HTTPError as exc:
-            return ExecResult(False, error=f"Worker error (HTTP {exc.code}): {exc.reason}")
+            return ExecResult(
+                False, error=f"Worker error (HTTP {exc.code}): {exc.reason}",
+                code="worker_unavailable",
+            )
         except urllib.error.URLError as exc:
-            return ExecResult(False, error=f"Worker unavailable: {exc.reason}")
-        except (TimeoutError, json.JSONDecodeError) as exc:
-            return ExecResult(False, error=f"Worker response invalid: {exc}")
+            return ExecResult(
+                False, error=f"Worker unavailable: {exc.reason}",
+                code="worker_unavailable",
+            )
+        except json.JSONDecodeError as exc:
+            return ExecResult(
+                False, error=f"Worker response invalid: {exc}",
+                code="worker_unavailable",
+            )
+        # Valid JSON that isn't an object (e.g. [], null, "oops", 1) would make
+        # `_result_from_worker_payload`'s `.get()` raise — treat any non-mapping
+        # body as a malformed worker response (transport-level), per W1.
+        if not isinstance(out, dict):
+            return ExecResult(
+                False, error=f"Worker response invalid: expected object, got {type(out).__name__}",
+                code="worker_unavailable",
+            )
+        # An object of the wrong shape (missing/mistyped required fields) would 500
+        # or return an untagged failure; degrade it to a coded worker_unavailable.
+        malformed = _malformed_worker_result(out)
+        if malformed is not None:
+            return malformed
         return _result_from_worker_payload(code, out)
 
     def export(self, code: str, fmt: str) -> bytes | None:
@@ -209,7 +290,7 @@ class RemoteExecutor:
                 out = json.loads(resp.read().decode("utf-8"))
         except (urllib.error.HTTPError, urllib.error.URLError, TimeoutError, json.JSONDecodeError):
             return None
-        if not out.get("success") or not out.get("data_base64"):
+        if not isinstance(out, dict) or not out.get("success") or not out.get("data_base64"):
             return None
         try:
             return base64.b64decode(out["data_base64"])

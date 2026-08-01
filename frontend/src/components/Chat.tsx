@@ -35,6 +35,8 @@ export function Chat() {
   const error = useStore((s) => s.error)
   const lang = useStore((s) => s.lang)
   const busyKind = useStore((s) => s.busyKind)
+  const retryPrompt = useStore((s) => s.retryPrompt)
+  const clearRetryPrompt = useStore((s) => s.clearRetryPrompt)
   const t = useT()
 
   // Staged progress for LLM generations: since the server does triage → generate
@@ -79,6 +81,16 @@ export function Chat() {
   useEffect(() => {
     inputRef.current?.focus()
   }, [])
+
+  // After a retryable failure (server_busy), the store hands back the prompt that
+  // was cleared on submit so the user can re-send in one click without retyping.
+  useEffect(() => {
+    if (retryPrompt != null) {
+      setText(retryPrompt)
+      clearRetryPrompt()
+      inputRef.current?.focus()
+    }
+  }, [retryPrompt, clearRetryPrompt])
 
   const dismissWelcome = () => {
     setShowWelcome(false)

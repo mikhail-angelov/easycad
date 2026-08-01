@@ -148,8 +148,11 @@ class ZygoteClient:
         try:
             return self._rpc({"op": "execute", "code": code}, TIMEOUT_SECONDS + 15)
         except (OSError, ValueError) as exc:
+            # A dead/unreachable zygote is an operational outage, not a model error:
+            # tag it so the app raises the retryable W1 notice instead of looping
+            # repairs or showing a generic failed step.
             return {"success": False, "stl_base64": None, "geometry_info": None,
-                    "error": f"Zygote unavailable: {exc}"}
+                    "error": f"Zygote unavailable: {exc}", "code": "worker_unavailable"}
 
     def export(self, code: str, fmt: str) -> dict:
         try:
@@ -211,7 +214,10 @@ def _timeout_payload(op: str) -> dict:
     msg = f"{verb} timed out after {TIMEOUT_SECONDS}s."
     if op == "export":
         return {"success": False, "data_base64": None, "error": msg}
-    return {"success": False, "stl_base64": None, "geometry_info": None, "error": msg}
+    # Carry a machine-readable code so the executor tags a real worker wall-clock
+    # timeout as `execution_timeout` (W1 504 notice), not a generic failed step.
+    return {"success": False, "stl_base64": None, "geometry_info": None,
+            "error": msg, "code": "execution_timeout"}
 
 
 def _guard_payload(op: str, reason: str) -> dict:

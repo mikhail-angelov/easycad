@@ -65,8 +65,9 @@ def _set_limits() -> None:  # runs in the child, after fork, before exec
         _try_setrlimit(resource.RLIMIT_AS, as_bytes, as_bytes)
 
 
-def _fail(msg: str) -> dict:
-    return {"success": False, "stl_base64": None, "geometry_info": None, "error": msg}
+def _fail(msg: str, code: str | None = None) -> dict:
+    return {"success": False, "stl_base64": None, "geometry_info": None,
+            "error": msg, "code": code}
 
 
 def run(code: str) -> dict:
@@ -85,7 +86,8 @@ def run(code: str) -> dict:
                 preexec_fn=_set_limits,
             )
         except subprocess.TimeoutExpired:
-            return _fail(f"Execution timed out after {TIMEOUT_SECONDS}s.")
+            return _fail(f"Execution timed out after {TIMEOUT_SECONDS}s.",
+                         code="execution_timeout")
 
         if proc.returncode != 0:
             detail = proc.stderr.strip() or f"worker exited with code {proc.returncode}"

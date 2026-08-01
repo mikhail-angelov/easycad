@@ -12,6 +12,7 @@ import {
 } from './api'
 import { LANG_KEY, type Lang, detectLang, translate } from './i18n'
 import { track } from './analytics'
+import { SOFT_CODES, TRIAL_CODES, preservesPrompt } from './notices'
 
 // Orange warning banner (SPEC14), distinct from the red `error`.
 export interface Notice {
@@ -19,7 +20,6 @@ export interface Notice {
   code: string | null
 }
 
-const TRIAL_CODES = new Set(['trial_exhausted_anon', 'trial_exhausted_user', 'trial_budget_exhausted'])
 
 export interface ChatEntry {
   id: number
@@ -86,6 +86,9 @@ interface State {
   busyKind: 'gen' | null // 'gen' = an LLM generation is running (staged progress)
   error: string | null
   notice: Notice | null
+  // A prompt to restore into the chat box after a retryable failure (server_busy),
+  // so the user can re-send with one click. Consumed (cleared) by the input.
+  retryPrompt: string | null
   accountOpen: boolean
   authenticated: boolean
   email: string | null
@@ -103,6 +106,7 @@ interface State {
   selectModel: (model: string) => Promise<void>
   setLang: (lang: Lang) => void
   dismissNotice: () => void
+  clearRetryPrompt: () => void
   setAccountOpen: (open: boolean) => void
   setAutoRefine: (on: boolean) => void
   sendChat: (prompt: string) => Promise<void>
@@ -164,10 +168,18 @@ export const useStore = create<State>((set, get) => {
   // Generation call sites pass `genSource` so a network/provider failure (a
   // thrown error, not a returned unsuccessful step) still counts as a health
   // signal; non-generation callers omit it.
-  function reportError(e: unknown, genSource?: string) {
+  function reportError(e: unknown, genSource?: string, retryPrompt?: string) {
     if (e instanceof ApiError && e.code && TRIAL_CODES.has(e.code)) {
       fireTrialExhausted('rejected')
       set({ notice: { message: e.message, code: e.code } })
+    } else if (e instanceof ApiError && e.code && SOFT_CODES.has(e.code)) {
+      // Operational: orange notice, not a red error. `server_busy` preserves the
+      // prompt so the user can retry in one click without retyping.
+      if (genSource) track('generation_failed', { source: genSource })
+      set({
+        notice: { message: e.message, code: e.code },
+        ...(preservesPrompt(e.code) && retryPrompt ? { retryPrompt } : {}),
+      })
     } else {
       if (genSource) track('generation_failed', { source: genSource })
       set({ error: e instanceof Error ? e.message : String(e) })
@@ -214,7 +226,7 @@ export const useStore = create<State>((set, get) => {
         set({ code: step.code, error: step.error })
       }
     } catch (e) {
-      reportError(e, 'chat')
+      reportError(e, 'chat', prompt)
     } finally {
       set({ busy: false, busyKind: null })
     }
@@ -243,6 +255,7 @@ export const useStore = create<State>((set, get) => {
     busyKind: null,
     error: null,
     notice: null,
+    retryPrompt: null,
     accountOpen: false,
     authenticated: false,
     email: null,
@@ -378,6 +391,7 @@ export const useStore = create<State>((set, get) => {
     },
 
     dismissNotice: () => set({ notice: null }),
+    clearRetryPrompt: () => set({ retryPrompt: null }),
     setAccountOpen: (accountOpen) => set({ accountOpen }),
     setAutoRefine: (autoRefine) => set({ autoRefine }),
 
@@ -443,7 +457,7 @@ export const useStore = create<State>((set, get) => {
           variations: { candidates: res.candidates, originalPrompt: prompt, refined: res.refined_prompt },
         })
       } catch (e) {
-        reportError(e, 'variations')
+        reportError(e, 'variations', prompt)
       } finally {
         set({ busy: false, busyKind: null })
       }

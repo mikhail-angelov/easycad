@@ -244,6 +244,13 @@ def count_feedback() -> int:
         return conn.execute("SELECT COUNT(*) AS n FROM feedback").fetchone()["n"]
 
 
+def count_users() -> int:
+    """Total registered accounts (signups), for the admin dashboard (SPEC19 W2)."""
+    with _lock:
+        conn = _get()
+        return conn.execute("SELECT COUNT(*) AS n FROM users").fetchone()["n"]
+
+
 def _reset_for_tests() -> None:
     """Drop all rows (test isolation)."""
     with _lock:

@@ -177,6 +177,12 @@ export function Account() {
               {authenticated ? t('account.keyPrivacy') : t('account.sessionOnly')}
             </div>
           </div>
+
+          <div class="account-legal">
+            <a href="/terms" target="_blank" rel="noopener">{t('account.terms')}</a>
+            <span aria-hidden="true"> · </span>
+            <a href="/privacy" target="_blank" rel="noopener">{t('account.privacy')}</a>
+          </div>
         </div>
       )}
     </div>

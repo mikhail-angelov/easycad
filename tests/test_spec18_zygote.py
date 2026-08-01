@@ -57,6 +57,16 @@ def test_framing_roundtrip():
     a.close(); b.close()
 
 
+def test_run_outage_is_tagged_worker_unavailable():
+    # A dead/unreachable zygote socket is an operational outage, not a model error:
+    # the payload must carry code="worker_unavailable" so the app raises the W1
+    # retryable notice instead of looping repairs / showing a generic failed step.
+    client = zygote.ZygoteClient("/nonexistent/easycad-zygote.sock")
+    out = client.run(BOX)
+    assert out["success"] is False
+    assert out["code"] == "worker_unavailable"
+
+
 def test_framed_reader_handles_partial_and_multiple():
     a, b = socket.socketpair()
     reader = zygote._FramedReader(b)

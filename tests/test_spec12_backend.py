@@ -4,8 +4,24 @@ These tests need neither cadquery nor a running worker — they exercise backend
 selection (which class `execute` dispatches to) and the standalone AST guard.
 """
 
+import pytest
+
 from app import cadquery_exec, code_guard
 from app.cadquery_exec import LocalExecutor, RemoteExecutor, _select_backend
+
+
+class _FakeResp:
+    def __init__(self, body: bytes):
+        self._body = body
+
+    def read(self):
+        return self._body
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, *a):
+        return False
 
 
 # ── Backend selection ────────────────────────────────────────────────────────
@@ -44,6 +60,74 @@ def test_remote_executor_maps_worker_down_to_error(monkeypatch):
     res = backend.execute("import cadquery as cq\nresult = cq.Workplane('XY').box(1,1,1)\n")
     assert not res.success
     assert "worker" in res.error.lower()
+
+
+@pytest.mark.parametrize("body", [b"[]", b"null", b'"oops"', b"1"])
+def test_remote_executor_non_object_response_is_coded(monkeypatch, body):
+    # Valid JSON that isn't an object must NOT raise AttributeError from a later
+    # `.get()` — it degrades to a coded worker_unavailable failure (W1).
+    backend = RemoteExecutor("http://worker:8853")
+    monkeypatch.setattr(cadquery_exec.urllib.request, "urlopen",
+                        lambda *a, **k: _FakeResp(body))
+    res = backend.execute("code")
+    assert res.success is False
+    assert res.code == "worker_unavailable"
+
+
+def test_remote_export_non_object_response_returns_none(monkeypatch):
+    backend = RemoteExecutor("http://worker:8853")
+    monkeypatch.setattr(cadquery_exec.urllib.request, "urlopen",
+                        lambda *a, **k: _FakeResp(b"[]"))
+    assert backend.export("code", "stl") is None
+
+
+@pytest.mark.parametrize("body", [
+    b'{"success": true}',                                   # success but no fields
+    b'{"success": true, "stl_base64": 123, "geometry_info": "x"}',  # stl wrong type
+    b'{"success": true, "stl_base64": "AA==", "geometry_info": 5}',  # geom wrong type
+    b'{}',                                                  # empty object
+    b'{"foo": 1}',                                          # unrelated keys
+    b'{"success": false}',                                  # failure without error text
+    b'{"success": "true", "stl_base64": "AA==", "geometry_info": "x"}',  # string discriminator
+    b'{"success": "false", "error": "x"}',                 # truthy string discriminator
+    b'{"success": null, "error": "x"}',                    # null discriminator
+    b'{"success": 1, "stl_base64": "AA==", "geometry_info": "x"}',  # numeric discriminator
+    b'{"error": "x"}',                                      # missing discriminator
+    b'{"success": false, "error": "x", "code": []}',       # unhashable code → would 500
+    b'{"success": false, "error": "x", "code": 5}',        # non-string code
+])
+def test_remote_executor_malformed_object_is_coded(monkeypatch, body):
+    # A structurally malformed object must not 500 (KeyError/TypeError) nor return an
+    # untagged failure — it degrades to a coded worker_unavailable notice (W1).
+    backend = RemoteExecutor("http://worker:8853")
+    monkeypatch.setattr(cadquery_exec.urllib.request, "urlopen",
+                        lambda *a, **k: _FakeResp(body))
+    res = backend.execute("code")
+    assert res.success is False
+    assert res.code == "worker_unavailable"
+
+
+def test_remote_executor_wellformed_success_passes(monkeypatch):
+    backend = RemoteExecutor("http://worker:8853")
+    monkeypatch.setattr(
+        cadquery_exec.urllib.request, "urlopen",
+        lambda *a, **k: _FakeResp(b'{"success": true, "stl_base64": "AA==", "geometry_info": "# info"}'),
+    )
+    res = backend.execute("result = None")
+    assert res.success is True and res.geometry_info == "# info"
+
+
+def test_remote_executor_wellformed_model_failure_stays_ordinary(monkeypatch):
+    # A real model error (well-formed failure) must NOT be mistagged as an
+    # operational worker_unavailable — it stays a plain in-chat failed step.
+    backend = RemoteExecutor("http://worker:8853")
+    monkeypatch.setattr(
+        cadquery_exec.urllib.request, "urlopen",
+        lambda *a, **k: _FakeResp(b'{"success": false, "error": "NameError: cq"}'),
+    )
+    res = backend.execute("code")
+    assert res.success is False and res.code is None
+    assert "NameError" in res.error
 
 
 # ── Level 0 code guard ───────────────────────────────────────────────────────

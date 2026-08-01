@@ -1,0 +1,101 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="robots" content="noindex">
+<title>text2part · admin</title>
+<style>
+  :root { color-scheme: light dark; --bg:#f7f4ee; --fg:#1b2430; --mut:#6b7280;
+          --line:rgba(0,0,0,.12); --card:#fff; --ok:#2a7d46; --bad:#c0392b; --blue:#2a5c8a; }
+  @media (prefers-color-scheme: dark){ :root{ --bg:#14181d; --fg:#e6e9ee; --mut:#9aa4b2;
+          --line:rgba(255,255,255,.12); --card:#1c2229; } }
+  * { box-sizing:border-box; } body { margin:0; background:var(--bg); color:var(--fg);
+      font:14px/1.5 -apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif; }
+  header { display:flex; align-items:baseline; gap:12px; padding:16px 20px; border-bottom:1px solid var(--line); }
+  h1 { font-size:16px; margin:0; } .mut { color:var(--mut); }
+  main { padding:20px; max-width:1100px; margin:0 auto; }
+  h2 { font-size:12px; text-transform:uppercase; letter-spacing:.06em; color:var(--mut); margin:24px 0 10px; }
+  .grid { display:grid; grid-template-columns:repeat(auto-fill,minmax(150px,1fr)); gap:10px; }
+  .card { background:var(--card); border:1px solid var(--line); border-radius:8px; padding:10px 12px; }
+  .card .k { color:var(--mut); font-size:11px; text-transform:uppercase; letter-spacing:.04em; }
+  .card .v { font-size:22px; font-weight:600; font-variant-numeric:tabular-nums; }
+  .card .v small { font-size:12px; font-weight:400; color:var(--mut); }
+  .dot { display:inline-block; width:8px; height:8px; border-radius:50%; margin-right:6px; }
+  .dot.ok{ background:var(--ok);} .dot.bad{ background:var(--bad);}
+  table { width:100%; border-collapse:collapse; background:var(--card);
+          border:1px solid var(--line); border-radius:8px; overflow:hidden; }
+  th,td { text-align:left; padding:8px 10px; border-bottom:1px solid var(--line); vertical-align:top; }
+  th { color:var(--mut); font-size:11px; text-transform:uppercase; letter-spacing:.04em; }
+  td.msg { white-space:pre-wrap; }
+  .stars { color:#e8a13a; } .empty { color:var(--mut); padding:16px; }
+</style></head><body>
+<header><h1>text2part <span class="mut">· admin</span></h1>
+  <span id="status" class="mut">loading…</span></header>
+<main>
+  <h2>Worker <span id="wmode" class="mut"></span></h2>
+  <div class="grid" id="worker"></div>
+  <h2>Usage</h2>
+  <div class="grid" id="usage"></div>
+  <h2>Feedback (<span id="fbcount">0</span>)</h2>
+  <div id="feedback"></div>
+</main>
+<script>
+let prev = null;  // { t, jobs } for derived RPS
+const el = (id) => document.getElementById(id);
+function card(k, v, sub) {
+  return `<div class="card"><div class="k">${k}</div><div class="v">${v}` +
+         (sub ? ` <small>${sub}</small>` : '') + `</div></div>`;
+}
+function esc(s){ return (s==null?'':String(s)).replace(/[&<>]/g, c=>({'&':'&amp;','<':'&lt;','>':'&gt;'}[c])); }
+async function tick() {
+  let s;
+  try { const r = await fetch('/api/admin/stats', {credentials:'same-origin'});
+        if(!r.ok) throw new Error(r.status); s = await r.json(); }
+  catch(e){ el('status').textContent = 'stats error: ' + e.message; return; }
+  el('status').textContent = 'updated ' + new Date().toLocaleTimeString();
+
+  const w = s.worker || {reachable:false};
+  el('wmode').textContent = w.reachable ? ('· ' + (w.mode||'')) : '· unreachable';
+  let rps = '—';
+  if (w.reachable && typeof w.jobs_total === 'number') {
+    const now = Date.now()/1000;
+    if (prev && now > prev.t) rps = Math.max(0, (w.jobs_total - prev.jobs)/(now - prev.t)).toFixed(1);
+    prev = { t: now, jobs: w.jobs_total };
+  }
+  const wdot = `<span class="dot ${w.reachable?'ok':'bad'}"></span>`;
+  el('worker').innerHTML = w.reachable ? (
+    card('Status', wdot + 'up') + card('RPS (live)', rps) +
+    card('Jobs total', w.jobs_total ?? '—') +
+    card('fork+exec', (w.fork_exec_p50_ms ?? '—'), 'p50 ms · p95 ' + (w.fork_exec_p95_ms ?? '—')) +
+    card('Wait', (w.request_wait_p50_ms ?? '—'), 'p50 ms') +
+    card('Crashes', w.crashes_total ?? '—') + card('Timeouts', w.timeouts_total ?? '—') +
+    card('RSS', (w.rss_mb ?? '—'), 'MB') + card('Import', (w.import_seconds ?? '—'), 's (once)')
+  ) : card('Status', wdot + 'unreachable', esc(w.reason||''));
+
+  const c = s.counters || {};
+  // `gen_exec_fail` is the true counterpart of `gen_ok` (both bumped at the same
+  // generation sites) — hence the honest "Execution failed" label. Operational
+  // failures raise before that counter and instead show as their own
+  // `exec_execution_timeout` / `exec_worker_unavailable` passthrough cards;
+  // LLM failures show as `provider_errors`. So every failure class stays visible.
+  el('usage').innerHTML =
+    card('Generations OK', c.gen_ok ?? 0) + card('Execution failed', c.gen_exec_fail ?? 0) +
+    card('Avg chat gen', (s.avg_chat_gen_ms ?? '—'), 'ms') +
+    card('Live sessions', s.sessions_live ?? 0) +
+    card('Signups', s.signups ?? 0) +
+    card('Trial budget', (s.budget_today?.used ?? 0), '/ ' + (s.budget_today?.limit ?? 0) + ' today') +
+    card('Feedback', s.feedback?.count ?? 0) +
+    Object.keys(c).filter(k=>!['gen_ok','gen_exec_fail','gen_ms_total','gen_ms_count'].includes(k))
+          .map(k=>card(k, c[k])).join('');
+
+  const fb = (s.feedback && s.feedback.recent) || [];
+  el('fbcount').textContent = s.feedback?.count ?? 0;
+  el('feedback').innerHTML = fb.length ? (
+    '<table><thead><tr><th>When</th><th>Rating</th><th>From</th><th>Message</th></tr></thead><tbody>' +
+    fb.map(f=>`<tr><td class="mut">${esc(f.created_at)}</td>` +
+      `<td class="stars">${f.rating?'★'.repeat(f.rating):''}</td>` +
+      `<td>${esc(f.email||'anon')}</td><td class="msg">${esc(f.message)}</td></tr>`).join('') +
+    '</tbody></table>'
+  ) : '<div class="empty">No feedback yet.</div>';
+}
+tick(); setInterval(tick, 10000);
+</script></body></html>

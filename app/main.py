@@ -16,6 +16,8 @@ import re
 import secrets
 import threading
 import time
+import urllib.error
+import urllib.request
 from contextlib import asynccontextmanager
 from dataclasses import dataclass
 from pathlib import Path
@@ -48,6 +50,7 @@ from .session_registry import Session, build_registry
 
 ROOT = Path(__file__).resolve().parent.parent
 STATIC_DIR = ROOT / "static"
+TEMPLATES_DIR = Path(__file__).resolve().parent / "templates"
 
 # Load .env BEFORE the module-level os.getenv() config block below — otherwise
 # every tunable read at import (SECURE_COOKIES, TRIAL_*, MAX_REPAIR, …) would miss
@@ -328,6 +331,29 @@ def _provider_error(context: str, exc: Exception) -> HTTPException:
     return _coded_error(502, "provider_error", f"{context}: {exc}")
 
 
+# Operational execution failures (worker timeout / transport) surfaced as coded,
+# localized "try again" notices instead of a raw error string in the chat. Ordinary
+# CadQuery/model errors carry no `code` and stay in the chat as a failed step (W1).
+_EXEC_OPERATIONAL = {
+    "execution_timeout": (504, "That model took too long — simplify it or try again."),
+    "worker_unavailable": (
+        503, "The modelling service is briefly unavailable — try again in a moment."
+    ),
+}
+
+
+def _raise_if_operational(res) -> None:
+    """Raise a coded error for an operational exec failure; no-op otherwise.
+
+    Called right after `execute()` on user-facing paths so a worker timeout or
+    transport failure degrades to a localized notice rather than looping repairs
+    (each of which costs an LLM call) or landing as a generic red error."""
+    if res is not None and not res.success and res.code in _EXEC_OPERATIONAL:
+        metrics.incr(f"exec_{res.code}")
+        status, message = _EXEC_OPERATIONAL[res.code]
+        raise _coded_error(status, res.code, message)
+
+
 _alert_lock = threading.Lock()
 _alert_day = ""
 
@@ -559,7 +585,10 @@ def gen_slot():
         yield
         return
     if not _gen_semaphore.acquire(blocking=False):
-        raise HTTPException(503, "Server is busy right now — try again in a moment.")
+        raise _coded_error(
+            503, "server_busy",
+            "We're under heavy load — try again in a few seconds.",
+        )
     try:
         yield
     finally:
@@ -901,11 +930,58 @@ def submit_feedback(
     return {"ok": True}
 
 
+# Numeric worker metrics surfaced on the admin dashboard. Only these keys are
+# forwarded (and only if numeric), so a malformed or compromised worker response
+# cannot smuggle arbitrary keys/markup into the same-origin admin DOM, which
+# renders these values via innerHTML.
+_WORKER_STAT_FIELDS = (
+    "jobs_total", "crashes_total", "timeouts_total",
+    "fork_exec_p50_ms", "fork_exec_p95_ms",
+    "request_wait_p50_ms", "request_wait_p95_ms",
+    "rss_mb", "import_seconds",
+)
+
+
+def _sanitize_worker_statz(data: dict) -> dict:
+    """Whitelist + type-coerce the worker's /statz payload for the admin page.
+    Drops unknown keys and non-numeric metric values so nothing untrusted reaches
+    the admin DOM as markup."""
+    out: dict = {"reachable": True}
+    mode = data.get("mode")
+    if isinstance(mode, str):
+        out["mode"] = mode[:32]  # rendered via textContent, but bound it anyway
+    for key in _WORKER_STAT_FIELDS:
+        val = data.get(key)
+        if isinstance(val, (int, float)) and not isinstance(val, bool):
+            out[key] = val
+    return out
+
+
+def _worker_statz() -> dict:
+    """Best-effort proxy of the worker's /statz (SPEC18) for the admin dashboard.
+    Never raises: an unreachable worker returns {reachable: False} so the page
+    degrades to a status line instead of 500-ing."""
+    base = os.getenv("EASYCAD_WORKER_URL")
+    if not base:
+        return {"reachable": False, "reason": "local execution (no worker)"}
+    try:
+        with urllib.request.urlopen(f"{base.rstrip('/')}/statz", timeout=2) as resp:
+            data = json.loads(resp.read().decode("utf-8"))
+        # A well-behaved worker returns a JSON object; anything else (list, string,
+        # number) is a malformed response — degrade instead of raising a TypeError
+        # on attribute access below (which would 500 the whole admin endpoint).
+        if not isinstance(data, dict):
+            return {"reachable": False, "reason": "malformed worker /statz response"}
+        return _sanitize_worker_statz(data)
+    except (urllib.error.URLError, TimeoutError, ValueError, OSError) as exc:
+        return {"reachable": False, "reason": str(exc)}
+
+
 @app.get("/api/admin/stats")
 def admin_stats(session: Session = Depends(require_admin)) -> dict:
     """Operator snapshot: counters, avg chat-generation latency, today's operator-
-    key budget, live session count, and recent feedback. Requires being signed in
-    as `ADMIN_EMAIL` (hidden with 404 otherwise)."""
+    key budget, live session count, recent feedback, and worker health. Requires
+    being signed in as `ADMIN_EMAIL` (hidden with 404 otherwise)."""
     counts = metrics.snapshot()
     # Scoped, honestly named: this is the /api/chat generation-turn latency only —
     # NOT triage, variations, manual execute, or lazy STL restore.
@@ -917,8 +993,22 @@ def admin_stats(session: Session = Depends(require_admin)) -> dict:
         "avg_chat_gen_ms": avg_ms,
         "budget_today": budget,
         "sessions_live": registry.count(),
+        "signups": db.count_users(),
         "feedback": {"count": db.count_feedback(), "recent": db.list_feedback(30)},
+        "worker": _worker_statz(),
     }
+
+
+@app.get("/admin")
+def admin_page(session: Session = Depends(require_admin)) -> HTMLResponse:
+    """Read-only operator dashboard (usage + worker health + feedback). Gated by
+    `require_admin` (signed in as ADMIN_EMAIL); hidden with 404 otherwise.
+
+    The page markup lives in app/templates/admin.html and is read per request so
+    an edit is picked up without a restart (same convention as the landing page).
+    """
+    html = (TEMPLATES_DIR / "admin.html").read_text(encoding="utf-8")
+    return HTMLResponse(html, headers={"Cache-Control": "no-store"})
 
 
 # ── CAD session endpoints ─────────────────────────────────────────────────────
@@ -966,6 +1056,7 @@ def api_execute(
 ) -> dict:
     _gen_guard(session)
     res = execute(req.code)
+    _raise_if_operational(res)
     return {
         "success": res.success,
         "stl_base64": res.stl_base64,
@@ -983,6 +1074,7 @@ def api_execute_manual(
     _gen_guard(session)
     _check_capacity(session)
     res = execute(req.code)
+    _raise_if_operational(res)
     step = session.store.add(
         kind="manual",
         code=res.code_with_geometry or req.code,
@@ -1081,6 +1173,9 @@ def _generate_and_step(
             _charge_trial(trial_ident)
             charged_trial = True
         res = execute(code)
+        # A worker timeout / transport failure won't be fixed by a repair attempt
+        # (and each repair costs another LLM call) — surface it as a notice now.
+        _raise_if_operational(res)
         if res.success:
             break
         if attempt < MAX_REPAIR:
@@ -1256,6 +1351,15 @@ def api_variations(
             )
             continue
         res = execute(code)
+        if not res.success and res.code in _EXEC_OPERATIONAL:
+            # An operational failure (worker timeout/outage) hits the whole batch,
+            # not just this candidate. With nothing usable yet, surface the localized
+            # W1 notice exactly like /api/chat; with partial results already in hand,
+            # stop the batch and return them rather than discarding good candidates.
+            if not any(c["success"] for c in candidates):
+                _raise_if_operational(res)
+            metrics.incr(f"exec_{res.code}")
+            break
         metrics.incr("gen_ok" if res.success else "gen_exec_fail")
         candidates.append({
             "code": res.code_with_geometry or code,
@@ -1300,6 +1404,7 @@ def api_commit(
     _gen_guard(session)
     _check_capacity(session)
     res = execute(req.code)
+    _raise_if_operational(res)
     step = session.store.add(
         kind="chat",
         original_prompt=req.original_prompt,
@@ -1438,13 +1543,36 @@ def _metrica_snippet(counter_id: str) -> str:
 
 
 # Both HTML sources carry the `<!--@METRICA@-->` placeholder in <head>; swap it
-# for the counter (or strip it when unconfigured). Reads per request so a
-# `make build` while the server is running is picked up without a restart.
-def _serve_html(path: Path, cache_control: str) -> HTMLResponse:
-    html = path.read_text(encoding="utf-8")
+# for the counter (or strip it when unconfigured).
+def _inject_metrica(html: str) -> str:
     snippet = _metrica_snippet(YANDEX_METRICA_ID) if YANDEX_METRICA_ID else ""
-    html = html.replace("<!--@METRICA@-->", snippet)
+    return html.replace("<!--@METRICA@-->", snippet)
+
+
+# Reads per request so a `make build` while the server is running is picked up
+# without a restart.
+def _serve_html(path: Path, cache_control: str) -> HTMLResponse:
+    html = _inject_metrica(path.read_text(encoding="utf-8"))
     return HTMLResponse(html, headers={"Cache-Control": cache_control})
+
+
+# The legal pages (terms/privacy) share their CSS and language-toggle JS. Rather
+# than duplicate ~90 lines across both files, each page carries `<!--@LEGAL_CSS@-->`
+# / `<!--@LEGAL_JS@-->` placeholders and only its own copy + RU strings; the shared
+# assets are inlined here from single source files (read per request, same as
+# the landing page, so an edit is picked up without a restart).
+def _serve_legal(path: Path) -> HTMLResponse:
+    css_path = STATIC_DIR / "legal.css"
+    js_path = STATIC_DIR / "legal.js"
+    # The page needs the shared assets too — a partial/stale build where the HTML
+    # exists but legal.{css,js} do not must 404 cleanly, not raise FileNotFoundError
+    # (→ 500) mid-request.
+    if not (path.exists() and css_path.exists() and js_path.exists()):
+        raise HTTPException(404)
+    html = path.read_text(encoding="utf-8")
+    html = html.replace("<!--@LEGAL_CSS@-->", f"<style>\n{css_path.read_text(encoding='utf-8')}</style>")
+    html = html.replace("<!--@LEGAL_JS@-->", f"<script>\n{js_path.read_text(encoding='utf-8')}</script>")
+    return HTMLResponse(_inject_metrica(html), headers={"Cache-Control": "public, max-age=3600"})
 
 
 @app.get("/robots.txt")
@@ -1478,6 +1606,16 @@ if STATIC_DIR.exists():
         if _LANDING.exists():
             return _serve_html(_LANDING, "public, max-age=300")
         return _serve_html(_INDEX, "no-cache")
+
+    # Minimal legal pages (W4). Same static serving as the landing; bilingual
+    # (EN+RU) with an in-page toggle. 404 if the build hasn't produced them.
+    @app.get("/terms")
+    def terms() -> HTMLResponse:
+        return _serve_legal(STATIC_DIR / "terms.html")
+
+    @app.get("/privacy")
+    def privacy() -> HTMLResponse:
+        return _serve_legal(STATIC_DIR / "privacy.html")
 
     # Static-root assets referenced by the landing (no global catch-all serves them).
     @app.get("/og-image.png")

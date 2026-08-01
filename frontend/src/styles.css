@@ -130,6 +130,21 @@ body {
 .account-note.dim {
   opacity: 0.55;
 }
+.account-legal {
+  margin-top: 14px;
+  padding-top: 12px;
+  border-top: 1px solid var(--line, rgba(0, 0, 0, 0.12));
+  font-size: 12px;
+  opacity: 0.7;
+  text-align: center;
+}
+.account-legal a {
+  color: inherit;
+  text-decoration: none;
+}
+.account-legal a:hover {
+  text-decoration: underline;
+}
 .text-button.danger {
   color: var(--rust, #b4462f);
 }

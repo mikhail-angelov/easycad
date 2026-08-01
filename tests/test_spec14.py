@@ -278,6 +278,7 @@ def test_concurrency_slot_rejects_when_full(monkeypatch):
         client = TestClient(app)
         r = _chat(client, ip="22.0.0.1")
         assert r.status_code == 503
+        assert r.json()["detail"]["code"] == "server_busy"  # W1 coded notice
     finally:
         m._gen_semaphore.release()
 

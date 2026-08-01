@@ -131,6 +131,8 @@ const STRINGS: Record<Lang, Record<string, string>> = {
     'account.sessionOnly': 'Without signing in, the key is kept for this session only.',
     'account.keyPrivacy':
       'Your key is encrypted at rest and used only to call your provider — never shared or logged. Replace or remove it anytime; deleting your account erases it.',
+    'account.terms': 'Terms',
+    'account.privacy': 'Privacy',
 
     'notice.signIn': 'Sign in',
     'notice.addKey': 'Add your key',
@@ -138,6 +140,9 @@ const STRINGS: Record<Lang, Record<string, string>> = {
     'notice.trial_exhausted_anon': 'Register for free generations, or add your own key.',
     'notice.trial_exhausted_user': "You've used your free generations — add your LLM key to continue.",
     'notice.trial_budget_exhausted': 'Free generations are paused right now — add your LLM key to keep building.',
+    'notice.server_busy': "We're under heavy load right now — try again in a few seconds.",
+    'notice.execution_timeout': 'That model took too long to build — simplify it or try again.',
+    'notice.worker_unavailable': 'The modelling service is briefly unavailable — try again in a moment.',
 
     'account.keySet': 'LLM key set',
     'chat.inconsistent': 'Inconsistent request.',
@@ -226,6 +231,8 @@ const STRINGS: Record<Lang, Record<string, string>> = {
     'account.sessionOnly': 'Без входа ключ хранится только в текущей сессии.',
     'account.keyPrivacy':
       'Ключ хранится в зашифрованном виде и используется только для вызовов вашего провайдера — не передаётся и не логируется. Можно заменить или удалить в любой момент; удаление аккаунта стирает его.',
+    'account.terms': 'Условия',
+    'account.privacy': 'Конфиденциальность',
 
     'notice.signIn': 'Войти',
     'notice.addKey': 'Добавить ключ',
@@ -233,6 +240,9 @@ const STRINGS: Record<Lang, Record<string, string>> = {
     'notice.trial_exhausted_anon': 'Зарегистрируйтесь ради бесплатных генераций или добавьте свой ключ.',
     'notice.trial_exhausted_user': 'Бесплатные генерации закончились — добавьте свой ключ LLM, чтобы продолжить.',
     'notice.trial_budget_exhausted': 'Бесплатные генерации сейчас на паузе — добавьте свой ключ LLM, чтобы продолжить.',
+    'notice.server_busy': 'Сейчас высокая нагрузка — попробуйте снова через несколько секунд.',
+    'notice.execution_timeout': 'Модель строилась слишком долго — упростите её или попробуйте снова.',
+    'notice.worker_unavailable': 'Сервис моделирования ненадолго недоступен — попробуйте через мгновение.',
 
     'account.keySet': 'Ключ LLM установлен',
     'chat.inconsistent': 'Несогласованный запрос.',

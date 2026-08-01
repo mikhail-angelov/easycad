@@ -1,0 +1,91 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>text2part — Privacy</title>
+<meta name="description" content="What text2part stores, how BYOK keys are handled, analytics in use, and how to delete your account.">
+<link rel="canonical" href="https://text2part.bconf.com/privacy">
+<link rel="icon" href="/favicon.svg" type="image/svg+xml">
+<meta name="theme-color" content="#ECEAE4" media="(prefers-color-scheme: light)">
+<meta name="theme-color" content="#0F1114" media="(prefers-color-scheme: dark)">
+<meta name="robots" content="index, follow">
+<!--@METRICA@-->
+<!--@LEGAL_CSS@-->
+</head>
+<body>
+<div class="lang" role="group" aria-label="Language / Язык">
+  <button class="lang-btn" data-lang-set="ru" type="button">RU</button>
+  <button class="lang-btn" data-lang-set="en" type="button">EN</button>
+</div>
+
+<header class="top">
+  <div class="wrap">
+    <span class="eyebrow" data-i18n="eyebrow">Privacy</span>
+    <h1 data-i18n="h1">Privacy Policy</h1>
+    <div class="updated" data-i18n="updated">Last updated: July 2026</div>
+  </div>
+</header>
+
+<main>
+  <div class="wrap">
+    <p class="muted" data-i18n="intro">text2part is a solo-operated tool. We keep data collection to the minimum needed to run the service, and this page says plainly what that is.</p>
+
+    <h2 data-i18n="store.h">What we store</h2>
+    <ul>
+      <li data-i18n="store.1"><b>Account email.</b> If you sign in, we store your email address to identify your account and send sign-in links. There are no passwords.</li>
+      <li data-i18n="store.2"><b>Settings.</b> Your chosen provider, model, and preferences.</li>
+      <li data-i18n="store.3"><b>CAD sessions.</b> Your prompts, generated code, and models are held in memory on the server for the life of the session so the editor and timeline work; they are not a long-term archive.</li>
+      <li data-i18n="store.4"><b>Feedback.</b> If you submit the in-app feedback form, we store your message, optional rating, and optional email.</li>
+    </ul>
+
+    <h2 data-i18n="byok.h">Your LLM key (BYOK)</h2>
+    <p data-i18n="byok.p">If you add your own LLM provider key, it is <b>encrypted at rest</b> and used only to make model calls on your behalf. It is <b>never logged</b> and never shown back to you in full. You can remove it at any time from the account panel.</p>
+
+    <h2 data-i18n="analytics.h">Analytics</h2>
+    <p data-i18n="analytics.p">We use <b>Yandex.Metrica</b> to understand aggregate usage (page visits, funnel steps). It is only active when configured for the deployment. We do not sell data or run advertising trackers.</p>
+
+    <h2 data-i18n="delete.h">Deleting your account</h2>
+    <p data-i18n="delete.p">You can delete your account and its stored data at any time from the account panel in the app (Delete account). This removes your email, settings, and stored key.</p>
+
+    <h2 data-i18n="contact.h">Contact</h2>
+    <p data-i18n="contact.p">Questions? Reach the operator via the in-app feedback form or the GitHub repository.</p>
+
+    <hr class="rule">
+    <a class="back" href="/" data-i18n="back">← Back to text2part</a>
+  </div>
+</main>
+
+<footer class="wrap">
+  <span>© 2026 Mikhail Angelov</span>
+  <span><a href="/terms" data-i18n="link.terms">Terms</a> · <a href="/privacy" data-i18n="link.privacy">Privacy</a></span>
+  <a href="https://text2part.bconf.com" target="_blank" rel="noopener">text2part.bconf.com</a>
+</footer>
+
+<script>
+window.LEGAL_I18N_RU = {
+  "eyebrow": "Конфиденциальность",
+  "h1": "Политика конфиденциальности",
+  "updated": "Обновлено: июль 2026",
+  "intro": "text2part — инструмент, который ведёт один человек. Мы собираем минимум данных, нужный для работы сервиса, и на этой странице честно рассказываем, что именно.",
+  "store.h": "Что мы храним",
+  "store.1": "<b>E-mail аккаунта.</b> Если вы входите, мы храним ваш адрес, чтобы опознавать аккаунт и присылать ссылки для входа. Паролей нет.",
+  "store.2": "<b>Настройки.</b> Выбранный провайдер, модель и предпочтения.",
+  "store.3": "<b>CAD-сессии.</b> Ваши запросы, сгенерированный код и модели хранятся в памяти сервера в течение сессии, чтобы работали редактор и таймлайн; это не долговременный архив.",
+  "store.4": "<b>Обратная связь.</b> Если вы отправляете форму обратной связи, мы храним сообщение, оценку (по желанию) и e-mail (по желанию).",
+  "byok.h": "Ваш ключ LLM (BYOK)",
+  "byok.p": "Если вы добавляете собственный ключ провайдера LLM, он <b>шифруется при хранении</b> и используется только для вызовов модели от вашего имени. Он <b>никогда не логируется</b> и не показывается вам целиком. Ключ можно удалить в любой момент в панели аккаунта.",
+  "analytics.h": "Аналитика",
+  "analytics.p": "Мы используем <b>Яндекс.Метрику</b>, чтобы понимать агрегированное использование (посещения страниц, шаги воронки). Она включается только если настроена для развёртывания. Мы не продаём данные и не ставим рекламные трекеры.",
+  "delete.h": "Удаление аккаунта",
+  "delete.p": "Вы можете удалить аккаунт и связанные с ним данные в любой момент в панели аккаунта в приложении (Удалить аккаунт). Это удаляет ваш e-mail, настройки и сохранённый ключ.",
+  "contact.h": "Контакты",
+  "contact.p": "Вопросы? Свяжитесь с оператором через форму обратной связи в приложении или репозиторий на GitHub.",
+  "back": "← Назад к text2part",
+  "link.terms": "Условия",
+  "link.privacy": "Конфиденциальность"
+};
+</script>
+<!--@LEGAL_JS@-->
+</body>
+</html>
