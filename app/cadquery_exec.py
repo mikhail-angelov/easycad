@@ -1,7 +1,7 @@
 """CadQuery execution with a pluggable backend (SPEC12).
 
 `execute(code)` runs the given CadQuery script and returns an `ExecResult`
-(STL b64 + a refreshed geometry-info block). All failure modes — syntax
+(STL b64 + separate geometry info). All failure modes — syntax
 errors, missing `result`, OCP crashes, timeouts, transport errors — come back
 as a populated `error` string rather than raising.
 
@@ -15,8 +15,7 @@ Two backends, selected by environment (see `_select_backend`):
   LLM-generated code must run away from the API process, the LLM key, and
   user data.
 
-The public `execute()` signature and `ExecResult` fields are unchanged, so all
-call sites in `app/main.py` are untouched.
+The public `execute()` signature is shared by both backends.
 """
 
 import base64
@@ -47,7 +46,6 @@ class ExecResult:
     success: bool
     stl_base64: str | None = None
     geometry_info: str | None = None
-    code_with_geometry: str | None = None
     error: str | None = None
     # Machine-readable tag for OPERATIONAL failures the user should retry rather
     # than debug — "execution_timeout" (wall-clock) or "worker_unavailable"
@@ -66,7 +64,7 @@ def append_geometry_block(code: str, info: str) -> str:
     return strip_geometry_block(code) + "\n\n" + info + "\n"
 
 
-def _result_from_worker_payload(code: str, out: dict) -> ExecResult:
+def _result_from_worker_payload(out: dict) -> ExecResult:
     """Build an ExecResult from a worker payload {success, stl_base64?,
     geometry_info?, error?}. Shared by both backends so local and remote agree.
     """
@@ -82,7 +80,6 @@ def _result_from_worker_payload(code: str, out: dict) -> ExecResult:
         success=True,
         stl_base64=out["stl_base64"],
         geometry_info=info,
-        code_with_geometry=append_geometry_block(code, info),
     )
 
 
@@ -181,7 +178,7 @@ class LocalExecutor:
                 return ExecResult(False, error=out.get("error") or "Unknown execution error.")
 
             out["stl_base64"] = base64.b64encode(stl_path.read_bytes()).decode("ascii")
-            return _result_from_worker_payload(code, out)
+            return _result_from_worker_payload(out)
 
     def export(self, code: str, fmt: str) -> bytes | None:
         """Run `code` and export `result` to `fmt`; return the file bytes or None."""
@@ -275,7 +272,7 @@ class RemoteExecutor:
         malformed = _malformed_worker_result(out)
         if malformed is not None:
             return malformed
-        return _result_from_worker_payload(code, out)
+        return _result_from_worker_payload(out)
 
     def export(self, code: str, fmt: str) -> bytes | None:
         if fmt not in _EXPORT_EXTS:

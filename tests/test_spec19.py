@@ -179,7 +179,7 @@ def test_worker_timeout_payload_maps_to_execution_timeout():
 
     payload = {"success": False, "stl_base64": None, "geometry_info": None,
                "error": "Execution timed out after 120s.", "code": "execution_timeout"}
-    res = _result_from_worker_payload("code", payload)
+    res = _result_from_worker_payload(payload)
     assert res.success is False
     assert res.code == "execution_timeout"
 
@@ -188,7 +188,7 @@ def test_worker_ordinary_failure_has_no_operational_code():
     from app.cadquery_exec import _result_from_worker_payload
 
     payload = {"success": False, "error": "NameError: cq"}
-    res = _result_from_worker_payload("code", payload)
+    res = _result_from_worker_payload(payload)
     assert res.success is False and res.code is None
 
 
@@ -221,8 +221,7 @@ def test_variations_keeps_partial_batch_on_later_operational_failure(monkeypatch
     def fake_exec(code):
         calls["n"] += 1
         if calls["n"] == 1:
-            return ExecResult(True, stl_base64="AA==", geometry_info="# info",
-                              code_with_geometry=code + "\n# info\n")
+            return ExecResult(True, stl_base64="AA==", geometry_info="# info")
         return ExecResult(False, error="down", code="worker_unavailable")
 
     monkeypatch.setattr(m, "execute", fake_exec)

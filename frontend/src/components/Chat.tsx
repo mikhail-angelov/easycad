@@ -1,9 +1,17 @@
-import { useEffect, useRef, useState } from 'preact/hooks'
+import { useEffect, useLayoutEffect, useRef, useState } from 'preact/hooks'
 import { useStore, useT } from '../store'
 import { STARTERS } from '../i18n'
 import { Notice } from './Notice'
+import { formatGeometryInfo } from '../geometry'
 
 const WELCOME_KEY = 'easycad_welcome_seen'
+const MAX_TEXTAREA_HEIGHT = 180
+
+function resizeTextarea(el: HTMLTextAreaElement | null) {
+  if (!el) return
+  el.style.height = 'auto'
+  el.style.height = `${Math.min(el.scrollHeight, MAX_TEXTAREA_HEIGHT)}px`
+}
 
 export function Chat() {
   const chatLog = useStore((s) => s.chatLog)
@@ -37,6 +45,7 @@ export function Chat() {
   const busyKind = useStore((s) => s.busyKind)
   const retryPrompt = useStore((s) => s.retryPrompt)
   const clearRetryPrompt = useStore((s) => s.clearRetryPrompt)
+  const setAccountOpen = useStore((s) => s.setAccountOpen)
   const t = useT()
 
   // Staged progress for LLM generations: since the server does triage → generate
@@ -92,6 +101,16 @@ export function Chat() {
     }
   }, [retryPrompt, clearRetryPrompt])
 
+  // Reflow after every state change too: retry restores and send clears do not
+  // originate from an input event.
+  useLayoutEffect(() => {
+    resizeTextarea(inputRef.current)
+  }, [text])
+
+  useLayoutEffect(() => {
+    resizeTextarea(proposalRef.current)
+  }, [proposal])
+
   const dismissWelcome = () => {
     setShowWelcome(false)
     try {
@@ -128,15 +147,6 @@ export function Chat() {
     if (!t || busy) return
     setText('')
     sendVariations(t)
-  }
-
-  const summarize = (info: string | null): string => {
-    if (!info) return ''
-    return info
-      .split('\n')
-      .filter((l) => l.includes('Size:') || l.includes('Topology:'))
-      .map((l) => l.replace(/^#\s*/, ''))
-      .join(' · ')
   }
 
   return (
@@ -176,16 +186,20 @@ export function Chat() {
             </select>
           ) : (
             onTrial &&
-            trialRemaining != null && (
-              <span
+            trialRemaining != null && (trialRemaining <= 0 ? (
+              <button
+                type="button"
                 class={`trial-pill ${trialRemaining <= 0 ? 'empty' : ''}`}
                 title={trialTier === 'anon' ? t('chat.trialAnonTip') : t('chat.trialUserTip')}
+                onClick={() => setAccountOpen(true)}
               >
-                {trialTier === 'anon' && trialRemaining > 0
-                  ? t('chat.trialNoSignup', { n: trialRemaining })
-                  : t('chat.trialLeft', { n: trialRemaining })}
+                {t('chat.trialLeft', { n: trialRemaining })}
+              </button>
+            ) : (
+              <span class="trial-pill" title={trialTier === 'anon' ? t('chat.trialAnonTip') : t('chat.trialUserTip')}>
+                {trialTier === 'anon' ? t('chat.trialNoSignup', { n: trialRemaining }) : t('chat.trialLeft', { n: trialRemaining })}
               </span>
-            )
+            ))
           )}
         </div>
       </header>
@@ -260,6 +274,7 @@ export function Chat() {
               class="proposal-text"
               disabled={busy}
               defaultValue={proposal.refinedPrompt}
+              onInput={(e) => resizeTextarea(e.currentTarget)}
             />
             <div class="proposal-actions">
               <button
@@ -304,7 +319,7 @@ export function Chat() {
               >
                 <span class="v-index">{i + 1}</span>
                 <span class="v-info">
-                  {c.success ? summarize(c.geometry_info) : t('chat.variationFailed', { error: c.error ?? '' })}
+                  {c.success ? formatGeometryInfo(c.geometry_info, t) : t('chat.variationFailed', { error: c.error ?? '' })}
                 </span>
               </button>
             ))}
@@ -328,19 +343,22 @@ export function Chat() {
       {error && <div class="chat-error">{error}</div>}
 
       <div class="chat-input">
-        <textarea
-          ref={inputRef}
-          placeholder={t('chat.inputPlaceholder')}
-          value={text}
-          disabled={busy}
-          onInput={(e) => setText((e.target as HTMLTextAreaElement).value)}
-          onKeyDown={(e) => {
-            if (e.key === 'Enter' && !e.shiftKey) {
-              e.preventDefault()
-              submit()
-            }
-          }}
-        />
+        <div class="chat-compose">
+          <textarea
+            ref={inputRef}
+            placeholder={t('chat.inputPlaceholder')}
+            value={text}
+            disabled={busy}
+            onInput={(e) => setText((e.target as HTMLTextAreaElement).value)}
+            onKeyDown={(e) => {
+              if (e.key === 'Enter' && !e.shiftKey) {
+                e.preventDefault()
+                submit()
+              }
+            }}
+          />
+          <div class="chat-input-hint">{t('chat.inputHint')}</div>
+        </div>
         <div class="chat-send">
           <button class="primary" disabled={busy} onClick={submit}>
             {busy ? '…' : t('chat.send')}
@@ -351,7 +369,7 @@ export function Chat() {
             title={t('chat.variationsTip')}
             onClick={submitVariations}
           >
-            ×3
+            {t('chat.variations')}
           </button>
         </div>
       </div>

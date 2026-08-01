@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from 'preact/hooks'
 import { api } from '../api'
 import { useStore, useT } from '../store'
 import { ModelViewer } from '../viewer3d'
+import { formatGeometryInfo } from '../geometry'
 import { IconCode, IconCube, IconDownload, IconMesh } from './Icons'
 
 export function Viewer() {
@@ -92,7 +93,7 @@ export function Viewer() {
         </div>
       </header>
       <div class="viewer-stage" ref={stageRef} />
-      {geometryInfo && <pre class="geo-info">{geometryInfo}</pre>}
+      {geometryInfo && <div class="geo-info">{formatGeometryInfo(geometryInfo, t)}</div>}
     </section>
   )
 }

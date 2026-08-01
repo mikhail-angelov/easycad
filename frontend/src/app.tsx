@@ -1,4 +1,4 @@
-import { useEffect, useRef } from 'preact/hooks'
+import { useEffect, useRef, useState } from 'preact/hooks'
 import { lazy, Suspense } from 'preact/compat'
 import { api } from './api'
 import { useStore, useT } from './store'
@@ -13,6 +13,15 @@ import { IconSave, IconLoad, IconNew } from './components/Icons'
 // they don't bloat the initial bundle (review L1).
 const Editor = lazy(() => import('./components/Editor').then((m) => ({ default: m.Editor })))
 const Viewer = lazy(() => import('./components/Viewer').then((m) => ({ default: m.Viewer })))
+const CODE_VISIBLE_KEY = 'easycad_code_visible'
+
+function savedCodeVisibility() {
+  try {
+    return localStorage.getItem(CODE_VISIBLE_KEY) === '1'
+  } catch {
+    return false
+  }
+}
 
 export function App() {
   const init = useStore((s) => s.init)
@@ -21,6 +30,7 @@ export function App() {
   const busy = useStore((s) => s.busy)
   const t = useT()
   const fileRef = useRef<HTMLInputElement>(null)
+  const [codeVisible, setCodeVisible] = useState(savedCodeVisibility)
 
   useEffect(() => {
     init()
@@ -34,29 +44,48 @@ export function App() {
     await importProject(await file.text())
   }
 
+  const toggleCode = () => {
+    setCodeVisible((visible) => {
+      const next = !visible
+      try {
+        localStorage.setItem(CODE_VISIBLE_KEY, next ? '1' : '0')
+      } catch {
+        /* ignore */
+      }
+      return next
+    })
+  }
+
   return (
     <div class="app-shell">
       <header class="topbar">
         <div class="brand">
           <span class="brand-mark" />
-          text2part
+          <span class="brand-title">text2part</span>
           <span class="project-name">{t('app.projectName')}</span>
         </div>
         <div class="topbar-actions">
+          <button class="topbar-action code-toggle" onClick={toggleCode} aria-pressed={codeVisible} title={codeVisible ? t('app.hideCode') : t('app.showCode')}>
+            <span class="code-toggle-long">{codeVisible ? t('app.hideCode') : t('app.showCode')}</span>
+            <span class="code-toggle-short">{t('app.code')}</span>
+          </button>
           <LangToggle />
-          <a class="icon-button" href={api.exportProjectUrl()} download title={t('app.saveProject')}>
+          <a class="topbar-action" href={api.exportProjectUrl()} download title={t('app.saveProject')}>
             <IconSave />
+            <span>{t('app.saveProject')}</span>
           </a>
           <button
-            class="icon-button"
+            class="topbar-action"
             onClick={() => fileRef.current?.click()}
             disabled={busy}
             title={t('app.loadProject')}
           >
             <IconLoad />
+            <span>{t('app.loadProject')}</span>
           </button>
-          <button class="icon-button" onClick={() => reset()} disabled={busy} title={t('app.newModel')}>
+          <button class="topbar-action" onClick={() => reset()} disabled={busy} title={t('app.newModel')}>
             <IconNew />
+            <span>{t('app.newModel')}</span>
           </button>
           <input
             ref={fileRef}
@@ -69,10 +98,12 @@ export function App() {
           <Account />
         </div>
       </header>
-      <div class="workspace">
-        <Suspense fallback={<section class="panel">{t('app.loadingEditor')}</section>}>
-          <Editor />
-        </Suspense>
+      <div class={`workspace ${codeVisible ? 'editor-open' : ''}`}>
+        {codeVisible && (
+          <Suspense fallback={<section class="panel">{t('app.loadingEditor')}</section>}>
+            <Editor />
+          </Suspense>
+        )}
         <Suspense fallback={<section class="panel">{t('app.loadingViewer')}</section>}>
           <Viewer />
         </Suspense>

@@ -18,8 +18,7 @@ def test_execute_simple_box():
     assert len(base64.b64decode(res.stl_base64)) > 200
     assert "Bounding box" in res.geometry_info
     assert "Size: 50.0 x 80.0 x 30.0 mm" in res.geometry_info
-    assert res.code_with_geometry.startswith("import cadquery as cq")
-    assert "# ── Geometry info" in res.code_with_geometry
+    assert res.geometry_info.startswith("# ── Geometry info")
 
 
 def test_execute_missing_result():

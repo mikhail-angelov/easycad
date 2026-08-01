@@ -10,6 +10,8 @@ import time
 from dataclasses import asdict, dataclass
 from itertools import count
 
+from .cadquery_exec import strip_geometry_block
+
 
 @dataclass
 class Step:
@@ -79,7 +81,10 @@ class SessionStore:
             kind=kind,
             original_prompt=original_prompt,
             refined_prompt=refined_prompt,
-            code=code,
+            # The client and all public read paths work with source only. Geometry
+            # is kept separately in ``geometry_info`` and reattached solely at the
+            # LLM boundary when it is useful as modelling context.
+            code=strip_geometry_block(code),
             stl_base64=stl_base64,
             geometry_info=geometry_info,
             success=success,
@@ -174,7 +179,9 @@ class SessionStore:
                     kind=str(sd.get("kind", "chat")),
                     original_prompt=sd.get("original_prompt"),
                     refined_prompt=sd.get("refined_prompt"),
-                    code=str(sd.get("code", "")),
+                    # Project import is also a write boundary: old project files
+                    # may still contain the now-private generated comment block.
+                    code=strip_geometry_block(str(sd.get("code", ""))),
                     stl_base64=sd.get("stl_base64"),
                     geometry_info=sd.get("geometry_info"),
                     success=bool(sd.get("success", False)),

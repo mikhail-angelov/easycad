@@ -30,7 +30,7 @@ from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
 
 from . import crypto, db, jwt_utils, metrics
-from .cadquery_exec import execute, export_model
+from .cadquery_exec import append_geometry_block, execute, export_model, strip_geometry_block
 from .llm import (
     DEFAULT_PROVIDER,
     INITIAL_CODE,
@@ -681,7 +681,7 @@ def _create_initial(store) -> None:
     res = _initial_result()
     store.add(
         kind="initial",
-        code=res.code_with_geometry or INITIAL_CODE,
+        code=INITIAL_CODE,
         stl_base64=res.stl_base64,
         geometry_info=res.geometry_info,
         success=res.success,
@@ -738,7 +738,18 @@ def _base_code(store, current_code: str | None) -> str:
 
 def _is_initial_model(store, code: str) -> bool:
     current = store.current()
-    return current is not None and current.kind == "initial" and code == current.code
+    return (
+        current is not None
+        and current.kind == "initial"
+        and strip_geometry_block(code) == strip_geometry_block(current.code)
+    )
+
+
+def _with_geometry(store, base_code: str) -> str:
+    """Give the LLM its last measured geometry without leaking it to clients."""
+    current = store.current()
+    info = current.geometry_info if current else None
+    return append_geometry_block(base_code, info) if info else base_code
 
 
 # ── Auth endpoints ────────────────────────────────────────────────────────────
@@ -1061,7 +1072,7 @@ def api_execute(
         "success": res.success,
         "stl_base64": res.stl_base64,
         "geometry_info": res.geometry_info,
-        "code_with_geometry": res.code_with_geometry,
+        "code": strip_geometry_block(req.code),
         "error": res.error,
     }
 
@@ -1077,7 +1088,7 @@ def api_execute_manual(
     _raise_if_operational(res)
     step = session.store.add(
         kind="manual",
-        code=res.code_with_geometry or req.code,
+        code=req.code,
         stl_base64=res.stl_base64,
         geometry_info=res.geometry_info,
         success=res.success,
@@ -1102,7 +1113,8 @@ def api_refine(
     if not _charge_operator_call(trial_ident):
         raise _budget_exhausted_error()
     try:
-        t = triage(req.prompt, _base_code(session.store, req.current_code), provider, model, api_key,
+        base_code = _base_code(session.store, req.current_code)
+        t = triage(req.prompt, _with_geometry(session.store, base_code), provider, model, api_key,
                    response_language=req.response_language)
     except LLMError as exc:
         raise _provider_error("Triage error", exc) from exc
@@ -1161,7 +1173,7 @@ def _generate_and_step(
             break
         metrics.incr("gen_attempts")
         try:
-            code = generate_code(base_code, gen_prompt, provider, model,
+            code = generate_code(_with_geometry(session.store, base_code), gen_prompt, provider, model,
                                  feedback=feedback, **generate_kwargs)
         except LLMError as exc:
             if attempt == 0:
@@ -1203,7 +1215,7 @@ def _generate_and_step(
         kind="chat",
         original_prompt=original_prompt,
         refined_prompt=refined_prompt,
-        code=res.code_with_geometry or code,
+        code=code,
         stl_base64=res.stl_base64,
         geometry_info=res.geometry_info,
         success=res.success,
@@ -1277,7 +1289,7 @@ def api_chat(
     if not _charge_operator_call(trial_ident):
         raise _budget_exhausted_error()
     try:
-        t = triage(req.prompt, base_code, provider, model, api_key,
+        t = triage(req.prompt, _with_geometry(session.store, base_code), provider, model, api_key,
                    response_language=req.response_language)
     except LLMError as exc:
         raise _provider_error("Triage error", exc) from exc
@@ -1316,7 +1328,7 @@ def api_variations(
         if not _charge_operator_call(trial_ident):  # triage is an operator call
             raise _budget_exhausted_error()
         try:
-            t = triage(req.prompt, base_code, provider, model, api_key,
+            t = triage(req.prompt, _with_geometry(session.store, base_code), provider, model, api_key,
                        response_language=req.response_language)
         except LLMError as exc:
             raise _provider_error("Triage error", exc) from exc
@@ -1343,7 +1355,7 @@ def api_variations(
             generate_kwargs = {"temperature": 0.7, "api_key": api_key, "skills": skills}
             if _is_initial_model(session.store, base_code):
                 generate_kwargs["replace_initial"] = True
-            code = generate_code(base_code, gen_prompt, provider, model, **generate_kwargs)
+            code = generate_code(_with_geometry(session.store, base_code), gen_prompt, provider, model, **generate_kwargs)
         except LLMError as exc:
             metrics.incr("provider_errors")  # so variations feed the failure rate
             candidates.append(
@@ -1362,7 +1374,7 @@ def api_variations(
             break
         metrics.incr("gen_ok" if res.success else "gen_exec_fail")
         candidates.append({
-            "code": res.code_with_geometry or code,
+            "code": strip_geometry_block(code),
             "stl_base64": res.stl_base64,
             "geometry_info": res.geometry_info,
             "success": res.success,
@@ -1409,7 +1421,7 @@ def api_commit(
         kind="chat",
         original_prompt=req.original_prompt,
         refined_prompt=req.refined_prompt,
-        code=res.code_with_geometry or req.code,
+        code=req.code,
         stl_base64=res.stl_base64,
         geometry_info=res.geometry_info,
         success=res.success,

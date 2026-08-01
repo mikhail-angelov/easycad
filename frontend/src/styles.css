@@ -88,6 +88,25 @@ body {
   align-items: center;
   gap: 16px;
 }
+.topbar-action {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  border: 0;
+  padding: 4px;
+  background: transparent;
+  color: var(--ink);
+  font: 12px inherit;
+  cursor: pointer;
+  text-decoration: none;
+}
+.topbar-action:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+.code-toggle-short {
+  display: none;
+}
 
 /* ── Account / settings panel (SPEC13) ───────────────────── */
 .account {
@@ -363,7 +382,7 @@ body {
   opacity: 0.7;
 }
 
-/* ── Workspace: three panels ─────────────────────────────── */
+/* ── Workspace ────────────────────────────────────────────── */
 .workspace {
   flex: 1 1 auto;
   min-height: 0;
@@ -398,12 +417,13 @@ body {
   border-right: 1px solid var(--grid-strong);
 }
 .viewer-panel {
-  flex: 1.4 1 0;
+  flex: 1 1 0;
   border-right: 1px solid var(--grid-strong);
 }
 .chat-panel {
-  flex: 0 0 360px;
-  width: 360px;
+  flex: 0 1 420px;
+  min-width: 320px;
+  max-width: 480px;
 }
 
 /* ── Code editor (Monaco) ────────────────────────────────── */
@@ -498,7 +518,6 @@ body {
   background: var(--paper);
   color: var(--soft);
   font: 11px/1.5 ui-monospace, monospace;
-  white-space: pre-wrap;
   max-height: 96px;
   overflow: auto;
 }
@@ -756,7 +775,11 @@ body {
   white-space: nowrap;
 }
 .trial-pill.empty {
-  opacity: 0.7;
+  border-color: var(--rust);
+  background: var(--rust-bg);
+  color: var(--rust);
+  cursor: pointer;
+  opacity: 1;
 }
 .model-select {
   max-width: 150px;
@@ -773,14 +796,24 @@ body {
   border-top: 1px solid var(--grid);
 }
 .chat-input textarea {
-  flex: 1 1 auto;
-  min-height: 44px;
-  max-height: 140px;
+  width: 100%;
+  min-height: 68px;
+  max-height: 180px;
   padding: 9px;
   border: 1px solid var(--grid-strong);
   border-radius: 6px;
-  resize: vertical;
+  resize: none;
   font: 13px inherit;
+  overflow-y: auto;
+}
+.chat-compose {
+  flex: 1 1 auto;
+  min-width: 0;
+}
+.chat-input-hint {
+  margin-top: 4px;
+  color: var(--soft);
+  font-size: 11px;
 }
 .chat-send {
   display: flex;
@@ -835,7 +868,9 @@ body {
   background: var(--blue-bg);
   color: var(--ink);
   font: 13px/1.5 inherit;
-  resize: vertical;
+  resize: none;
+  max-height: 180px;
+  overflow-y: auto;
 }
 .proposal-actions,
 .invalid-actions {
@@ -975,6 +1010,111 @@ body {
   background: var(--panel);
   border-top: 1px solid var(--grid-strong);
   overflow-x: auto;
+}
+
+/* Medium screens keep the useful two-column workspace. Code is an intentional
+   overlay, never a third squeezed column. */
+@media (min-width: 640px) and (max-width: 1023px) {
+  .topbar {
+    padding: 0 10px;
+  }
+  .project-name {
+    display: none;
+  }
+  .topbar-actions {
+    gap: 5px;
+  }
+  .topbar-action {
+    font-size: 11px;
+    padding: 3px;
+  }
+  .workspace.editor-open {
+    position: relative;
+  }
+  .workspace.editor-open .editor-panel {
+    position: absolute;
+    inset: 0;
+    z-index: 15;
+    border-right: 0;
+    box-shadow: 0 0 0 1px var(--grid-strong), 0 8px 28px rgba(0, 0, 0, 0.18);
+  }
+}
+
+/* A phone is one vertical workspace: model first, then the conversation. */
+@media (max-width: 639px) {
+  .topbar {
+    height: 50px;
+    padding: 0 8px;
+  }
+  .brand {
+    gap: 5px;
+  }
+  .brand-mark {
+    width: 18px;
+    height: 18px;
+  }
+  .project-name,
+  .brand-title {
+    display: none;
+  }
+  .topbar-actions {
+    gap: 3px;
+  }
+  .topbar-action {
+    gap: 2px;
+    padding: 3px;
+    font-size: 9px;
+  }
+  .code-toggle-long {
+    display: none;
+  }
+  .code-toggle-short {
+    display: inline;
+  }
+  .topbar-action svg {
+    width: 15px;
+    height: 15px;
+  }
+  .workspace {
+    flex-direction: column;
+    overflow: hidden;
+  }
+  .viewer-panel {
+    flex: 0 0 max(280px, 42vh);
+    min-height: 280px;
+    border-right: 0;
+    border-bottom: 1px solid var(--grid-strong);
+  }
+  .chat-panel {
+    flex: 1 1 auto;
+    min-width: 0;
+    max-width: none;
+    width: 100%;
+  }
+  .workspace.editor-open {
+    position: relative;
+  }
+  .workspace.editor-open .editor-panel {
+    position: absolute;
+    inset: 0;
+    z-index: 15;
+    border: 0;
+  }
+  .viewer-actions {
+    gap: 8px;
+  }
+  .panel > header,
+  .chat-input {
+    padding-left: 10px;
+    padding-right: 10px;
+  }
+  .timeline {
+    height: 42px;
+    padding: 0 10px;
+  }
+  .timeline-meta {
+    display: none;
+  }
 }
 .timeline-label {
   font: 11px ui-monospace, monospace;
