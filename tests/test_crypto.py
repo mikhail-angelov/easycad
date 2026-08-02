@@ -92,6 +92,7 @@ def test_production_boot_requires_strong_secret(monkeypatch):
     monkeypatch.delenv("EASYCAD_SECRETS_KEY", raising=False)
     monkeypatch.delenv("JWT_SECRET", raising=False)
     monkeypatch.setattr(m, "SECURE_COOKIES", True)  # production
+    monkeypatch.setattr(m, "ADMIN_EMAIL", "ops@example.com")  # required in prod (SPEC21 W2)
     with pytest.raises(RuntimeError):
         m._check_required_env()
     monkeypatch.setenv("JWT_SECRET", "a-strong-secret")

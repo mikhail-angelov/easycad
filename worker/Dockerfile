@@ -8,6 +8,12 @@
 #
 FROM python:3.11-slim
 
+# Build id baked into the image (SPEC21 W1) — same tag/SHA as the app image, so
+# a worker log line reports the running build. Keeps the worker secret-free and
+# volume-free (version comes from this ENV, not a mount).
+ARG EASYCAD_VERSION=unknown
+ENV EASYCAD_VERSION=$EASYCAD_VERSION
+
 # Runtime libs OCP/CadQuery links against (headless). Adjust if a future
 # CadQuery/OCP build pulls in more.
 RUN apt-get update && apt-get install -y --no-install-recommends \
@@ -26,7 +32,7 @@ RUN pip install --no-cache-dir -r requirements.txt
 COPY app/cq_worker.py ./cq_worker.py
 COPY app/code_guard.py ./code_guard.py
 # Worker service code.
-COPY worker/main.py worker/limits.py worker/zygote.py ./
+COPY worker/main.py worker/limits.py worker/zygote.py worker/log_context.py ./
 
 # Non-root, matching the compose `user:` and a fixed uid for tmpfs ownership.
 RUN useradd --uid 10001 --create-home appuser

@@ -16,6 +16,7 @@ import re
 import secrets
 import threading
 import time
+import traceback
 import urllib.error
 import urllib.request
 from contextlib import asynccontextmanager
@@ -29,8 +30,9 @@ from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, Redirect
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
 
-from . import crypto, db, jwt_utils, metrics
+from . import crashlog, crypto, db, jwt_utils, log_context, metrics
 from .cadquery_exec import append_geometry_block, execute, export_model, strip_geometry_block
+from .version import VERSION
 from .llm import (
     DEFAULT_PROVIDER,
     INITIAL_CODE,
@@ -96,17 +98,18 @@ MAX_REPAIR = max(0, int(os.getenv("EASYCAD_MAX_REPAIR", "2")))
 # this email; feedback and ops alerts are sent here. Unset → admin is hidden and
 # no ops mail is sent. This is the ONLY admin/ops address the app uses.
 ADMIN_EMAIL = (os.getenv("ADMIN_EMAIL") or "").strip().lower()
+# Send the daily crash-report email (SPEC21 W2). 0 disables the mail (the JSONL
+# sink and retention still run — only the digest email is suppressed).
+CRASH_REPORT = os.getenv("EASYCAD_CRASH_REPORT", "1") != "0"
 
 # ── Logging setup ─────────────────────────────────────────────────────────────
-# Without this, `logging.getLogger("easycad")` inherits the root WARNING level and
-# has no handler under some runners, so INFO "happy path" lines never appear and
-# the container logs stay empty. Configure a single stream handler + timestamped
-# format once, at import, and honour EASYCAD_LOG_LEVEL (default INFO).
+# Configure logging EXPLICITLY via dictConfig (not basicConfig, which only owns
+# root and is a no-op once uvicorn installs its own propagate=False handlers).
+# This owns root + the three uvicorn loggers, routes them all through one handler
+# with a context-aware formatter, so every line — including access/error and the
+# crash record — carries the request's trace_id/user/version (SPEC21 W1).
 LOG_LEVEL = os.getenv("EASYCAD_LOG_LEVEL", "INFO").upper()
-logging.basicConfig(
-    level=LOG_LEVEL,
-    format="%(asctime)s %(levelname)s %(name)s %(message)s",
-)
+log_context.configure_logging(LOG_LEVEL)
 log = logging.getLogger("easycad")
 log.setLevel(LOG_LEVEL)
 
@@ -134,6 +137,11 @@ def _check_required_env() -> None:
     # an explicit EASYCAD_SECRETS_KEY=<default> is still caught.
     if not crypto.secret_is_secure():
         problems.append("JWT_SECRET or EASYCAD_SECRETS_KEY (encrypts BYOK keys at rest)")
+    # ADMIN_EMAIL is now the destination for the daily crash report (SPEC21 W2) and
+    # the SPEC19 ops mail. Unset in prod → silently no crash mail, a foot-gun — so
+    # it joins the fail-fast checks (dev only warns, below).
+    if not ADMIN_EMAIL:
+        problems.append("ADMIN_EMAIL (destination for the daily crash report + ops mail)")
     if problems:
         if SECURE_COOKIES:
             raise RuntimeError("Refusing to start: missing/insecure " + "; ".join(problems) + ".")
@@ -144,6 +152,7 @@ def _check_required_env() -> None:
 
 
 _check_required_env()
+crashlog.ensure_dir()  # create the crash-log dir on boot (record also creates lazily)
 
 registry = build_registry()
 limiter = RateLimiter()
@@ -229,6 +238,16 @@ async def _session_cookie(request: Request, call_next):
     if new:
         sid = secrets.token_urlsafe(24)
     request.state.session_id = sid
+    # Fill the log context now that the session id is known (the outer context
+    # middleware seeded trace_id/version/user). Anonymous callers get a stable
+    # `anon:<session-prefix>` identity; signed-in callers keep their email.
+    log_context.update_context(session_id=sid)
+    if log_context.current().get("user") in (None, "-"):
+        log_context.update_context(user=f"anon:{sid[:8]}")
+    # Stash the resolved identity on the Request so the exception handler — which
+    # runs after the ContextVar is reset — can still stamp user/session (W1).
+    request.state.log_user = log_context.current().get("user", "-")
+    request.state.log_session = sid
     response = await call_next(request)
     if new:
         response.set_cookie(
@@ -246,6 +265,37 @@ async def _session_cookie(request: Request, call_next):
 _ACCESS_LOG_SKIP_PREFIXES = ("/assets", "/static")
 
 
+def _crash_event(request: Request, status: int, kind: str, *,
+                 service: str = "app", code: str | None = None,
+                 exc: BaseException | None = None) -> dict:
+    """Build one crash record from the W1 context + request specifics (W2).
+    `kind:error` carries the live exception; `kind:operational` carries the
+    coded 5xx via op_error. Scrubbing/length-capping happens in crashlog.record."""
+    ctx = log_context.current()
+    ev = {
+        "ts": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
+        "trace_id": getattr(request.state, "trace_id", ctx.get("trace_id", "-")),
+        "service": service,
+        "method": request.method,
+        "path": request.url.path,
+        "status": status,
+        "kind": kind,
+        "code": code,
+        "user": ctx.get("user", "-"),
+        "session_id": ctx.get("session_id", "-"),
+        "version": VERSION,
+        "exc_class": None,
+        "exc_message": None,
+        "traceback_tail": None,
+    }
+    if exc is not None:
+        ev["exc_class"] = type(exc).__name__
+        ev["exc_message"] = str(exc)
+        tb = traceback.format_exception(type(exc), exc, exc.__traceback__)
+        ev["traceback_tail"] = "".join(tb)[-crashlog.MAX_TB:]
+    return ev
+
+
 @app.middleware("http")
 async def _access_log(request: Request, call_next):
     path = request.url.path
@@ -256,10 +306,14 @@ async def _access_log(request: Request, call_next):
         response = await call_next(request)
     except Exception as exc:
         # Unhandled error escaping the app: emit the concise access line here (no
-        # traceback — the exception handler below logs the full traceback once)
-        # and re-raise so that handler turns it into a 500 for the client.
+        # traceback — the exception handler below logs the full traceback once),
+        # record the crash ONCE (the single chokepoint — the exception handler does
+        # not), and re-raise so that handler turns it into a 500 for the client.
         dur_ms = int((time.monotonic() - _t0) * 1000)
         log.error("%s %s -> 500 (%dms) unhandled: %s", request.method, path, dur_ms, exc)
+        if not getattr(request.state, "crash_recorded", False):
+            request.state.crash_recorded = True
+            crashlog.record(_crash_event(request, 500, "error", exc=exc))
         raise
     dur_ms = int((time.monotonic() - _t0) * 1000)
     level = logging.INFO
@@ -268,16 +322,133 @@ async def _access_log(request: Request, call_next):
     elif response.status_code >= 400:
         level = logging.WARNING
     log.log(level, "%s %s -> %d (%dms)", request.method, path, response.status_code, dur_ms)
+    # Operational/explicit 5xx that never raised (worker outage mapped to a coded
+    # HTTPException, server_busy, provider_error…): record it as `kind:operational`,
+    # labelled from op_error. A normal HTTP-200 failed generation is NOT a crash.
+    if response.status_code >= 500 and not getattr(request.state, "crash_recorded", False):
+        request.state.crash_recorded = True
+        op = getattr(request.state, "op_error", None) or {}
+        crashlog.record(_crash_event(
+            request, response.status_code, "operational",
+            service=op.get("service", "app"), code=op.get("code"),
+        ))
+    return response
+
+
+# ── Daily crash report trigger (lazy, at-most-once) ───────────────────────────
+# An in-memory guard is only a hot-path short-circuit (avoid the FS on every
+# request); the authority is the single atomic marker crashlog.claim_report writes.
+_report_lock = threading.Lock()
+_report_day = ""
+
+
+def _maybe_send_daily_report() -> None:
+    """On the first request of a new UTC day, claim the day (one atomic marker),
+    email yesterday's digest best-effort, and apply retention. At-most-once: a
+    mail failure loses that day's report by design (never a duplicate). Wrapped so
+    it never breaks a request (the _budget_alert contract)."""
+    global _report_day
+    today = time.strftime("%Y-%m-%d", time.gmtime())
+    with _report_lock:
+        if _report_day == today:
+            return
+    outcome = crashlog.claim_report(today)
+    if outcome is None:
+        # Transient FS error — do NOT mark the day done; a later request retries.
+        return
+    with _report_lock:
+        _report_day = today  # definitive (claimed or already-sent): stop re-checking
+    if outcome is False:
+        return  # another worker/restart already sent today's report
+    yesterday = time.strftime("%Y-%m-%d", time.gmtime(time.time() - 86400))
+    try:
+        n, subject, body = crashlog.build_digest(yesterday)
+        if CRASH_REPORT and ADMIN_EMAIL:
+            try:
+                send_mail(ADMIN_EMAIL, subject, body)
+            except Exception:  # noqa: BLE001 — mail failure loses this report, by design
+                log.warning("Daily crash report email failed for %s", yesterday)
+        log.info("Daily crash report %s: %d crashes", yesterday, n)
+    finally:
+        crashlog.apply_retention()
+
+
+def _daily_report_tick() -> None:
+    try:
+        _maybe_send_daily_report()
+    except Exception:  # noqa: BLE001 — never break a request
+        pass
+
+
+# Fire-and-forget tasks are tracked so they aren't garbage-collected mid-flight.
+_report_tasks: set = set()
+
+
+def _spawn_daily_report_if_due() -> None:
+    """Per-request hook. The common case is a single date-string compare — no work,
+    no thread hop. Only when the UTC day has rolled over do we spawn the tick as a
+    fire-and-forget task (its FS work + blocking SMTP run off the request path, so
+    NO request — not even the day's first — waits for it). Concurrent spawns at the
+    day boundary are safe: the atomic marker lets only one send win."""
+    if _report_day == time.strftime("%Y-%m-%d", time.gmtime()):
+        return
+    try:
+        task = asyncio.create_task(asyncio.to_thread(_daily_report_tick))
+    except RuntimeError:
+        return  # no running loop (shouldn't happen in an async middleware)
+    _report_tasks.add(task)
+    task.add_done_callback(_report_tasks.discard)
+
+
+# Registered LAST → the OUTERMOST user middleware. Its `finally` runs after the
+# access-log middleware's, so the crash record + access line inside are still
+# stamped with this request's context before the ContextVar is reset.
+@app.middleware("http")
+async def _request_context(request: Request, call_next):
+    trace_id = secrets.token_hex(8)
+    request.state.trace_id = trace_id
+    # Resolve the caller identity from the auth cookie (email) here; session_id and
+    # the anon fallback are filled in _session_cookie (which runs inside this).
+    token = request.cookies.get(AUTH_COOKIE)
+    payload = jwt_utils.verify(token) if token else None
+    user = payload.get("email") if payload and payload.get("user_id") else None
+    ctx_token = log_context.set_context(trace_id=trace_id, version=VERSION, user=user)
+    try:
+        _spawn_daily_report_if_due()  # cheap gate; off-request-path when the day rolls over
+        response = await call_next(request)
+    finally:
+        # A thread-pool task/thread can be reused, so reset unconditionally — else a
+        # later request could inherit this caller's identity.
+        log_context.reset_context(ctx_token)
+    response.headers["X-Trace-Id"] = trace_id  # error path: the exception handler sets it
     return response
 
 
 @app.exception_handler(Exception)
 async def _unhandled_exception(request: Request, exc: Exception):
-    """Last-resort handler so a bug returns a clean 500 JSON body (and is logged
-    with a traceback via the access-log middleware above) instead of the client
-    seeing a dropped/reset connection."""
-    log.exception("Unhandled error on %s %s: %s", request.method, request.url.path, exc)
-    return JSONResponse({"detail": "Internal server error."}, status_code=500)
+    """Last-resort handler so a bug returns a clean 500 JSON body instead of the
+    client seeing a dropped/reset connection.
+
+    It runs in ServerErrorMiddleware — OUTSIDE the context middleware, whose
+    `finally` has already reset the ContextVar — so it must NOT rely on the live
+    context: it reads `request.state.trace_id` (still on the Request), stamps it
+    on the log line via `extra=`, echoes it in the body, and sets `X-Trace-Id` on
+    its own response (the middleware never got to add it for a request that
+    raised). It does NOT record the crash — that already happened once at the
+    access-log chokepoint (W2)."""
+    trace_id = getattr(request.state, "trace_id", "-")
+    log.exception(
+        "Unhandled error on %s %s: %s", request.method, request.url.path, exc,
+        extra={
+            "trace_id": trace_id, "version": VERSION,
+            "user": getattr(request.state, "log_user", "-") or "-",
+            "session_id": getattr(request.state, "log_session", "-"),
+        },
+    )
+    return JSONResponse(
+        {"detail": "Internal server error.", "trace_id": trace_id},
+        status_code=500, headers={"X-Trace-Id": trace_id},
+    )
 
 
 def current_session(request: Request) -> Session:
@@ -342,16 +513,25 @@ _EXEC_OPERATIONAL = {
 }
 
 
-def _raise_if_operational(res) -> None:
+def _raise_operational(request: Request, code: str, *, service: str = "worker") -> None:
+    """Set the op_error contract, then raise the coded 5xx. The access-log
+    chokepoint reads `request.state.op_error` to label the crash record with the
+    originating `service` and `code` (W2) — without it a worker outage would be
+    mislabelled an app error (the middleware sees only an HTTP status)."""
+    metrics.incr(f"exec_{code}")
+    request.state.op_error = {"service": service, "code": code}
+    status, message = _EXEC_OPERATIONAL[code]
+    raise _coded_error(status, code, message)
+
+
+def _raise_if_operational(res, request: Request) -> None:
     """Raise a coded error for an operational exec failure; no-op otherwise.
 
     Called right after `execute()` on user-facing paths so a worker timeout or
     transport failure degrades to a localized notice rather than looping repairs
     (each of which costs an LLM call) or landing as a generic red error."""
     if res is not None and not res.success and res.code in _EXEC_OPERATIONAL:
-        metrics.incr(f"exec_{res.code}")
-        status, message = _EXEC_OPERATIONAL[res.code]
-        raise _coded_error(status, res.code, message)
+        _raise_operational(request, res.code)
 
 
 _alert_lock = threading.Lock()
@@ -575,7 +755,7 @@ def _charge_operator_call(trial_ident: "TrialIdent | None") -> bool:
     return False
 
 
-def gen_slot():
+def gen_slot(request: Request):
     """Cap concurrent LLM/worker generation requests globally (SPEC14 hardening).
 
     Non-blocking: over capacity → 503 instead of piling work onto one instance.
@@ -585,6 +765,8 @@ def gen_slot():
         yield
         return
     if not _gen_semaphore.acquire(blocking=False):
+        # server_busy is an app-origin operational 5xx → label the crash record.
+        request.state.op_error = {"service": "app", "code": "server_busy"}
         raise _coded_error(
             503, "server_busy",
             "We're under heavy load — try again in a few seconds.",
@@ -1000,6 +1182,7 @@ def admin_stats(session: Session = Depends(require_admin)) -> dict:
     with _budget_lock:
         budget = {"day": _budget_state["day"], "used": _budget_state["used"], "limit": TRIAL_DAILY_BUDGET}
     return {
+        "version": VERSION,
         "counters": counts,
         "avg_chat_gen_ms": avg_ms,
         "budget_today": budget,
@@ -1062,12 +1245,12 @@ def revert_step(step_id: int, request: Request, session: Session = Depends(locke
 
 @app.post("/api/execute")
 def api_execute(
-    req: ExecuteRequest,
+    req: ExecuteRequest, request: Request,
     session: Session = Depends(current_session), _slot: None = Depends(gen_slot),
 ) -> dict:
     _gen_guard(session)
     res = execute(req.code)
-    _raise_if_operational(res)
+    _raise_if_operational(res, request)
     return {
         "success": res.success,
         "stl_base64": res.stl_base64,
@@ -1085,7 +1268,7 @@ def api_execute_manual(
     _gen_guard(session)
     _check_capacity(session)
     res = execute(req.code)
-    _raise_if_operational(res)
+    _raise_if_operational(res, request)
     step = session.store.add(
         kind="manual",
         code=req.code,
@@ -1187,7 +1370,7 @@ def _generate_and_step(
         res = execute(code)
         # A worker timeout / transport failure won't be fixed by a repair attempt
         # (and each repair costs another LLM call) — surface it as a notice now.
-        _raise_if_operational(res)
+        _raise_if_operational(res, request)
         if res.success:
             break
         if attempt < MAX_REPAIR:
@@ -1369,7 +1552,7 @@ def api_variations(
             # W1 notice exactly like /api/chat; with partial results already in hand,
             # stop the batch and return them rather than discarding good candidates.
             if not any(c["success"] for c in candidates):
-                _raise_if_operational(res)
+                _raise_if_operational(res, request)
             metrics.incr(f"exec_{res.code}")
             break
         metrics.incr("gen_ok" if res.success else "gen_exec_fail")
@@ -1416,7 +1599,7 @@ def api_commit(
     _gen_guard(session)
     _check_capacity(session)
     res = execute(req.code)
-    _raise_if_operational(res)
+    _raise_if_operational(res, request)
     step = session.store.add(
         kind="chat",
         original_prompt=req.original_prompt,
@@ -1483,7 +1666,8 @@ def export_step_source(step_id: int, session: Session = Depends(current_session)
 
 @app.get("/api/export/{step_id}/step")
 def export_step_step(
-    step_id: int, session: Session = Depends(current_session), _slot: None = Depends(gen_slot),
+    step_id: int, request: Request,
+    session: Session = Depends(current_session), _slot: None = Depends(gen_slot),
 ) -> Response:
     """Download the step as a STEP file — re-runs the stored code in the worker to
     export CAD-native geometry (no LLM; rate-limited + concurrency-capped)."""
@@ -1491,7 +1675,13 @@ def export_step_step(
     step = session.store.get(step_id)
     if step is None or not step.success or not step.code:
         raise HTTPException(404, f"No model available for step {step_id}")
-    data = export_model(step.code, "step")
+    result = export_model(step.code, "step")
+    # Symmetric with execute(): a worker outage/timeout is a coded operational 5xx
+    # (reaches the crash chokepoint as service=worker), distinct from a legit
+    # no-data result (→ a plain 502 "could not export").
+    if result.code in _EXEC_OPERATIONAL:
+        _raise_operational(request, result.code)
+    data = result.data
     if not data:
         raise HTTPException(502, "Could not export STEP for this model.")
     # Content hash so a client (e.g. the bench harness) can verify the download

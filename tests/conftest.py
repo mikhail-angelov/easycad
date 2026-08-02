@@ -11,6 +11,9 @@ from pathlib import Path
 # Must be set before app.main / app.db are imported.
 os.environ["EASYCAD_DB_PATH"] = str(Path(tempfile.mkdtemp()) / "easycad-test.db")
 os.environ.setdefault("JWT_SECRET", "test-secret")
+# Keep the SPEC21 crash sink + daily-report marker out of the repo cwd (the
+# per-request daily tick would otherwise create ./crashlog during any request).
+os.environ.setdefault("EASYCAD_CRASH_DIR", str(Path(tempfile.mkdtemp()) / "crashes"))
 
 import pytest
 

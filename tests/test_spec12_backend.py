@@ -74,11 +74,14 @@ def test_remote_executor_non_object_response_is_coded(monkeypatch, body):
     assert res.code == "worker_unavailable"
 
 
-def test_remote_export_non_object_response_returns_none(monkeypatch):
+def test_remote_export_non_object_response_is_worker_unavailable(monkeypatch):
+    # A non-object body is a malformed/broken worker → an OPERATIONAL outage
+    # (SPEC21 W2), so export is now symmetric with execute: coded, not silent None.
     backend = RemoteExecutor("http://worker:8853")
     monkeypatch.setattr(cadquery_exec.urllib.request, "urlopen",
                         lambda *a, **k: _FakeResp(b"[]"))
-    assert backend.export("code", "stl") is None
+    result = backend.export("code", "stl")
+    assert result.data is None and result.code == "worker_unavailable"
 
 
 @pytest.mark.parametrize("body", [

@@ -19,6 +19,7 @@ after. A concurrency semaphore keeps one heavy request from starving the worker.
 
 import asyncio
 import fcntl
+import logging
 import os
 import subprocess
 import sys
@@ -32,7 +33,12 @@ from pydantic import BaseModel, Field
 
 import code_guard
 import limits
+import log_context
 import zygote
+
+# Own logging explicitly (the worker configured none before): every line carries
+# the trace_id seeded from the inbound X-Trace-Id + the baked version (SPEC21 W1).
+log_context.configure_logging(os.getenv("EASYCAD_LOG_LEVEL", "INFO").upper())
 
 _CONCURRENCY = int(os.getenv("EASYCAD_WORKER_CONCURRENCY", "2"))
 _sem = asyncio.Semaphore(_CONCURRENCY)
@@ -134,6 +140,36 @@ async def _lifespan(app: FastAPI):
 
 
 app = FastAPI(title="EasyCAD CadQuery Worker", lifespan=_lifespan)
+
+
+# Health/stat probes are hit frequently (compose healthcheck, monitors) — drop
+# them from the access log to keep the signal high, like the app does for statics.
+_ACCESS_LOG_SKIP = ("/healthz", "/readyz", "/statz")
+_wlog = logging.getLogger("worker")
+
+
+@app.middleware("http")
+async def _trace_context(request: Request, call_next):
+    """Seed the log context from the app's X-Trace-Id so a worker log line
+    correlates to the app request that caused it, and emit the access line
+    IN-CONTEXT (before reset) — on the happy path `limits.run` logs nothing, so
+    this is the only worker line and it must carry the trace. Reset via token in
+    `finally` — a reused task/thread must not inherit a prior request's trace_id."""
+    token = log_context.set_context(request.headers.get("x-trace-id"))
+    t0 = time.monotonic()
+    path = request.url.path
+    try:
+        response = await call_next(request)
+        if path not in _ACCESS_LOG_SKIP:
+            dur_ms = int((time.monotonic() - t0) * 1000)
+            _wlog.info("%s %s -> %d (%dms)", request.method, path, response.status_code, dur_ms)
+        return response
+    except Exception as exc:
+        _wlog.error("%s %s -> 500 (%dms) unhandled: %s",
+                    request.method, path, int((time.monotonic() - t0) * 1000), exc)
+        raise
+    finally:
+        log_context.reset_context(token)
 
 
 @app.middleware("http")

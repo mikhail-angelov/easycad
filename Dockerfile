@@ -7,6 +7,12 @@
 #
 FROM python:3.11-slim
 
+# Build id baked into the image (SPEC21 W1) — CI passes the git tag/SHA. The
+# version IS the built image, not a property of the deploy host; a runtime
+# EASYCAD_VERSION env still overrides it.
+ARG EASYCAD_VERSION=unknown
+ENV EASYCAD_VERSION=$EASYCAD_VERSION
+
 WORKDIR /app
 
 # App-only deps (no cadquery — execution is delegated to the worker).

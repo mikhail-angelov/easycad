@@ -29,6 +29,7 @@
   .stars { color:#e8a13a; } .empty { color:var(--mut); padding:16px; }
 </style></head><body>
 <header><h1>text2part <span class="mut">· admin</span></h1>
+  <span id="version" class="mut"></span>
   <span id="status" class="mut">loading…</span></header>
 <main>
   <h2>Worker <span id="wmode" class="mut"></span></h2>
@@ -52,6 +53,7 @@ async function tick() {
         if(!r.ok) throw new Error(r.status); s = await r.json(); }
   catch(e){ el('status').textContent = 'stats error: ' + e.message; return; }
   el('status').textContent = 'updated ' + new Date().toLocaleTimeString();
+  el('version').textContent = s.version ? ('· ' + s.version) : '';
 
   const w = s.worker || {reachable:false};
   el('wmode').textContent = w.reachable ? ('· ' + (w.mode||'')) : '· unreachable';

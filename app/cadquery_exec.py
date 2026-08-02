@@ -29,6 +29,8 @@ import urllib.request
 from dataclasses import dataclass
 from pathlib import Path
 
+from . import log_context
+
 TIMEOUT_SECONDS = int(os.getenv("CADQUERY_WORKER_TIMEOUT_SECONDS", "120"))
 
 # Matches the auto-generated geometry-info block so it can be stripped/replaced.
@@ -52,6 +54,24 @@ class ExecResult:
     # (transport). Left None for ordinary CadQuery/model errors, which stay in the
     # chat as a normal failed step. The API maps this to a localized notice (W1).
     code: str | None = None
+
+
+@dataclass
+class ExportResult:
+    """Result of an on-demand export. `data` is the file bytes (None on any
+    no-data/bad-format outcome — a legit empty download). `code` carries an
+    OPERATIONAL failure (worker down/timeout), symmetric with `ExecResult.code`,
+    so an export-time worker outage reaches the app's 5xx chokepoint (W2) instead
+    of masquerading as an empty download."""
+    data: bytes | None = None
+    code: str | None = None
+
+
+def _trace_headers() -> dict:
+    """Propagate the request's trace id to the worker (W1) so a worker log line
+    correlates to the app request that caused it."""
+    tid = log_context.current().get("trace_id", "-")
+    return {"X-Trace-Id": tid} if tid and tid != "-" else {}
 
 
 def strip_geometry_block(code: str) -> str:
@@ -180,18 +200,19 @@ class LocalExecutor:
             out["stl_base64"] = base64.b64encode(stl_path.read_bytes()).decode("ascii")
             return _result_from_worker_payload(out)
 
-    def export(self, code: str, fmt: str) -> bytes | None:
-        """Run `code` and export `result` to `fmt`; return the file bytes or None."""
+    def export(self, code: str, fmt: str) -> ExportResult:
+        """Run `code` and export `result` to `fmt`; return the file bytes, or an
+        empty/coded ExportResult (symmetric with the remote backend)."""
         import tempfile
 
         if fmt not in _EXPORT_EXTS:
-            return None
+            return ExportResult()
         if os.getenv("EASYCAD_LOCAL_GUARD") == "1":
             from . import code_guard
 
             ok, _ = code_guard.check(code)
             if not ok:
-                return None
+                return ExportResult()
         with tempfile.TemporaryDirectory() as tmp:
             path = Path(tmp) / f"model.{fmt}"
             job = json.dumps({"code": code, "export_path": str(path)})
@@ -202,17 +223,17 @@ class LocalExecutor:
                     timeout=TIMEOUT_SECONDS, cwd=str(_ROOT),
                 )
             except subprocess.TimeoutExpired:
-                return None
+                return ExportResult(code="execution_timeout")
             if proc.returncode != 0:
-                return None
+                return ExportResult()
             line = proc.stdout.strip().splitlines()[-1] if proc.stdout.strip() else ""
             try:
                 out = json.loads(line)
             except json.JSONDecodeError:
-                return None
+                return ExportResult()
             if not out.get("success") or not path.exists():
-                return None
-            return path.read_bytes()
+                return ExportResult()
+            return ExportResult(data=path.read_bytes())
 
 
 class RemoteExecutor:
@@ -231,7 +252,7 @@ class RemoteExecutor:
         url = f"{self.base_url}/execute"
         body = json.dumps({"code": code}).encode("utf-8")
         req = urllib.request.Request(
-            url, data=body, headers={"Content-Type": "application/json"}, method="POST"
+            url, data=body, headers={"Content-Type": "application/json", **_trace_headers()}, method="POST"
         )
         # Allow slack over the worker's own execution timeout for the round-trip.
         timeout = TIMEOUT_SECONDS + 15
@@ -274,25 +295,34 @@ class RemoteExecutor:
             return malformed
         return _result_from_worker_payload(out)
 
-    def export(self, code: str, fmt: str) -> bytes | None:
+    def export(self, code: str, fmt: str) -> ExportResult:
         if fmt not in _EXPORT_EXTS:
-            return None
+            return ExportResult()
         url = f"{self.base_url}/export"
         body = json.dumps({"code": code, "format": fmt}).encode("utf-8")
         req = urllib.request.Request(
-            url, data=body, headers={"Content-Type": "application/json"}, method="POST"
+            url, data=body, headers={"Content-Type": "application/json", **_trace_headers()}, method="POST"
         )
+        # Symmetric with execute(): a transport/timeout failure is an OPERATIONAL
+        # outage (→ coded, raised as a 5xx by the endpoint), distinct from a legit
+        # no-data/bad-format result (→ data=None, an empty download).
         try:
             with urllib.request.urlopen(req, timeout=TIMEOUT_SECONDS + 15) as resp:
                 out = json.loads(resp.read().decode("utf-8"))
-        except (urllib.error.HTTPError, urllib.error.URLError, TimeoutError, json.JSONDecodeError):
-            return None
-        if not isinstance(out, dict) or not out.get("success") or not out.get("data_base64"):
-            return None
+        except TimeoutError:
+            return ExportResult(code="execution_timeout")
+        except (urllib.error.HTTPError, urllib.error.URLError):
+            return ExportResult(code="worker_unavailable")
+        except json.JSONDecodeError:
+            return ExportResult(code="worker_unavailable")
+        if not isinstance(out, dict):
+            return ExportResult(code="worker_unavailable")
+        if not out.get("success") or not out.get("data_base64"):
+            return ExportResult()
         try:
-            return base64.b64decode(out["data_base64"])
-        except Exception:  # noqa: BLE001
-            return None
+            return ExportResult(data=base64.b64decode(out["data_base64"]))
+        except Exception:  # noqa: BLE001 — malformed base64 is a no-data outcome, not an outage
+            return ExportResult()
 
 
 def _select_backend():
@@ -320,7 +350,8 @@ def execute(code: str) -> ExecResult:
     return _select_backend().execute(code)
 
 
-def export_model(code: str, fmt: str) -> bytes | None:
-    """Run `code` and export `result` to `fmt` ('stl'|'step'); return the file
-    bytes, or None on any failure. Used for on-demand STEP/STL downloads."""
+def export_model(code: str, fmt: str) -> ExportResult:
+    """Run `code` and export `result` to `fmt` ('stl'|'step'); return an
+    ExportResult (`data` bytes, or `code` set on an operational worker outage).
+    Used for on-demand STEP/STL downloads."""
     return _select_backend().export(code, fmt)
