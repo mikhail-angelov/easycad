@@ -17,3 +17,7 @@ article*
 bench/runs/
 review.md
 crashlog/
+
+# Playwright E2E (SPEC22)
+test-results/
+playwright-report/

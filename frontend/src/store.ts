@@ -86,6 +86,12 @@ interface State {
   busyKind: 'gen' | null // 'gen' = an LLM generation is running (staged progress)
   error: string | null
   notice: Notice | null
+  // Monotonic counter bumped once per mutating action (SPEC22 §4.1). Rendered as
+  // `data-state-rev` so an agent can wait race-free: read it before submitting,
+  // then wait until it increased AND data-state is settled. Advances at action
+  // START — not on an observed frame — so a fast turn that never paints
+  // `generating` still resolves the wait.
+  actionRev: number
   // A prompt to restore into the chat box after a retryable failure (server_busy),
   // so the user can re-send with one click. Consumed (cleared) by the input.
   retryPrompt: string | null
@@ -186,10 +192,19 @@ export const useStore = create<State>((set, get) => {
     }
   }
 
+  // Shared entry point for every mutating action the agent can trigger (SPEC22
+  // §4.1). Clears BOTH error and notice — so a stale soft `notice` (server_busy,
+  // timeout, trial) can't leave a successful next action reading `error` — and
+  // bumps the action counter for race-free waiting.
+  function beginAction() {
+    set({ error: null, notice: null, actionRev: get().actionRev + 1 })
+  }
+
   // Core chat round-trip shared by send / confirm / proceed-anyway.
   async function doChat(prompt: string, autoRefine: boolean, refinedOverride?: string) {
     const { code, provider, model, lang } = get()
-    set({ busy: true, busyKind: 'gen', error: null, notice: null })
+    beginAction()
+    set({ busy: true, busyKind: 'gen' })
     try {
       const res = await api.chat(prompt, code, provider, model || undefined, autoRefine, refinedOverride, lang)
       set({ steps: res.session.steps, currentId: res.session.current_id })
@@ -255,6 +270,7 @@ export const useStore = create<State>((set, get) => {
     busyKind: null,
     error: null,
     notice: null,
+    actionRev: 0,
     retryPrompt: null,
     accountOpen: false,
     authenticated: false,
@@ -263,7 +279,8 @@ export const useStore = create<State>((set, get) => {
     authMessage: null,
 
     async init() {
-      set({ busy: true, error: null })
+      beginAction()
+      set({ busy: true })
       try {
         const session = await api.session()
         applySession(session)
@@ -284,7 +301,8 @@ export const useStore = create<State>((set, get) => {
     },
 
     async login(email) {
-      set({ busy: true, error: null, authMessage: null })
+      beginAction()
+      set({ busy: true, authMessage: null })
       try {
         await api.login(email)
         // Store the address only; the component localizes the confirmation text.
@@ -297,7 +315,8 @@ export const useStore = create<State>((set, get) => {
     },
 
     async logout() {
-      set({ busy: true, error: null })
+      beginAction()
+      set({ busy: true })
       try {
         await api.logout()
         const me = await api.me()
@@ -321,7 +340,8 @@ export const useStore = create<State>((set, get) => {
     },
 
     async saveKey(provider, model, key) {
-      set({ busy: true, error: null })
+      beginAction()
+      set({ busy: true })
       try {
         const s = await api.saveSettings({ provider, model: model || undefined, key })
         set({
@@ -339,7 +359,8 @@ export const useStore = create<State>((set, get) => {
     },
 
     async removeKey() {
-      set({ busy: true, error: null })
+      beginAction()
+      set({ busy: true })
       try {
         // Empty key clears it server-side (has_key ⇒ false); provider/model stay.
         const s = await api.saveSettings({ key: '' })
@@ -356,7 +377,8 @@ export const useStore = create<State>((set, get) => {
     },
 
     async deleteAccount() {
-      set({ busy: true, error: null })
+      beginAction()
+      set({ busy: true })
       try {
         await api.deleteAccount()
         set({ authenticated: false, email: null, hasKey: false, authMessage: null })
@@ -432,7 +454,8 @@ export const useStore = create<State>((set, get) => {
     async sendVariations(prompt) {
       const { code, provider, model, autoRefine, lang } = get()
       track('prompt_sent', { mode: 'variations' })
-      set({ busy: true, busyKind: 'gen', error: null, notice: null, pending: null, proposal: null, invalidNotice: null, variations: null, selectedVariation: null })
+      beginAction()
+      set({ busy: true, busyKind: 'gen', pending: null, proposal: null, invalidNotice: null, variations: null, selectedVariation: null })
       try {
         const res = await api.variations(prompt, code, provider, model || undefined, autoRefine, 3, lang)
         if (res.action === 'clarify') {
@@ -481,7 +504,8 @@ export const useStore = create<State>((set, get) => {
       if (!v || i == null) return
       const c = v.candidates[i]
       if (!c.success || !c.code) return
-      set({ busy: true, error: null })
+      beginAction()
+      set({ busy: true })
       try {
         const { step, session } = await api.commit(c.code, v.originalPrompt, v.refined)
         set({
@@ -514,7 +538,8 @@ export const useStore = create<State>((set, get) => {
 
     async runManual() {
       const { code } = get()
-      set({ busy: true, error: null })
+      beginAction()
+      set({ busy: true })
       try {
         const { step, session } = await api.executeManual(code)
         set({ steps: session.steps, currentId: session.current_id })
@@ -533,7 +558,8 @@ export const useStore = create<State>((set, get) => {
     },
 
     async revert(stepId) {
-      set({ busy: true, error: null })
+      beginAction()
+      set({ busy: true })
       try {
         applySession(await api.revert(stepId))
       } catch (e) {
@@ -544,7 +570,8 @@ export const useStore = create<State>((set, get) => {
     },
 
     async reset() {
-      set({ busy: true, error: null })
+      beginAction()
+      set({ busy: true })
       try {
         applySession(await api.reset())
         set({ chatLog: [], pending: null, proposal: null, invalidNotice: null, variations: null, selectedVariation: null })
@@ -556,7 +583,8 @@ export const useStore = create<State>((set, get) => {
     },
 
     async importProject(text) {
-      set({ busy: true, error: null })
+      beginAction()
+      set({ busy: true })
       try {
         const project = JSON.parse(text)
         const session = await api.importProject(project)

@@ -17,6 +17,7 @@ export function Timeline() {
         <button
           key={s.id}
           id={`timeline-step-${s.id}`}
+          data-status={s.success ? 'ok' : 'error'}
           disabled={busy}
           class={`node ${s.id === currentId ? 'current' : ''} ${s.success ? '' : 'failed'}`}
           title={s.original_prompt ?? s.kind}

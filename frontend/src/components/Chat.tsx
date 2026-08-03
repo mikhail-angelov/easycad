@@ -323,7 +323,7 @@ export function Chat() {
             {variations.candidates.map((c, i) => (
               <button
                 key={i}
-                id={`variation-${i}`}
+                id={`variation-option-${i}`}
                 class={`variation-card ${i === selectedVariation ? 'selected' : ''} ${c.success ? '' : 'failed'}`}
                 disabled={!c.success || busy}
                 onClick={() => previewVariation(i)}
@@ -358,6 +358,7 @@ export function Chat() {
         <div class="chat-compose">
           <textarea
             ref={inputRef}
+            id="chat-prompt"
             name="chat-prompt"
             data-testid="chat-prompt"
             placeholder={t('chat.inputPlaceholder')}

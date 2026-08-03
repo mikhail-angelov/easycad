@@ -1,4 +1,5 @@
 import { useEffect, useState } from 'preact/hooks'
+import { ApiError, api, type CreatedToken, type TokenInfo } from '../api'
 import { useStore, useT } from '../store'
 import { IconUser } from './Icons'
 
@@ -29,6 +30,84 @@ export function Account() {
   // Inline validation result for the key: { ok, reason } | null.
   const [result, setResult] = useState<{ ok: boolean; reason: string | null } | null>(null)
   const [checking, setChecking] = useState(false)
+  // In-DOM delete confirmation (SPEC22 §4.3): a native browser dialog freezes
+  // automation agents, so we use an inline two-button confirm instead.
+  const [confirmDelete, setConfirmDelete] = useState(false)
+
+  // Access tokens (SPEC22 §3.1). The raw secret of a just-created token is shown
+  // once; the list otherwise carries no secrets.
+  const [tokens, setTokens] = useState<TokenInfo[]>([])
+  const [tokenName, setTokenName] = useState('')
+  const [createdToken, setCreatedToken] = useState<CreatedToken | null>(null)
+  const [copied, setCopied] = useState(false)
+  const [tokenBusy, setTokenBusy] = useState(false)
+  // Token ops don't touch the CAD automation state (they're not CAD mutations),
+  // so a failure must NOT be silently swallowed — it surfaces here as a
+  // machine-readable signal (`#account-token-error`) an orchestrating agent can
+  // observe, complementing the success signal `#account-token-value` (SPEC22 §3.1).
+  const [tokenError, setTokenError] = useState<string | null>(null)
+
+  const refreshTokens = async () => {
+    try {
+      setTokens(await api.listTokens())
+    } catch {
+      /* not signed in / transient — leave the list as-is */
+    }
+  }
+
+  // Load the token list whenever the panel opens for a signed-in user.
+  useEffect(() => {
+    if (open && authenticated) refreshTokens()
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [open, authenticated])
+
+  const createToken = async () => {
+    setTokenBusy(true)
+    setTokenError(null)
+    // Drop any prior one-time secret so a failed retry can't leave a stale
+    // `#account-token-value` next to `#account-token-error` — the "wait for one"
+    // completion contract (docs/automation.md) requires exactly one to be present.
+    setCreatedToken(null)
+    try {
+      const tok = await api.createToken(tokenName.trim() || 'token')
+      setCreatedToken(tok)
+      setCopied(false)
+      setTokenName('')
+      await refreshTokens()
+    } catch (e) {
+      // e.g. 429 at the 10-token cap or the per-user rate limit.
+      setTokenError(e instanceof ApiError ? e.message : t('account.tokenOpError'))
+    } finally {
+      setTokenBusy(false)
+    }
+  }
+
+  const copyToken = async () => {
+    if (!createdToken) return
+    try {
+      await navigator.clipboard.writeText(createdToken.token)
+      setCopied(true)
+    } catch {
+      /* clipboard blocked — the value stays visible for manual copy */
+    }
+  }
+
+  const revoke = async (id: number) => {
+    setTokenError(null)
+    setTokenBusy(true)
+    try {
+      await api.revokeToken(id)
+      // Mark inactive locally so the revoke button disappears immediately — the
+      // documented completion signal — regardless of the best-effort refresh
+      // below. An agent then never hangs waiting on a refresh that silently failed.
+      setTokens((prev) => prev.map((tok) => (tok.id === id ? { ...tok, revoked_at: Math.floor(Date.now() / 1000) } : tok)))
+      await refreshTokens()
+    } catch (e) {
+      setTokenError(e instanceof ApiError ? e.message : t('account.tokenOpError'))
+    } finally {
+      setTokenBusy(false)
+    }
+  }
 
   const providerNames = Object.keys(providers)
   const models = providers[provider]?.models ?? []
@@ -102,16 +181,99 @@ export function Account() {
               <button id="account-logout" class="text-link" disabled={busy} onClick={() => logout()}>
                 {t('account.signOut')}
               </button>
-              <button
-                class="text-link danger"
-                id="account-delete"
-                disabled={busy}
-                onClick={() => {
-                  if (confirm(t('account.deleteConfirm'))) deleteAccount()
-                }}
-              >
-                {t('account.delete')}
+              {!confirmDelete ? (
+                <button
+                  class="text-link danger"
+                  id="account-delete"
+                  disabled={busy}
+                  onClick={() => setConfirmDelete(true)}
+                >
+                  {t('account.delete')}
+                </button>
+              ) : (
+                <div class="account-confirm">
+                  <span>{t('account.deleteConfirm')}</span>
+                  <button
+                    class="text-link danger"
+                    id="account-delete-confirm"
+                    disabled={busy}
+                    onClick={() => {
+                      setConfirmDelete(false)
+                      deleteAccount()
+                    }}
+                  >
+                    {t('account.delete')}
+                  </button>
+                  <button id="account-delete-cancel" class="text-link" disabled={busy} onClick={() => setConfirmDelete(false)}>
+                    {t('chat.cancel')}
+                  </button>
+                </div>
+              )}
+            </div>
+          )}
+
+          {authenticated && (
+            <div class="account-section">
+              <div class="account-title">{t('account.tokensTitle')}</div>
+              <div class="account-note dim">{t('account.tokensHint')}</div>
+              <input
+                type="text"
+                id="account-token-name"
+                name="token-name"
+                placeholder={t('account.tokenNamePlaceholder')}
+                value={tokenName}
+                disabled={tokenBusy}
+                onInput={(e) => setTokenName((e.target as HTMLInputElement).value)}
+              />
+              <button id="account-token-create" class="primary" disabled={tokenBusy} onClick={() => createToken()}>
+                {t('account.tokenCreate')}
               </button>
+
+              {tokenError && (
+                <div id="account-token-error" class="account-warn" role="alert">
+                  {tokenError}
+                </div>
+              )}
+
+              {createdToken && (
+                <div class="account-token-new">
+                  <input
+                    id="account-token-value"
+                    name="token-value"
+                    readonly
+                    value={createdToken.token}
+                    onFocus={(e) => (e.target as HTMLInputElement).select()}
+                  />
+                  <button id="account-token-copy" class="text-link" onClick={() => copyToken()}>
+                    {copied ? t('account.tokenCopied') : t('account.tokenCopy')}
+                  </button>
+                  <div class="account-note dim">{t('account.tokenValueHint')}</div>
+                </div>
+              )}
+
+              {tokens.length > 0 && (
+                <ul class="account-token-list">
+                  {tokens.map((tok) => {
+                    const revoked = tok.revoked_at != null
+                    const expired = !revoked && tok.expires_at * 1000 < Date.now()
+                    const inactive = revoked || expired
+                    return (
+                      <li key={tok.id} class={`account-token-item ${inactive ? 'inactive' : ''}`}>
+                        <span class="account-token-label">
+                          {tok.name}
+                          {revoked && ` (${t('account.tokenRevoked')})`}
+                          {expired && ` (${t('account.tokenExpired')})`}
+                        </span>
+                        {!inactive && (
+                          <button id={`token-revoke-${tok.id}`} class="text-link danger" disabled={tokenBusy} onClick={() => revoke(tok.id)}>
+                            {t('account.tokenRevoke')}
+                          </button>
+                        )}
+                      </li>
+                    )
+                  })}
+                </ul>
+              )}
             </div>
           )}
 

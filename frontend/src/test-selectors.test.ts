@@ -27,6 +27,52 @@ test('primary workspace controls expose stable test selectors', () => {
   }
 })
 
+test('SPEC22 automation contract selectors are present', () => {
+  const app = source('./app.tsx')
+  const chat = source('./components/Chat.tsx')
+  const account = source('./components/Account.tsx')
+  const viewer = source('./components/Viewer.tsx')
+  const timeline = source('./components/Timeline.tsx')
+
+  // App state root exposes the machine-readable signals.
+  for (const attr of ['data-state', 'data-state-rev', 'data-error-code', 'data-auth-error', 'aria-busy']) {
+    assert.match(app, new RegExp(attr))
+  }
+  // Auth-error banner.
+  assert.match(app, /id="auth-error-banner"/)
+  assert.match(app, /id="auth-error-dismiss"/)
+
+  // Prompt input now has an id (not just a testid) and Send.
+  assert.match(chat, /id="chat-prompt"/)
+  assert.match(chat, /id="chat-send"/)
+
+  // Awaiting-input forks: exact ids + disambiguated variation option cards.
+  for (const id of ['proposal-use', 'proposal-cancel', 'invalid-generate', 'invalid-cancel', 'variation-commit', 'variation-cancel']) {
+    assert.match(chat, new RegExp(`id="${id}"`))
+  }
+  assert.match(chat, /id=\{`variation-option-\$\{i\}`\}/)
+  assert.match(chat, /id=\{`clarify-\$\{qi\}-\$\{oi\}`\}/)
+  // The old ambiguous option id must be gone (would also match commit/cancel).
+  assert.doesNotMatch(chat, /id=\{`variation-\$\{i\}`\}/)
+
+  // Export selectors.
+  for (const id of ['viewer-download', 'export-stl', 'export-step', 'export-source']) {
+    assert.match(viewer, new RegExp(`id="${id}"`))
+  }
+
+  // Timeline per-step status.
+  assert.match(timeline, /data-status=/)
+  assert.match(timeline, /id=\{`timeline-step-\$\{s\.id\}`\}/)
+
+  // Account token entry + revoke (no native confirm).
+  for (const id of ['account-toggle', 'account-token-name', 'account-token-create', 'account-token-value', 'account-token-copy', 'account-token-error', 'account-delete-confirm', 'account-delete-cancel']) {
+    assert.match(account, new RegExp(`id="${id}"`))
+  }
+  assert.match(account, /id=\{`token-revoke-\$\{tok\.id\}`\}/)
+  // The native confirm() dialog that freezes agents must be gone.
+  assert.doesNotMatch(account, /\bconfirm\(/)
+})
+
 test('form controls have stable names for browser automation', () => {
   const app = source('./app.tsx')
   const chat = source('./components/Chat.tsx')

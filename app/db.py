@@ -36,8 +36,17 @@ def _get() -> sqlite3.Connection:
     if _conn is None or _conn_path != path:
         if path != ":memory:":
             Path(path).parent.mkdir(parents=True, exist_ok=True)
-        _conn = sqlite3.connect(path, check_same_thread=False)
+        # isolation_level=None → autocommit mode: each statement commits on its
+        # own, and explicit BEGIN IMMEDIATE / COMMIT (create_token_if_under_limit)
+        # works without sqlite3's implicit-transaction machinery fighting it. The
+        # existing single-statement writers stay correct; their .commit() is a
+        # harmless no-op.
+        _conn = sqlite3.connect(path, check_same_thread=False, isolation_level=None)
         _conn.row_factory = sqlite3.Row
+        # ON DELETE CASCADE (tokens → users) is silently ignored unless foreign
+        # keys are enabled per-connection (SQLite default is OFF). Set it before
+        # any DDL/DML so deleting an account also drops its PAT rows (SPEC22).
+        _conn.execute("PRAGMA foreign_keys=ON")
         _conn.execute(
             """
             CREATE TABLE IF NOT EXISTS users (
@@ -75,6 +84,23 @@ def _get() -> sqlite3.Connection:
             )
             """
         )
+        # Personal Access Tokens (SPEC22): long-lived, revocable agent creds.
+        # `hash` is sha256 of the secret (raw token never stored); UNIQUE indexes
+        # the exchange lookup. ON DELETE CASCADE removes tokens with their owner.
+        _conn.execute(
+            """
+            CREATE TABLE IF NOT EXISTS tokens (
+                id         INTEGER PRIMARY KEY,
+                user_id    INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+                name       TEXT NOT NULL,
+                hash       TEXT NOT NULL UNIQUE,
+                created_at INTEGER NOT NULL,
+                expires_at INTEGER NOT NULL,
+                revoked_at INTEGER
+            )
+            """
+        )
+        _conn.execute("CREATE INDEX IF NOT EXISTS idx_tokens_user ON tokens(user_id)")
         _migrate_add_trial_used(_conn)
         _conn.commit()
         _conn_path = path
@@ -143,6 +169,97 @@ def delete_user(user_id: int) -> None:
         conn = _get()
         conn.execute("DELETE FROM users WHERE id = ?", (user_id,))
         conn.commit()
+
+
+# ── Personal Access Tokens (SPEC22) ───────────────────────────────────────────
+#
+# Long-lived, revocable agent credentials. The raw secret is shown once at
+# creation and never stored — only sha256(secret). Verification hashes the
+# presented secret and looks it up by the indexed `hash` column; the indexed
+# equality IS the constant-time-irrelevant compare (32 bytes of entropy, no
+# low-entropy prefix to leak).
+
+TOKEN_TTL_SECONDS = 30 * 24 * 3600  # 30 days
+MAX_ACTIVE_TOKENS = 10  # per user (non-revoked, non-expired)
+
+
+class TokenLimitError(Exception):
+    """Raised by create_token_if_under_limit when the caller is at the cap."""
+
+
+def create_token_if_under_limit(user_id: int, name: str, token_hash: str) -> dict:
+    """Atomically enforce the per-user active-token cap and insert.
+
+    Counting then inserting in one critical section (`_lock` + a single SQLite
+    transaction) prevents two parallel requests from racing past the cap. Raises
+    TokenLimitError when already at MAX_ACTIVE_TOKENS active tokens.
+    """
+    now = int(time.time())
+    with _lock:
+        conn = _get()
+        # BEGIN IMMEDIATE takes the write lock up front so the count-then-insert is
+        # one atomic critical section against a concurrent writer (another process
+        # or connection), not just against threads `_lock` already serializes —
+        # otherwise two racing creates could both read 9 and both insert (SPEC22 §2.3).
+        conn.execute("BEGIN IMMEDIATE")
+        try:
+            active = conn.execute(
+                "SELECT COUNT(*) AS n FROM tokens "
+                "WHERE user_id = ? AND revoked_at IS NULL AND expires_at > ?",
+                (user_id, now),
+            ).fetchone()["n"]
+            if active >= MAX_ACTIVE_TOKENS:
+                raise TokenLimitError()
+            expires_at = now + TOKEN_TTL_SECONDS
+            cur = conn.execute(
+                "INSERT INTO tokens (user_id, name, hash, created_at, expires_at) "
+                "VALUES (?, ?, ?, ?, ?)",
+                (user_id, name, token_hash, now, expires_at),
+            )
+        except BaseException:
+            conn.rollback()
+            raise
+        conn.commit()
+        return {"id": cur.lastrowid, "name": name, "created_at": now, "expires_at": expires_at}
+
+
+def list_tokens(user_id: int) -> list[dict]:
+    """The caller's tokens (no secrets), newest first."""
+    with _lock:
+        conn = _get()
+        rows = conn.execute(
+            "SELECT id, name, created_at, expires_at, revoked_at FROM tokens "
+            "WHERE user_id = ? ORDER BY id DESC",
+            (user_id,),
+        ).fetchall()
+        return [dict(r) for r in rows]
+
+
+def revoke_token(token_id: int, user_id: int) -> bool:
+    """Revoke a token the caller owns. Scoped by user_id so sequential ids can't
+    revoke another user's token (IDOR). Returns True if a row was updated."""
+    with _lock:
+        conn = _get()
+        cur = conn.execute(
+            "UPDATE tokens SET revoked_at = ? "
+            "WHERE id = ? AND user_id = ? AND revoked_at IS NULL",
+            (int(time.time()), token_id, user_id),
+        )
+        conn.commit()
+        return cur.rowcount > 0
+
+
+def get_active_token_by_hash(token_hash: str) -> dict | None:
+    """Look up an active (non-revoked, non-expired) token by its hash. Used by
+    the PAT→cookie exchange. Returns {id, user_id} or None."""
+    with _lock:
+        conn = _get()
+        row = conn.execute(
+            "SELECT id, user_id FROM tokens "
+            "WHERE hash = ? AND revoked_at IS NULL AND expires_at > ?",
+            (token_hash, int(time.time())),
+        ).fetchone()
+        return dict(row) if row else None
 
 
 # ── Free-trial counters (SPEC14) ──────────────────────────────────────────────
@@ -258,4 +375,5 @@ def _reset_for_tests() -> None:
         conn.execute("DELETE FROM users")
         conn.execute("DELETE FROM anon_trial")
         conn.execute("DELETE FROM feedback")
+        conn.execute("DELETE FROM tokens")
         conn.commit()

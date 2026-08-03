@@ -6,7 +6,8 @@
   "scripts": {
     "dev": "vite",
     "build": "tsc --noEmit && vite build",
-    "test": "node --test frontend/src/*.test.ts"
+    "test": "node --test frontend/src/*.test.ts",
+    "test:e2e": "playwright test -c e2e"
   },
   "dependencies": {
     "monaco-editor": "^0.54.0",
@@ -15,6 +16,7 @@
     "zustand": "^5.0.3"
   },
   "devDependencies": {
+    "@playwright/test": "^1.62.1",
     "@preact/preset-vite": "^2.10.1",
     "@types/three": "^0.185.1",
     "typescript": "7.0.2",

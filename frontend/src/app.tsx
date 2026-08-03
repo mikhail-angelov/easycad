@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from 'preact/hooks'
 import { lazy, Suspense } from 'preact/compat'
 import { api } from './api'
 import { useStore, useT } from './store'
+import { automationState, automationErrorCode } from './automation'
 import { Chat } from './components/Chat'
 import { Timeline } from './components/Timeline'
 import { Account } from './components/Account'
@@ -23,7 +24,7 @@ function savedCodeVisibility() {
   }
 }
 
-export function App() {
+export function App({ authError }: { authError?: string | null } = {}) {
   const init = useStore((s) => s.init)
   const reset = useStore((s) => s.reset)
   const importProject = useStore((s) => s.importProject)
@@ -31,6 +32,27 @@ export function App() {
   const t = useT()
   const fileRef = useRef<HTMLInputElement>(null)
   const [codeVisible, setCodeVisible] = useState(savedCodeVisibility)
+
+  // The full automation input (SPEC22 §4.1) — real store fields, derived into a
+  // single `data-state` by one pure function so an agent drives us deterministically.
+  const error = useStore((s) => s.error)
+  const notice = useStore((s) => s.notice)
+  const pending = useStore((s) => s.pending)
+  const proposal = useStore((s) => s.proposal)
+  const invalidNotice = useStore((s) => s.invalidNotice)
+  const variations = useStore((s) => s.variations)
+  const steps = useStore((s) => s.steps)
+  const currentId = useStore((s) => s.currentId)
+  const actionRev = useStore((s) => s.actionRev)
+
+  const input = { busy, error, notice, pending, proposal, invalidNotice, variations, steps, currentId }
+  const state = automationState(input)
+  const errorCode = automationErrorCode(input)
+
+  // A failed PAT bootstrap (§3.2) surfaces as a single neutral marker + a
+  // dismissible banner — the SPA still renders on the free trial. Never echoes
+  // the token or the cause.
+  const [showAuthBanner, setShowAuthBanner] = useState(!!authError)
 
   useEffect(() => {
     init()
@@ -57,7 +79,22 @@ export function App() {
   }
 
   return (
-    <div class="app-shell">
+    <div
+      class="app-shell"
+      data-state={state}
+      data-state-rev={actionRev}
+      {...(errorCode ? { 'data-error-code': errorCode } : {})}
+      {...(authError ? { 'data-auth-error': authError } : {})}
+      aria-busy={state === 'generating' ? 'true' : undefined}
+    >
+      {showAuthBanner && authError && (
+        <div id="auth-error-banner" class="auth-error-banner" role="alert">
+          <span>{t('auth.tokenError')}</span>
+          <button id="auth-error-dismiss" class="text-link" onClick={() => setShowAuthBanner(false)}>
+            ×
+          </button>
+        </div>
+      )}
       <header class="topbar">
         <div class="brand">
           <span class="brand-mark" />

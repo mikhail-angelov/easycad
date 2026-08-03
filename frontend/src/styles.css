@@ -208,6 +208,64 @@ body {
   font-size: 12px;
 }
 
+/* ── SPEC22: in-DOM delete confirm + access tokens ──────────── */
+.account-confirm {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 8px;
+  padding: 8px 10px;
+  background: var(--amber-bg);
+  border: 1px solid var(--amber);
+  border-radius: 6px;
+  font-size: 12px;
+}
+.account-token-new {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+.account-token-new input {
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 11px;
+}
+.account-token-list {
+  list-style: none;
+  margin: 4px 0 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+.account-token-item {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  font-size: 12px;
+}
+.account-token-item.inactive {
+  opacity: 0.5;
+}
+.account-token-label {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* Neutral auth-error banner for a failed PAT bootstrap (agent-facing marker). */
+.auth-error-banner {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 8px 16px;
+  background: var(--amber-bg);
+  border-bottom: 1px solid var(--amber);
+  color: var(--amber);
+  font-size: 13px;
+}
+
 /* ── Language toggle (topbar) ────────────────────────────── */
 .lang-toggle {
   display: inline-flex;

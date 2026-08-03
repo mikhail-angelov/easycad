@@ -107,11 +107,20 @@ export class ApiError extends Error {
   }
 }
 
-async function send<T>(method: string, url: string, body?: unknown): Promise<T> {
+export interface ReqOpts {
+  timeoutMs?: number
+}
+
+async function send<T>(method: string, url: string, body?: unknown, opts?: ReqOpts): Promise<T> {
+  // Optional hard timeout (SPEC22): the boot exchange must never stall the SPA
+  // render on a hung network. AbortSignal.timeout rejects the fetch after the
+  // window, surfacing as a thrown error the caller treats like any failure.
+  const signal = opts?.timeoutMs ? AbortSignal.timeout(opts.timeoutMs) : undefined
   const res = await fetch(url, {
     method,
     headers: body === undefined ? undefined : { 'Content-Type': 'application/json' },
     body: body === undefined ? undefined : JSON.stringify(body),
+    signal,
   })
   if (!res.ok) {
     const parsed = await res.json().catch(() => null)
@@ -129,8 +138,23 @@ async function send<T>(method: string, url: string, body?: unknown): Promise<T> 
   return res.json()
 }
 
-function post<T>(url: string, body: unknown): Promise<T> {
-  return send<T>('POST', url, body)
+function post<T>(url: string, body: unknown, opts?: ReqOpts): Promise<T> {
+  return send<T>('POST', url, body, opts)
+}
+
+export interface TokenInfo {
+  id: number
+  name: string
+  created_at: number
+  expires_at: number
+  revoked_at: number | null
+}
+
+export interface CreatedToken {
+  id: number
+  name: string
+  token: string // the raw secret — shown once, never retrievable again
+  created_at: number
 }
 
 export const api = {
@@ -199,7 +223,19 @@ export const api = {
 
   login: (email: string): Promise<{ ok: boolean }> => post('/api/auth/login', { email }),
 
-  logout: (): Promise<{ ok: boolean }> => post('/api/auth/logout', {}),
+  logout: (opts?: ReqOpts): Promise<{ ok: boolean }> => post('/api/auth/logout', {}, opts),
+
+  // ── PAT bootstrap + management (SPEC22) ──
+  // Exchange a Personal Access Token for the standard session cookie. Bounded by
+  // a hard timeout so a hung request can't stall the SPA boot.
+  authWithToken: (token: string, opts?: ReqOpts): Promise<{ ok: boolean; email: string }> =>
+    post('/api/auth/token', { token }, opts),
+
+  createToken: (name: string): Promise<CreatedToken> => post('/api/tokens', { name }),
+
+  listTokens: (): Promise<TokenInfo[]> => send('GET', '/api/tokens'),
+
+  revokeToken: (id: number): Promise<{ ok: boolean }> => send('DELETE', `/api/tokens/${id}`),
 
   deleteAccount: (): Promise<{ ok: boolean }> => send('DELETE', '/api/auth/me'),
 

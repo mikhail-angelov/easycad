@@ -9,6 +9,7 @@ Users persist CAD work themselves via project export/import.
 
 import asyncio
 import base64
+import hashlib
 import json
 import logging
 import os
@@ -69,6 +70,11 @@ COOKIE_MAX_AGE = 365 * 24 * 3600  # 1 year
 # rolling window fresh without setting a cookie on every single request).
 AUTH_REFRESH_AFTER = 24 * 3600  # 1 day
 MAGIC_TTL = 15 * 60  # 15 minutes
+# PAT→cookie exchange issues a SHORT-lived auth cookie (SPEC22 §6.1): revoking or
+# expiring a PAT then stops working within this window, because the agent's cookie
+# dies and re-bootstrapping re-checks revoked_at/expires_at. The cookie is stamped
+# `pat:true` so _maybe_refresh_auth never promotes it to the 1-year rolling window.
+PAT_COOKIE_MAX_AGE = 12 * 3600  # 12 hours
 
 # Free-trial grants on the operator's DeepSeek key (SPEC14). Lifetime, not
 # periodic. Set both to 0 to disable the trial entirely (supersedes the old
@@ -209,6 +215,24 @@ async def _body_size_limit(request: Request, call_next):
     return await call_next(request)
 
 
+def issue_auth_cookie(resp, user_id, email: str, max_age: int, pat: bool = False) -> None:
+    """Single definition of the `auth` session cookie contract (SPEC22).
+
+    Both the magic-link callback and the PAT exchange mint the SAME cookie so
+    every downstream route stays unchanged. `max_age` differs by caller
+    (COOKIE_MAX_AGE for magic-link, PAT_COOKIE_MAX_AGE for PAT); `pat=True` stamps
+    a provenance marker so _maybe_refresh_auth never promotes a 12h PAT cookie to
+    the 1-year rolling window."""
+    payload = {"user_id": user_id, "email": email}
+    if pat:
+        payload["pat"] = True
+    token = jwt_utils.sign(payload, max_age)
+    resp.set_cookie(
+        AUTH_COOKIE, token, max_age=max_age,
+        httponly=True, samesite="lax", secure=SECURE_COOKIES,
+    )
+
+
 def _maybe_refresh_auth(request: Request, response) -> None:
     """Rolling session: re-issue the auth cookie with a fresh 1-year expiry on
     activity, so a returning user is never logged out (Facebook-style). Skips
@@ -222,13 +246,22 @@ def _maybe_refresh_auth(request: Request, response) -> None:
     payload = jwt_utils.verify(token)
     if not payload or not payload.get("user_id"):
         return
+    # PAT cookies are a hard 12h cap from issuance (SPEC22 §6.1): never refresh
+    # them, else the agent's first busy minute would silently promote a revocable
+    # 12h cookie to a 1-year rolling session and destroy the revocation bound.
+    if payload.get("pat"):
+        return
+    # Time-gate first so a normal authenticated request in the refresh window does
+    # no extra DB work (current_session already resolved identity for this request).
     if time.time() - float(payload.get("iat", 0)) < AUTH_REFRESH_AFTER:
         return
-    fresh = jwt_utils.sign({"user_id": payload["user_id"], "email": payload["email"]}, COOKIE_MAX_AGE)
-    response.set_cookie(
-        AUTH_COOKIE, fresh, max_age=COOKIE_MAX_AGE,
-        httponly=True, samesite="lax", secure=SECURE_COOKIES,
-    )
+    # About to roll the cookie forward: a deleted account's cookie must NOT get a
+    # fresh 1-year expiry (SPEC22 §2.3). If the user row is gone, skip refresh and
+    # clear the stale cookie so the request settles anonymous.
+    if not db.get_user(int(payload["user_id"])):
+        response.delete_cookie(AUTH_COOKIE)
+        return
+    issue_auth_cookie(response, payload["user_id"], payload["email"], COOKIE_MAX_AGE)
 
 
 @app.middleware("http")
@@ -456,7 +489,11 @@ def current_session(request: Request) -> Session:
     session = registry.get_or_create(request.state.session_id)
     token = request.cookies.get(AUTH_COOKIE)
     payload = jwt_utils.verify(token) if token else None
-    session.user_id = int(payload["user_id"]) if payload and payload.get("user_id") else None
+    user_id = int(payload["user_id"]) if payload and payload.get("user_id") else None
+    # A still-valid cookie (magic-link OR PAT) for a deleted account must resolve
+    # as anonymous, not keep the session "signed in" until the JWT expires
+    # (SPEC22 §2.3). One existence check covers both cookie kinds.
+    session.user_id = user_id if user_id is not None and db.get_user(user_id) else None
     return session
 
 
@@ -822,6 +859,14 @@ class LoginRequest(BaseModel):
     email: str = Field(max_length=MAX_EMAIL)
 
 
+class CreateTokenRequest(BaseModel):
+    name: str = Field(max_length=MAX_NAME)
+
+
+class TokenExchangeRequest(BaseModel):
+    token: str = Field(max_length=MAX_NAME)
+
+
 class SettingsRequest(BaseModel):
     provider: str | None = Field(default=None, max_length=MAX_NAME)
     model: str | None = Field(default=None, max_length=MAX_NAME)
@@ -969,14 +1014,8 @@ def auth_callback(token: str) -> Response:
     payload = jwt_utils.verify(token)
     if not payload or payload.get("type") != "magic" or not payload.get("user_id"):
         raise HTTPException(400, "Invalid or expired sign-in link.")
-    session_token = jwt_utils.sign(
-        {"user_id": payload["user_id"], "email": payload["email"]}, COOKIE_MAX_AGE
-    )
     resp = RedirectResponse(url="/", status_code=302)
-    resp.set_cookie(
-        AUTH_COOKIE, session_token, max_age=COOKIE_MAX_AGE,
-        httponly=True, samesite="lax", secure=SECURE_COOKIES,
-    )
+    issue_auth_cookie(resp, payload["user_id"], payload["email"], COOKIE_MAX_AGE)
     return resp
 
 
@@ -1001,6 +1040,89 @@ def auth_delete(session: Session = Depends(current_session)) -> Response:
     session.settings = {}
     resp = JSONResponse({"ok": True})
     resp.delete_cookie(AUTH_COOKIE)
+    return resp
+
+
+# ── Personal Access Tokens (SPEC22) ───────────────────────────────────────────
+
+PAT_PREFIX = "pat_"
+# `pat_<base64url(32 random bytes)>` (SPEC22 §2.2). token_urlsafe(32) is 43
+# unpadded urlsafe-base64 chars, so the exact shape is prefix + 43 chars. Matching
+# it rejects obviously-wrong forms (`pat_x`, bad length/alphabet) before a DB hit.
+PAT_RE = re.compile(r"^pat_[A-Za-z0-9_-]{43}$")
+
+
+def _new_pat() -> tuple[str, str]:
+    """Return (raw_token, sha256_hash). `pat_<base64url(32 random bytes)>` — the
+    prefix is greppable/leak-scannable and lets us reject wrong shapes before a DB
+    hit; the 32 bytes are the secret. Only the hash is ever stored."""
+    raw = PAT_PREFIX + secrets.token_urlsafe(32)
+    return raw, _hash_pat(raw)
+
+
+def _hash_pat(raw: str) -> str:
+    return hashlib.sha256(raw.encode()).hexdigest()
+
+
+@app.post("/api/tokens")
+def create_token(req: CreateTokenRequest, session: Session = Depends(current_session)) -> dict:
+    if not session.user_id:
+        raise HTTPException(401, "Not signed in.")
+    # Per-user rate limit only (SPEC22 §2.3). No per-IP cap here — that would
+    # reject distinct users behind one NAT; per-IP is only for the exchange (§2.4).
+    if not limiter.allow(f"pat_create:{session.user_id}", 10, 3600):
+        raise HTTPException(429, "Too many token requests. Try again later.")
+    name = req.name.strip() or "token"
+    raw, token_hash = _new_pat()
+    try:
+        rec = db.create_token_if_under_limit(session.user_id, name, token_hash)
+    except db.TokenLimitError:
+        raise HTTPException(
+            429, f"You already have {db.MAX_ACTIVE_TOKENS} active tokens — revoke one first."
+        )
+    # The raw secret is returned exactly once and never retrievable again.
+    return {"id": rec["id"], "name": rec["name"], "token": raw, "created_at": rec["created_at"]}
+
+
+@app.get("/api/tokens")
+def get_tokens(session: Session = Depends(current_session)) -> list[dict]:
+    if not session.user_id:
+        raise HTTPException(401, "Not signed in.")
+    return db.list_tokens(session.user_id)
+
+
+@app.delete("/api/tokens/{token_id}")
+def delete_token(token_id: int, session: Session = Depends(current_session)) -> dict:
+    if not session.user_id:
+        raise HTTPException(401, "Not signed in.")
+    # revoke_token scopes by user_id, so a foreign/missing/already-revoked row is
+    # a safe no-op — an agent can't revoke another user's token by guessing ids.
+    db.revoke_token(token_id, session.user_id)
+    return {"ok": True}
+
+
+@app.post("/api/auth/token")
+def auth_token(req: TokenExchangeRequest, request: Request) -> Response:
+    """Exchange a PAT for the standard short-lived `auth` session cookie (SPEC22).
+    This is the ONLY PAT-aware auth path; every downstream route resolves identity
+    from the resulting cookie unchanged."""
+    ip = _client_ip(request)
+    if not limiter.allow(f"pat_exchange_ip:{ip}", 20, 3600):
+        raise HTTPException(429, "Too many attempts. Try again later.")
+    # Exact-shape pre-filter on the RAW value before any DB hit (SPEC22 §2.2). No
+    # strip(): the exchange is machine-to-machine (the SPA posts the stored token
+    # verbatim), so whitespace is not valid input — a padded token is rejected.
+    raw = req.token
+    if not PAT_RE.match(raw):
+        raise HTTPException(401, "Invalid token.")
+    rec = db.get_active_token_by_hash(_hash_pat(raw))
+    if not rec:
+        raise HTTPException(401, "Invalid token.")
+    user = db.get_user(rec["user_id"])
+    if not user:
+        raise HTTPException(401, "Invalid token.")
+    resp = JSONResponse({"ok": True, "email": user["email"]})
+    issue_auth_cookie(resp, user["id"], user["email"], PAT_COOKIE_MAX_AGE, pat=True)
     return resp
 
 
