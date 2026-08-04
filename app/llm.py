@@ -491,7 +491,7 @@ async def generate_code(
         messages.append({"role": "system", "content": skill_prompt})
     messages.append({"role": "user", "content": user_msg})
     result = await stream_completion(
-        messages, provider, model, temperature=temperature, max_tokens=4096,
+        messages, provider, model, temperature=temperature, max_tokens=16_384,
         api_key=api_key, operation="generate", prompt_for_log=prompt,
     )
     return strip_markdown_fences(result.content)

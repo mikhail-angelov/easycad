@@ -27,10 +27,12 @@ class _Stream:
 class _Client:
     def __init__(self, chunks):
         self.closed = False
+        self.create_kwargs = None
         self.chat = SimpleNamespace(completions=SimpleNamespace(create=self._create))
         self._chunks = chunks
 
-    async def _create(self, **_kwargs):
+    async def _create(self, **kwargs):
+        self.create_kwargs = kwargs
         return _Stream(self._chunks)
 
     async def close(self):
@@ -73,6 +75,16 @@ def test_stream_completion_collects_content_and_safe_metadata(monkeypatch, caplo
     assert "think" not in caplog.text
     assert "<redacted>" in caplog.text
     assert "sk-abcdef" not in caplog.text
+
+
+def test_generate_code_allows_16k_completion_tokens(monkeypatch):
+    client = _Client([_chunk("result = cq.Workplane('XY')"), _chunk(finish_reason="stop")])
+    monkeypatch.setattr(llm, "make_async_client", lambda *_args, **_kwargs: client)
+
+    code = asyncio.run(llm.generate_code("import cadquery as cq\n", "make a box"))
+
+    assert code == "result = cq.Workplane('XY')"
+    assert client.create_kwargs["max_tokens"] == 16_384
 
 
 def test_stream_completion_rejects_empty_content_without_retry(monkeypatch, caplog):
