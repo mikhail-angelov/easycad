@@ -10,18 +10,17 @@ import os
 import re
 import textwrap
 import time
+from dataclasses import dataclass
 
-from openai import OpenAI
+from openai import AsyncOpenAI, OpenAI
 
+from .crashlog import scrub_text
 from .skills import render as skills_render
 
 log = logging.getLogger("easycad.llm")
 
-# Hard ceiling on any single provider call. The OpenAI SDK defaults to 600s,
-# which is far longer than the edge proxy's response timeout — so a slow
-# generation used to hang until the proxy reset the (HTTP/2) connection
-# (ERR_HTTP2_PROTOCOL_ERROR in the browser) with nothing logged. Timing out
-# here turns that into a fast, logged LLMError the API can report cleanly.
+# The synchronous BYOK validation request has no client-disconnect lifecycle, so
+# it keeps a hard ceiling. Streaming generation is cancelled by its HTTP request.
 LLM_TIMEOUT = float(os.getenv("EASYCAD_LLM_TIMEOUT", "90"))
 
 # ── Providers (OpenAI-compatible) ────────────────────────────────────────────
@@ -192,13 +191,29 @@ class LLMError(Exception):
     """Raised when an LLM provider call fails or is misconfigured."""
 
 
+class LLMEmptyResponse(LLMError):
+    """The provider completed successfully but returned no usable text."""
+
+
+@dataclass(frozen=True)
+class StreamResult:
+    content: str
+    reasoning_chars: int
+    finish_reason: str | None
+    request_id: str | None
+    prompt_tokens: int | None
+    completion_tokens: int | None
+    total_tokens: int | None
+    first_chunk_ms: int | None
+
+
 def resolve_model(provider: str, model: str | None) -> str:
     if provider not in PROVIDERS:
         raise LLMError(f"Unknown provider: {provider}")
     return model or PROVIDERS[provider]["default_model"]
 
 
-def make_client(provider: str, api_key: str | None = None) -> OpenAI:
+def _provider_key(provider: str, api_key: str | None) -> tuple[dict, str]:
     if provider not in PROVIDERS:
         raise LLMError(f"Unknown provider: {provider}")
     cfg = PROVIDERS[provider]
@@ -206,7 +221,99 @@ def make_client(provider: str, api_key: str | None = None) -> OpenAI:
     key = api_key or os.getenv(cfg["api_key_env"])
     if not key:
         raise LLMError(f"No API key for provider '{provider}'. Add your key in settings.")
-    return OpenAI(base_url=cfg["base_url"], api_key=key, timeout=LLM_TIMEOUT)
+    return cfg, key
+
+
+def make_client(provider: str, api_key: str | None = None) -> OpenAI:
+    cfg, key = _provider_key(provider, api_key)
+    return OpenAI(base_url=cfg["base_url"], api_key=key, timeout=LLM_TIMEOUT, max_retries=0)
+
+
+def make_async_client(provider: str, api_key: str | None = None) -> AsyncOpenAI:
+    """Streaming generation client: no deadline and no implicit retries.
+
+    The request is instead cancelled when the client disconnects. An SDK retry
+    would outlive that request and hide the real provider attempt in the trace.
+    """
+    cfg, key = _provider_key(provider, api_key)
+    return AsyncOpenAI(base_url=cfg["base_url"], api_key=key, timeout=None, max_retries=0)
+
+
+async def stream_completion(
+    messages: list[dict],
+    provider: str,
+    model: str | None,
+    *,
+    temperature: float,
+    max_tokens: int,
+    api_key: str | None = None,
+    operation: str,
+    prompt_for_log: str,
+) -> StreamResult:
+    """Consume one OpenAI-compatible stream and retain diagnostic metadata only."""
+    client = make_async_client(provider, api_key)
+    resolved = resolve_model(provider, model)
+    log.info(
+        "llm.stream start operation=%s provider=%s model=%s prompt=%r",
+        operation, provider, resolved, scrub_text(prompt_for_log),
+    )
+    t0 = time.monotonic()
+    try:
+        stream = await client.chat.completions.create(
+            model=resolved, messages=messages, temperature=temperature,
+            max_tokens=max_tokens, stream=True,
+        )
+        content: list[str] = []
+        reasoning_chars = 0
+        finish_reason: str | None = None
+        usage = None
+        first_chunk_ms: int | None = None
+        async for chunk in stream:
+            if first_chunk_ms is None:
+                first_chunk_ms = int((time.monotonic() - t0) * 1000)
+            if getattr(chunk, "usage", None) is not None:
+                usage = chunk.usage
+            for choice in chunk.choices or []:
+                if choice.finish_reason is not None:
+                    finish_reason = choice.finish_reason
+                delta = choice.delta
+                text = getattr(delta, "content", None)
+                if text:
+                    content.append(text)
+                reasoning = getattr(delta, "reasoning_content", None)
+                if reasoning:
+                    reasoning_chars += len(reasoning)
+    except Exception as exc:  # noqa: BLE001 — normalize SDK/transport errors
+        log.warning(
+            "llm.stream fail operation=%s provider=%s model=%s dur_ms=%d err=%s",
+            operation, provider, resolved, int((time.monotonic() - t0) * 1000), exc,
+        )
+        raise LLMError(str(exc)) from exc
+    finally:
+        await client.close()
+
+    request_id = getattr(stream, "_request_id", None)
+    if request_id is None:
+        request_id = getattr(getattr(stream, "response", None), "headers", {}).get("x-request-id")
+    result = StreamResult(
+        content="".join(content), reasoning_chars=reasoning_chars,
+        finish_reason=finish_reason, request_id=request_id,
+        prompt_tokens=getattr(usage, "prompt_tokens", None),
+        completion_tokens=getattr(usage, "completion_tokens", None),
+        total_tokens=getattr(usage, "total_tokens", None), first_chunk_ms=first_chunk_ms,
+    )
+    log.info(
+        "llm.stream done operation=%s provider=%s model=%s dur_ms=%d first_chunk_ms=%s "
+        "request_id=%s finish_reason=%s prompt_tokens=%s completion_tokens=%s "
+        "total_tokens=%s content_chars=%d reasoning_chars=%d",
+        operation, provider, resolved, int((time.monotonic() - t0) * 1000),
+        result.first_chunk_ms, result.request_id, result.finish_reason,
+        result.prompt_tokens, result.completion_tokens, result.total_tokens,
+        len(result.content), result.reasoning_chars,
+    )
+    if not result.content.strip():
+        raise LLMEmptyResponse("The provider returned an empty response.")
+    return result
 
 
 def validate_key_live(provider: str, key: str) -> tuple[bool, str | None]:
@@ -289,7 +396,7 @@ def _repair_hint(error: str | None) -> str | None:
     return None
 
 
-def generate_code(
+async def generate_code(
     current_code: str,
     prompt: str,
     provider: str = DEFAULT_PROVIDER,
@@ -313,8 +420,6 @@ def generate_code(
     model only ever sees its own code + the measured error, never a reference. A
     matched error class also gets ONE targeted fix hint (`_repair_hint`, SPEC16 §6).
     """
-    client = make_client(provider, api_key)
-    resolved = resolve_model(provider, model)
     user_msg = (
         f"Current CadQuery code:\n```python\n{current_code}\n```\n\n"
         f"Modification request: {prompt}"
@@ -337,28 +442,8 @@ def generate_code(
     if skill_prompt:
         messages.append({"role": "system", "content": skill_prompt})
     messages.append({"role": "user", "content": user_msg})
-    log.info(
-        "llm.generate start provider=%s model=%s code_len=%d prompt_len=%d temp=%s skills=%s",
-        provider, resolved, len(current_code), len(prompt), temperature, skills or [],
+    result = await stream_completion(
+        messages, provider, model, temperature=temperature, max_tokens=4096,
+        api_key=api_key, operation="generate", prompt_for_log=prompt,
     )
-    _t0 = time.monotonic()
-    try:
-        response = client.chat.completions.create(
-            model=resolved,
-            messages=messages,
-            temperature=temperature,
-            max_tokens=4096,
-        )
-    except Exception as exc:  # noqa: BLE001 — normalize SDK/transport errors
-        log.warning(
-            "llm.generate FAIL provider=%s model=%s dur_ms=%d err=%s",
-            provider, resolved, int((time.monotonic() - _t0) * 1000), exc,
-        )
-        raise LLMError(str(exc)) from exc
-
-    raw = response.choices[0].message.content or ""
-    log.info(
-        "llm.generate ok provider=%s model=%s dur_ms=%d out_len=%d",
-        provider, resolved, int((time.monotonic() - _t0) * 1000), len(raw),
-    )
-    return strip_markdown_fences(raw)
+    return strip_markdown_fences(result.content)

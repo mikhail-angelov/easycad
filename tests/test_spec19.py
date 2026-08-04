@@ -18,8 +18,8 @@ BOX = "import cadquery as cq\nresult = cq.Workplane('XY').box(10, 10, 10)\n"
 
 
 def _stub_llm(monkeypatch, code: str = BOX):
-    def fake_generate(base_code, prompt, provider, model=None, temperature=0.2,
-                      api_key=None, skills=None, feedback=None):
+    async def fake_generate(base_code, prompt, provider, model=None, temperature=0.2,
+                            api_key=None, skills=None, feedback=None):
         return code
 
     monkeypatch.setattr(m, "generate_code", fake_generate)

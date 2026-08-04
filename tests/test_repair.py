@@ -59,8 +59,8 @@ def _scripted_generate(monkeypatch, scripted):
     last entry once exhausted), recording the `feedback` kwarg of every call."""
     seen = []
 
-    def fake_generate(base_code, prompt, provider, model=None, temperature=0.2,
-                      api_key=None, skills=None, feedback=None):
+    async def fake_generate(base_code, prompt, provider, model=None, temperature=0.2,
+                            api_key=None, skills=None, feedback=None):
         seen.append(feedback)
         return scripted[min(len(seen) - 1, len(scripted) - 1)]
 

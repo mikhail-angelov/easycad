@@ -45,8 +45,8 @@ def _capture_generate(monkeypatch):
     """Stub generate_code, recording the skills it was called with."""
     seen: dict = {"skills": "unset"}
 
-    def fake_generate(base_code, prompt, provider, model=None, temperature=0.2,
-                      api_key=None, skills=None, feedback=None):
+    async def fake_generate(base_code, prompt, provider, model=None, temperature=0.2,
+                            api_key=None, skills=None, feedback=None):
         seen["skills"] = skills
         return BOX
 
@@ -64,7 +64,10 @@ def test_render_and_clean_tags():
 
 def test_ready_path_passes_skills(monkeypatch):
     seen = _capture_generate(monkeypatch)
-    monkeypatch.setattr(m, "triage", lambda *a, **k: TriageResult("ready", skills=["thread"]))
+    async def ready_triage(*_args, **_kwargs):
+        return TriageResult("ready", skills=["thread"])
+
+    monkeypatch.setattr(m, "triage", ready_triage)
     client = TestClient(app)
     r = client.post("/api/chat", json={"prompt": "M12 bolt", "auto_refine": True, "current_code": BOX},
                     headers={"x-real-ip": "3.3.3.3"})
@@ -74,9 +77,12 @@ def test_ready_path_passes_skills(monkeypatch):
 
 def test_chat_passes_interface_language_to_triage(monkeypatch):
     seen: dict = {}
-    monkeypatch.setattr(m, "generate_code", lambda *a, **k: BOX)
+    async def generate_box(*_args, **_kwargs):
+        return BOX
 
-    def fake_triage(*args, **kwargs):
+    monkeypatch.setattr(m, "generate_code", generate_box)
+
+    async def fake_triage(*args, **kwargs):
         seen["response_language"] = kwargs["response_language"]
         return TriageResult("ready")
 
@@ -103,10 +109,10 @@ def test_triage_uses_interface_language_for_prompt_and_fallback_reason():
 def test_first_chat_treats_the_starter_box_as_replaceable(monkeypatch):
     seen: dict = {}
 
-    def fake_triage(*args, **kwargs):
+    async def fake_triage(*args, **kwargs):
         raise AssertionError("the first request must skip triage")
 
-    def fake_generate(*args, **kwargs):
+    async def fake_generate(*args, **kwargs):
         seen["replace_initial"] = kwargs["replace_initial"]
         return BOX
 
@@ -125,10 +131,10 @@ def test_first_chat_treats_the_starter_box_as_replaceable(monkeypatch):
 def test_confirm_refine_carries_skills_server_side(monkeypatch):
     seen = _capture_generate(monkeypatch)
     # First turn: triage asks to refine and tags the thread skill.
-    monkeypatch.setattr(
-        m, "triage",
-        lambda *a, **k: TriageResult("refine", refined_prompt="M12x80, 30mm thread", skills=["thread"]),
-    )
+    async def refine_triage(*_args, **_kwargs):
+        return TriageResult("refine", refined_prompt="M12x80, 30mm thread", skills=["thread"])
+
+    monkeypatch.setattr(m, "triage", refine_triage)
     client = TestClient(app)  # one client → cookie persists → same session
     r1 = client.post("/api/chat", json={"prompt": "bolt", "auto_refine": True, "current_code": BOX},
                      headers={"x-real-ip": "3.3.3.4"})
@@ -159,10 +165,10 @@ def test_pending_skills_bound_to_prompt(monkeypatch):
     # A pending refinement for one prompt must NOT apply to a DIFFERENT
     # auto_refine=off prompt in the same session (P2 binding).
     seen = _capture_generate(monkeypatch)
-    monkeypatch.setattr(
-        m, "triage",
-        lambda *a, **k: TriageResult("refine", refined_prompt="rp", skills=["thread"]),
-    )
+    async def refine_triage(*_args, **_kwargs):
+        return TriageResult("refine", refined_prompt="rp", skills=["thread"])
+
+    monkeypatch.setattr(m, "triage", refine_triage)
     client = TestClient(app)
     client.post("/api/chat", json={"prompt": "make a bolt", "auto_refine": True, "current_code": BOX},
                 headers={"x-real-ip": "3.3.4.1"})  # → pending bound to "make a bolt"
@@ -183,17 +189,17 @@ def test_failed_confirm_keeps_pending_skills(monkeypatch):
     # must survive so retrying the same confirmation still loads the recipe.
     from app.llm import LLMError
 
-    monkeypatch.setattr(
-        m, "triage",
-        lambda *a, **k: TriageResult("refine", refined_prompt="rp", skills=["thread"]),
-    )
+    async def refine_triage(*_args, **_kwargs):
+        return TriageResult("refine", refined_prompt="rp", skills=["thread"])
+
+    monkeypatch.setattr(m, "triage", refine_triage)
     client = TestClient(app)
     client.post("/api/chat", json={"prompt": "bolt", "auto_refine": True, "current_code": BOX},
                 headers={"x-real-ip": "3.3.5.5"})
     sid = client.cookies.get("easycad_session")
     assert m.registry.get(sid).pending_skills == ("bolt", ["thread"])
 
-    def boom(*a, **k):
+    async def boom(*a, **k):
         raise LLMError("provider down")
 
     monkeypatch.setattr(m, "generate_code", boom)
@@ -212,15 +218,15 @@ def test_failed_exec_keeps_pending_then_retry_gets_recipe(monkeypatch):
     monkeypatch.setattr(m, "TRIAL_ANON", 100)  # allow two generations in one session
     monkeypatch.setattr(m, "MAX_REPAIR", 0)    # one-shot: no in-turn repair, so the
     #                    failed turn genuinely fails (the manual-retry flow under test)
-    monkeypatch.setattr(
-        m, "triage",
-        lambda *a, **k: TriageResult("refine", refined_prompt="rp", skills=["thread"]),
-    )
+    async def refine_triage(*_args, **_kwargs):
+        return TriageResult("refine", refined_prompt="rp", skills=["thread"])
+
+    monkeypatch.setattr(m, "triage", refine_triage)
     calls = []
     BROKEN = "x = 1\n"  # executes but defines no `result` → execute() reports failure
 
-    def fake_generate(base_code, prompt, provider, model=None, temperature=0.2,
-                      api_key=None, skills=None, feedback=None):
+    async def fake_generate(base_code, prompt, provider, model=None, temperature=0.2,
+                            api_key=None, skills=None, feedback=None):
         calls.append(skills)
         return BROKEN if len(calls) == 1 else BOX
 
@@ -253,10 +259,10 @@ def test_failed_exec_keeps_pending_then_retry_gets_recipe(monkeypatch):
 def test_budget_exhausted_confirm_keeps_pending(monkeypatch):
     # Budget exhaustion raises before generation; the pending refinement must
     # survive so a retry (once budget frees up) still gets the recipe.
-    monkeypatch.setattr(
-        m, "triage",
-        lambda *a, **k: TriageResult("refine", refined_prompt="rp", skills=["thread"]),
-    )
+    async def refine_triage(*_args, **_kwargs):
+        return TriageResult("refine", refined_prompt="rp", skills=["thread"])
+
+    monkeypatch.setattr(m, "triage", refine_triage)
     client = TestClient(app)
     client.post("/api/chat", json={"prompt": "bolt", "auto_refine": True, "current_code": BOX},
                 headers={"x-real-ip": "3.3.7.7"})
@@ -319,13 +325,16 @@ def test_recipe_embeds_the_executed_example_and_stays_mathless():
 def test_variations_passes_skills(monkeypatch):
     seen = {"skills": "unset"}
 
-    def fake_generate(base_code, prompt, provider, model=None, temperature=0.2,
-                      api_key=None, skills=None, feedback=None):
+    async def fake_generate(base_code, prompt, provider, model=None, temperature=0.2,
+                            api_key=None, skills=None, feedback=None):
         seen["skills"] = skills
         return BOX
 
     monkeypatch.setattr(m, "generate_code", fake_generate)
-    monkeypatch.setattr(m, "triage", lambda *a, **k: TriageResult("ready", skills=["thread"]))
+    async def ready_triage(*_args, **_kwargs):
+        return TriageResult("ready", skills=["thread"])
+
+    monkeypatch.setattr(m, "triage", ready_triage)
     client = TestClient(app)
     r = client.post("/api/variations", json={
         "prompt": "M12 bolt", "auto_refine": True, "count": 1, "current_code": BOX,
@@ -335,10 +344,10 @@ def test_variations_passes_skills(monkeypatch):
 
 
 def test_refine_endpoint_returns_skills(monkeypatch):
-    monkeypatch.setattr(
-        m, "triage",
-        lambda *a, **k: TriageResult("refine", refined_prompt="M12x80", skills=["thread"]),
-    )
+    async def refine_triage(*_args, **_kwargs):
+        return TriageResult("refine", refined_prompt="M12x80", skills=["thread"])
+
+    monkeypatch.setattr(m, "triage", refine_triage)
     client = TestClient(app)
     r = client.post("/api/refine", json={"prompt": "bolt", "current_code": BOX},
                     headers={"x-real-ip": "3.3.3.7"})
@@ -356,8 +365,8 @@ def test_client_cannot_forge_skills(monkeypatch):
     # server-side, the request field is inert.
     seen = {"skills": "unset"}
 
-    def fake_generate(base_code, prompt, provider, model=None, temperature=0.2,
-                      api_key=None, skills=None, feedback=None):
+    async def fake_generate(base_code, prompt, provider, model=None, temperature=0.2,
+                            api_key=None, skills=None, feedback=None):
         seen["skills"] = skills
         return BOX
 

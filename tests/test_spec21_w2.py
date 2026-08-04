@@ -23,6 +23,10 @@ from app.main import app
 BOX = "import cadquery as cq\nresult = cq.Workplane('XY').box(10, 10, 10)\n"
 
 
+async def _generate_box(*_args, **_kwargs):
+    return BOX
+
+
 @pytest.fixture(autouse=True)
 def _crash_tmp(monkeypatch, tmp_path):
     monkeypatch.setenv("EASYCAD_CRASH_DIR", str(tmp_path))
@@ -72,7 +76,7 @@ def test_unhandled_exception_recorded_exactly_once(tmp_path):
 
 
 def test_worker_failure_labelled_service_worker(monkeypatch, tmp_path):
-    monkeypatch.setattr(m, "generate_code", lambda *a, **k: BOX)
+    monkeypatch.setattr(m, "generate_code", _generate_box)
     monkeypatch.setattr(m, "execute",
                         lambda code: ExecResult(False, error="down", code="worker_unavailable"))
     r = TestClient(app).post("/api/chat", json={"prompt": "x", "auto_refine": False, "current_code": BOX},
@@ -102,7 +106,7 @@ def test_export_outage_reaches_chokepoint(monkeypatch, tmp_path):
 def test_http_200_failed_generation_not_recorded(monkeypatch, tmp_path):
     # A CadQuery that runs but errors (no operational code) is a product-flow 200,
     # NOT a crash — it must leave no crash line.
-    monkeypatch.setattr(m, "generate_code", lambda *a, **k: BOX)
+    monkeypatch.setattr(m, "generate_code", _generate_box)
     monkeypatch.setattr(m, "execute", lambda code: ExecResult(False, error="NameError: cq"))
     monkeypatch.setattr(m, "MAX_REPAIR", 0)
     r = TestClient(app).post("/api/chat", json={"prompt": "x", "auto_refine": False, "current_code": BOX},

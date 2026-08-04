@@ -37,6 +37,7 @@ from .version import VERSION
 from .llm import (
     DEFAULT_PROVIDER,
     INITIAL_CODE,
+    LLMEmptyResponse,
     LLMError,
     PROVIDERS,
     TRIAL_MODEL,
@@ -537,6 +538,37 @@ def _provider_error(context: str, exc: Exception) -> HTTPException:
     metrics.incr("provider_errors")
     log.warning("provider_error %s: %s", context, exc)
     return _coded_error(502, "provider_error", f"{context}: {exc}")
+
+
+def _empty_response_error() -> HTTPException:
+    return _coded_error(
+        422, "empty_response",
+        "The model could not produce an answer. Please rephrase your request.",
+    )
+
+
+async def _await_llm(request: Request, operation: str, value):
+    """Await one streaming LLM call, cancelling its HTTP connection on disconnect."""
+    llm_task = asyncio.create_task(value)
+    while not llm_task.done():
+        await asyncio.wait({llm_task}, timeout=0.1)
+        if llm_task.done():
+            break
+        if await request.is_disconnected():
+            llm_task.cancel()
+            await asyncio.gather(llm_task, return_exceptions=True)
+            metrics.incr("llm_disconnect_cancelled")
+            log.info("llm.disconnect_cancelled operation=%s", operation)
+            raise HTTPException(status_code=499, detail={"code": "client_disconnected", "message": "Client disconnected."})
+    return await llm_task
+
+
+async def _execute_if_connected(request: Request, code: str):
+    """Avoid dispatching CadQuery after the user/proxy has already disconnected."""
+    if await request.is_disconnected():
+        metrics.incr("worker_skipped_disconnect")
+        raise HTTPException(status_code=499, detail={"code": "client_disconnected", "message": "Client disconnected."})
+    return await asyncio.to_thread(execute, code)
 
 
 # Operational execution failures (worker timeout / transport) surfaced as coded,
@@ -1404,7 +1436,7 @@ def api_execute_manual(
 
 
 @app.post("/api/refine")
-def api_refine(
+async def api_refine(
     req: RefineRequest, request: Request,
     session: Session = Depends(current_session), _slot: None = Depends(gen_slot),
 ) -> dict:
@@ -1419,8 +1451,13 @@ def api_refine(
         raise _budget_exhausted_error()
     try:
         base_code = _base_code(session.store, req.current_code)
-        t = triage(req.prompt, _with_geometry(session.store, base_code), provider, model, api_key,
-                   response_language=req.response_language)
+        t = await _await_llm(
+            request, "triage",
+            triage(req.prompt, _with_geometry(session.store, base_code), provider, model, api_key,
+                   response_language=req.response_language),
+        )
+    except LLMEmptyResponse as exc:
+        raise _empty_response_error() from exc
     except LLMError as exc:
         raise _provider_error("Triage error", exc) from exc
     # `/api/refine` is STATELESS: it does not touch session.pending_skills.
@@ -1439,7 +1476,7 @@ def api_refine(
     }
 
 
-def _generate_and_step(
+async def _generate_and_step(
     session: Session,
     request: Request,
     base_code: str,
@@ -1478,8 +1515,14 @@ def _generate_and_step(
             break
         metrics.incr("gen_attempts")
         try:
-            code = generate_code(_with_geometry(session.store, base_code), gen_prompt, provider, model,
-                                 feedback=feedback, **generate_kwargs)
+            code = await _await_llm(
+                request, "generate",
+                generate_code(_with_geometry(session.store, base_code), gen_prompt, provider, model,
+                              feedback=feedback, **generate_kwargs),
+            )
+        except LLMEmptyResponse as exc:
+            metrics.incr("llm_empty_response")
+            raise _empty_response_error() from exc
         except LLMError as exc:
             if attempt == 0:
                 raise _provider_error("LLM error", exc) from exc
@@ -1489,7 +1532,7 @@ def _generate_and_step(
         if trial_ident is not None and not charged_trial:
             _charge_trial(trial_ident)
             charged_trial = True
-        res = execute(code)
+        res = await _execute_if_connected(request, code)
         # A worker timeout / transport failure won't be fixed by a repair attempt
         # (and each repair costs another LLM call) — surface it as a notice now.
         _raise_if_operational(res, request)
@@ -1553,7 +1596,7 @@ def _no_step(session: Session, request: Request, action: str, original_prompt: s
 
 
 @app.post("/api/chat")
-def api_chat(
+async def api_chat(
     req: ChatRequest, request: Request,
     session: Session = Depends(locked_session), _slot: None = Depends(gen_slot),
 ) -> dict:
@@ -1566,7 +1609,7 @@ def api_chat(
     # The starter box is a disposable visual placeholder. The first user request
     # always defines the actual model, so bypass triage and replace it directly.
     if _is_initial_model(session.store, base_code):
-        return _generate_and_step(
+        return await _generate_and_step(
             session, request, base_code, req.prompt, req.prompt, None,
             provider, model, api_key, trial_ident,
         )
@@ -1585,7 +1628,7 @@ def api_chat(
         )
         skills = session.pending_skills[1] if matched else None
         gen_prompt = req.refined_prompt or req.prompt
-        return _generate_and_step(
+        return await _generate_and_step(
             session, request, base_code, gen_prompt, req.prompt, req.refined_prompt,
             provider, model, api_key, trial_ident, skills=skills, consume_pending=matched,
         )
@@ -1594,8 +1637,13 @@ def api_chat(
     if not _charge_operator_call(trial_ident):
         raise _budget_exhausted_error()
     try:
-        t = triage(req.prompt, _with_geometry(session.store, base_code), provider, model, api_key,
-                   response_language=req.response_language)
+        t = await _await_llm(
+            request, "triage",
+            triage(req.prompt, _with_geometry(session.store, base_code), provider, model, api_key,
+                   response_language=req.response_language),
+        )
+    except LLMEmptyResponse as exc:
+        raise _empty_response_error() from exc
     except LLMError as exc:
         raise _provider_error("Triage error", exc) from exc
 
@@ -1610,14 +1658,14 @@ def api_chat(
         return _no_step(session, request, "confirm_refine", req.prompt,
                         refined_prompt=t.refined_prompt)
 
-    return _generate_and_step(
+    return await _generate_and_step(
         session, request, base_code, req.prompt, req.prompt, None,
         provider, model, api_key, trial_ident, skills=t.skills,
     )
 
 
 @app.post("/api/variations")
-def api_variations(
+async def api_variations(
     req: VariationsRequest, request: Request,
     session: Session = Depends(current_session), _slot: None = Depends(gen_slot),
 ) -> dict:
@@ -1633,8 +1681,13 @@ def api_variations(
         if not _charge_operator_call(trial_ident):  # triage is an operator call
             raise _budget_exhausted_error()
         try:
-            t = triage(req.prompt, _with_geometry(session.store, base_code), provider, model, api_key,
-                       response_language=req.response_language)
+            t = await _await_llm(
+                request, "triage",
+                triage(req.prompt, _with_geometry(session.store, base_code), provider, model, api_key,
+                       response_language=req.response_language),
+            )
+        except LLMEmptyResponse as exc:
+            raise _empty_response_error() from exc
         except LLMError as exc:
             raise _provider_error("Triage error", exc) from exc
         skills = t.skills
@@ -1660,14 +1713,21 @@ def api_variations(
             generate_kwargs = {"temperature": 0.7, "api_key": api_key, "skills": skills}
             if _is_initial_model(session.store, base_code):
                 generate_kwargs["replace_initial"] = True
-            code = generate_code(_with_geometry(session.store, base_code), gen_prompt, provider, model, **generate_kwargs)
+            code = await _await_llm(
+                request, "generate",
+                generate_code(_with_geometry(session.store, base_code), gen_prompt, provider, model,
+                              **generate_kwargs),
+            )
+        except LLMEmptyResponse as exc:
+            metrics.incr("llm_empty_response")
+            raise _empty_response_error() from exc
         except LLMError as exc:
             metrics.incr("provider_errors")  # so variations feed the failure rate
             candidates.append(
                 {"code": None, "stl_base64": None, "geometry_info": None, "success": False, "error": str(exc)}
             )
             continue
-        res = execute(code)
+        res = await _execute_if_connected(request, code)
         if not res.success and res.code in _EXEC_OPERATIONAL:
             # An operational failure (worker timeout/outage) hits the whole batch,
             # not just this candidate. With nothing usable yet, surface the localized

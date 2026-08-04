@@ -151,7 +151,10 @@ def test_admin_stats_counts_failed_generation(monkeypatch):
     # The template reads `gen_exec_fail` (the counterpart of gen_ok); the old
     # `gen_fail` key was never emitted.
     monkeypatch.setattr(main, "ADMIN_EMAIL", "admin@example.com")
-    monkeypatch.setattr(main, "generate_code", lambda *a, **k: "result = None\n")
+    async def generate_none(*_args, **_kwargs):
+        return "result = None\n"
+
+    monkeypatch.setattr(main, "generate_code", generate_none)
     monkeypatch.setattr(main, "execute", lambda code: ExecResult(False, error="NameError"))
     monkeypatch.setattr(main, "MAX_REPAIR", 0)
     main.metrics._reset_for_tests()

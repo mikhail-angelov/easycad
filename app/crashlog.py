@@ -58,7 +58,8 @@ def _utc_date() -> str:
     return time.strftime("%Y-%m-%d", time.gmtime())
 
 
-def _scrub(s: str) -> str:
+def scrub_text(s: str) -> str:
+    """Remove credential-shaped values before writing diagnostic text to disk."""
     for p in _SCRUB:
         s = p.sub("<redacted>", s)
     return s
@@ -79,9 +80,9 @@ def record(event: dict) -> None:
     try:
         ev = dict(event)
         if ev.get("exc_message"):
-            ev["exc_message"] = _scrub(str(ev["exc_message"]))[:MAX_MSG]
+            ev["exc_message"] = scrub_text(str(ev["exc_message"]))[:MAX_MSG]
         if ev.get("traceback_tail"):
-            ev["traceback_tail"] = _scrub(str(ev["traceback_tail"]))[:MAX_TB]
+            ev["traceback_tail"] = scrub_text(str(ev["traceback_tail"]))[:MAX_TB]
         line = (json.dumps(ev, ensure_ascii=False, separators=(",", ":")) + "\n").encode("utf-8")
         d = crash_dir()
         d.mkdir(parents=True, exist_ok=True)

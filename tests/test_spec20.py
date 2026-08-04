@@ -28,7 +28,7 @@ def test_store_writes_and_legacy_imports_are_always_base_code():
 def test_geometry_is_reattached_only_for_llm_calls(monkeypatch):
     seen: dict[str, str] = {}
 
-    def fake_generate(base_code, *args, **kwargs):
+    async def fake_generate(base_code, *args, **kwargs):
         seen["generate"] = base_code
         return BOX
 
@@ -49,7 +49,7 @@ def test_geometry_is_reattached_only_for_llm_calls(monkeypatch):
 def test_first_variation_replaces_initial_and_returns_base_code(monkeypatch):
     seen: dict[str, object] = {}
 
-    def fake_generate(base_code, *args, **kwargs):
+    async def fake_generate(base_code, *args, **kwargs):
         seen["code"] = base_code
         seen["replace_initial"] = kwargs.get("replace_initial")
         return append_geometry_block(BOX, INFO)
@@ -75,7 +75,7 @@ def test_first_variation_replaces_initial_and_returns_base_code(monkeypatch):
 def test_refine_is_null_safe_and_receives_geometry_when_available(monkeypatch):
     seen: dict[str, str] = {}
 
-    def fake_triage(prompt, code, *args, **kwargs):
+    async def fake_triage(prompt, code, *args, **kwargs):
         seen["code"] = code
         return TriageResult("ready")
 

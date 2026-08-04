@@ -21,7 +21,7 @@ import re
 import textwrap
 from dataclasses import dataclass
 
-from .llm import DEFAULT_PROVIDER, LLMError, make_client, resolve_model
+from .llm import DEFAULT_PROVIDER, LLMError, stream_completion
 from .skills import SKILL_MENU, clean_tags
 
 VERDICTS = {"ready", "refine", "clarify", "invalid"}
@@ -153,7 +153,7 @@ def _parse(raw: str, response_language: str = "en") -> TriageResult:
     return TriageResult(verdict, refined, questions, reason, skills)
 
 
-def triage(
+async def triage(
     prompt: str,
     current_code: str,
     provider: str = DEFAULT_PROVIDER,
@@ -162,23 +162,16 @@ def triage(
     response_language: str = "en",
 ) -> TriageResult:
     """Classify a user request against the current model (one LLM call)."""
-    client = make_client(provider, api_key)
-    resolved = resolve_model(provider, model)
     user_msg = (
         f"Current CadQuery code (with geometry info):\n```python\n{current_code}\n```\n\n"
         f"User request: {prompt}"
     )
-    try:
-        response = client.chat.completions.create(
-            model=resolved,
-            messages=[
-                {"role": "system", "content": _triage_system_prompt(response_language)},
-                {"role": "user", "content": user_msg},
-            ],
-            temperature=0.1,
-            max_tokens=1024,
-        )
-    except Exception as exc:  # noqa: BLE001
-        raise LLMError(str(exc)) from exc
-
-    return _parse(response.choices[0].message.content or "", response_language)
+    result = await stream_completion(
+        [
+            {"role": "system", "content": _triage_system_prompt(response_language)},
+            {"role": "user", "content": user_msg},
+        ],
+        provider, model, temperature=0.1, max_tokens=1024, api_key=api_key,
+        operation="triage", prompt_for_log=prompt,
+    )
+    return _parse(result.content, response_language)

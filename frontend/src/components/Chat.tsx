@@ -52,22 +52,25 @@ export function Chat() {
   // → execute inside one request, advance a plausible label by elapsed time so a
   // long wait doesn't read as frozen. Non-generation waits keep a generic label.
   const [genStage, setGenStage] = useState(0)
+  const [genElapsedSeconds, setGenElapsedSeconds] = useState(0)
   useEffect(() => {
     if (!busy || busyKind !== 'gen') {
       setGenStage(0)
+      setGenElapsedSeconds(0)
       return
     }
     const start = Date.now()
     const id = setInterval(() => {
       const elapsed = (Date.now() - start) / 1000
       setGenStage(elapsed < 2.5 ? 0 : elapsed < 8 ? 1 : 2)
+      setGenElapsedSeconds(Math.floor(elapsed))
     }, 400)
     return () => clearInterval(id)
   }, [busy, busyKind])
 
   const overlayLabel =
     busyKind === 'gen'
-      ? [t('chat.stageThinking'), t('chat.stageGenerating'), t('chat.stageBuilding')][genStage]
+      ? `${[t('chat.stageThinking'), t('chat.stageGenerating'), t('chat.stageBuilding')][genStage]} · ${genElapsedSeconds} s`
       : t('chat.working')
 
   const models = providers[provider]?.models ?? []

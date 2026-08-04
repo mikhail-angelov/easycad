@@ -20,7 +20,7 @@ def _stub_llm(monkeypatch, code: str = BOX):
     """Replace the LLM generator with a deterministic stub; count invocations."""
     calls = {"n": 0}
 
-    def fake_generate(base_code, prompt, provider, model=None, temperature=0.2, api_key=None, skills=None, feedback=None):
+    async def fake_generate(base_code, prompt, provider, model=None, temperature=0.2, api_key=None, skills=None, feedback=None):
         calls["n"] += 1
         return code
 
@@ -94,7 +94,7 @@ def test_anon_trial_keyed_by_ip(monkeypatch):
 
 
 def test_failed_provider_call_does_not_burn_trial(monkeypatch):
-    def boom(*a, **k):
+    async def boom(*a, **k):
         raise m.LLMError("provider down")
 
     monkeypatch.setattr(m, "generate_code", boom)
@@ -209,7 +209,10 @@ def test_exhaustion_message_mentions_the_limit(monkeypatch):
 
 
 def test_refine_is_rate_limited(monkeypatch):
-    monkeypatch.setattr(m, "triage", lambda *a, **k: __import__("app.refiner", fromlist=["TriageResult"]).TriageResult("ready"))
+    async def ready_triage(*_args, **_kwargs):
+        return __import__("app.refiner", fromlist=["TriageResult"]).TriageResult("ready")
+
+    monkeypatch.setattr(m, "triage", ready_triage)
     monkeypatch.setenv("EASYCAD_GEN_RATE_LIMIT", "3")
     client = TestClient(app)
     codes = [
@@ -224,9 +227,10 @@ def test_refine_is_rate_limited(monkeypatch):
 
 def test_variations_echoes_trial_remaining(monkeypatch):
     _stub_llm(monkeypatch)
-    monkeypatch.setattr(
-        m, "triage", lambda *a, **k: __import__("app.refiner", fromlist=["TriageResult"]).TriageResult("ready")
-    )
+    async def ready_triage(*_args, **_kwargs):
+        return __import__("app.refiner", fromlist=["TriageResult"]).TriageResult("ready")
+
+    monkeypatch.setattr(m, "triage", ready_triage)
     client = TestClient(app)
     r = client.post(
         "/api/variations",
@@ -291,7 +295,10 @@ def test_refine_reserves_daily_budget(monkeypatch):
     # daily budget, not slip through uncounted.
     from app.refiner import TriageResult
 
-    monkeypatch.setattr(m, "triage", lambda *a, **k: TriageResult("ready"))
+    async def ready_triage(*_args, **_kwargs):
+        return TriageResult("ready")
+
+    monkeypatch.setattr(m, "triage", ready_triage)
     monkeypatch.setattr(m, "TRIAL_DAILY_BUDGET", 1)
     m._budget_state.update(day="", used=0)
     client = TestClient(app)
@@ -319,7 +326,7 @@ def test_execute_manual_respects_concurrency_cap(monkeypatch):
 def test_variations_failures_feed_metrics(monkeypatch):
     from app import metrics
 
-    def boom(*a, **k):
+    async def boom(*a, **k):
         raise m.LLMError("down")
 
     monkeypatch.setattr(m, "generate_code", boom)
@@ -359,7 +366,10 @@ def test_variations_budget_out_after_triage_returns_notice(monkeypatch):
     from app.refiner import TriageResult
 
     _stub_llm(monkeypatch)
-    monkeypatch.setattr(m, "triage", lambda *a, **k: TriageResult("ready"))
+    async def ready_triage(*_args, **_kwargs):
+        return TriageResult("ready")
+
+    monkeypatch.setattr(m, "triage", ready_triage)
     monkeypatch.setattr(m, "TRIAL_DAILY_BUDGET", 1)
     m._budget_state.update(day="", used=0)
     client = TestClient(app)
