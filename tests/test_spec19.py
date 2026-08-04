@@ -33,6 +33,14 @@ def _chat(client: TestClient, prompt="add a hole", ip="9.9.9.9"):
     )
 
 
+def _variations(client: TestClient, ip="9.9.9.9"):
+    return client.post(
+        "/api/variations",
+        json={"prompt": "add a hole", "auto_refine": False, "current_code": BOX, "count": 1},
+        headers={"x-real-ip": ip},
+    )
+
+
 # ── Operational exec failures → coded notice, not a chat error ─────────────────
 
 def test_chat_worker_timeout_returns_execution_timeout(monkeypatch):
@@ -55,6 +63,19 @@ def test_chat_worker_transport_returns_worker_unavailable(monkeypatch):
     r = _chat(TestClient(app), ip="60.0.0.2")
     assert r.status_code == 503
     assert r.json()["detail"]["code"] == "worker_unavailable"
+
+
+def test_variations_worker_font_error_is_operational(monkeypatch):
+    _stub_llm(monkeypatch)
+    monkeypatch.setattr(
+        m, "execute",
+        lambda code: ExecResult(False, error="AttributeError: 'NoneType' object has no attribute 'FontName'"),
+    )
+
+    r = _variations(TestClient(app), ip="60.0.0.20")
+
+    assert r.status_code == 503
+    assert r.json()["detail"]["code"] == "worker_font_unavailable"
 
 
 def test_ordinary_model_error_stays_a_chat_step(monkeypatch):

@@ -536,8 +536,9 @@ def _coded_error(status: int, code: str, message: str) -> HTTPException:
 
 def _provider_error(context: str, exc: Exception) -> HTTPException:
     metrics.incr("provider_errors")
-    log.warning("provider_error %s: %s", context, exc)
-    return _coded_error(502, "provider_error", f"{context}: {exc}")
+    detail = crashlog.scrub_text(str(exc))
+    log.warning("provider_error %s: %s", context, detail)
+    return _coded_error(502, "provider_error", f"{context}: {detail}")
 
 
 def _empty_response_error() -> HTTPException:
@@ -579,6 +580,9 @@ _EXEC_OPERATIONAL = {
     "worker_unavailable": (
         503, "The modelling service is briefly unavailable — try again in a moment."
     ),
+    "worker_font_unavailable": (
+        503, "The modelling service cannot create text right now — try again in a moment."
+    ),
 }
 
 
@@ -593,14 +597,24 @@ def _raise_operational(request: Request, code: str, *, service: str = "worker") 
     raise _coded_error(status, code, message)
 
 
+def _operational_exec_code(res) -> str | None:
+    """Return a user-facing operational code for an execution result, if any."""
+    if res is None or res.success:
+        return None
+    if "fontname" in (res.error or "").lower():
+        return "worker_font_unavailable"
+    return res.code if res.code in _EXEC_OPERATIONAL else None
+
+
 def _raise_if_operational(res, request: Request) -> None:
     """Raise a coded error for an operational exec failure; no-op otherwise.
 
     Called right after `execute()` on user-facing paths so a worker timeout or
     transport failure degrades to a localized notice rather than looping repairs
     (each of which costs an LLM call) or landing as a generic red error."""
-    if res is not None and not res.success and res.code in _EXEC_OPERATIONAL:
-        _raise_operational(request, res.code)
+    code = _operational_exec_code(res)
+    if code:
+        _raise_operational(request, code)
 
 
 _alert_lock = threading.Lock()
@@ -1728,14 +1742,15 @@ async def api_variations(
             )
             continue
         res = await _execute_if_connected(request, code)
-        if not res.success and res.code in _EXEC_OPERATIONAL:
+        operational_code = _operational_exec_code(res)
+        if operational_code:
             # An operational failure (worker timeout/outage) hits the whole batch,
             # not just this candidate. With nothing usable yet, surface the localized
             # W1 notice exactly like /api/chat; with partial results already in hand,
             # stop the batch and return them rather than discarding good candidates.
             if not any(c["success"] for c in candidates):
                 _raise_if_operational(res, request)
-            metrics.incr(f"exec_{res.code}")
+            metrics.incr(f"exec_{operational_code}")
             break
         metrics.incr("gen_ok" if res.success else "gen_exec_fail")
         candidates.append({

@@ -17,6 +17,7 @@ ENV EASYCAD_VERSION=$EASYCAD_VERSION
 # Runtime libs OCP/CadQuery links against (headless). Adjust if a future
 # CadQuery/OCP build pulls in more.
 RUN apt-get update && apt-get install -y --no-install-recommends \
+        fontconfig fonts-dejavu-core \
         libgl1 libglu1-mesa libxext6 libxrender1 libsm6 \
     && rm -rf /var/lib/apt/lists/*
 

@@ -67,11 +67,15 @@ def test_stream_completion_collects_content_and_safe_metadata(monkeypatch, caplo
     assert result.reasoning_chars == 5
     assert result.total_tokens == 5
     assert client.closed is True
+    assert "llm.stream event" in caplog.text
+    assert "content_preview='result = '" in caplog.text
+    assert "reasoning_chars=5" in caplog.text
+    assert "think" not in caplog.text
     assert "<redacted>" in caplog.text
     assert "sk-abcdef" not in caplog.text
 
 
-def test_stream_completion_rejects_empty_content_without_retry(monkeypatch):
+def test_stream_completion_rejects_empty_content_without_retry(monkeypatch, caplog):
     client = _Client([_chunk(finish_reason="insufficient_system_resource")])
     monkeypatch.setattr(llm, "make_async_client", lambda *_args, **_kwargs: client)
 
@@ -81,6 +85,72 @@ def test_stream_completion_rejects_empty_content_without_retry(monkeypatch):
             temperature=0, max_tokens=8, operation="generate", prompt_for_log="x",
         ))
     assert client.closed is True
+    assert "content_chars=0" in caplog.text
+    assert "finish_reasons=['insufficient_system_resource']" in caplog.text
+
+
+def test_stream_logs_reasoning_only_response_without_exposing_reasoning(monkeypatch, caplog):
+    client = _Client([_chunk(reasoning="private reasoning"), _chunk(finish_reason="length")])
+    monkeypatch.setattr(llm, "make_async_client", lambda *_args, **_kwargs: client)
+
+    with pytest.raises(llm.LLMEmptyResponse):
+        asyncio.run(llm.stream_completion(
+            [{"role": "user", "content": "x"}], "deepseek", None,
+            temperature=0, max_tokens=8, operation="generate", prompt_for_log="x",
+        ))
+
+    assert "content_chars=0" in caplog.text
+    assert "reasoning_chars=17" in caplog.text
+    assert "finish_reasons=['length']" in caplog.text
+    assert "private reasoning" not in caplog.text
+
+
+def test_stream_logs_scrub_prompt_content_and_provider_errors(monkeypatch, caplog):
+    prompt_secret = "Authorization: Token token-value-123456"
+    content_secret = "password=not-for-logs"
+    client = _Client([_chunk(content_secret), _chunk(finish_reason="stop")])
+    monkeypatch.setattr(llm, "make_async_client", lambda *_args, **_kwargs: client)
+
+    asyncio.run(llm.stream_completion(
+        [{"role": "user", "content": "x"}], "deepseek", None,
+        temperature=0, max_tokens=8, operation="generate", prompt_for_log=prompt_secret,
+    ))
+
+    assert prompt_secret not in caplog.text
+    assert content_secret not in caplog.text
+    assert caplog.text.count("<redacted>") >= 2
+
+    async def fail_create(**_kwargs):
+        raise RuntimeError("api_key=also-not-for-logs")
+
+    client.chat.completions.create = fail_create
+    with pytest.raises(llm.LLMError):
+        asyncio.run(llm.stream_completion(
+            [{"role": "user", "content": "x"}], "deepseek", None,
+            temperature=0, max_tokens=8, operation="generate", prompt_for_log="x",
+        ))
+    assert "also-not-for-logs" not in caplog.text
+
+
+def test_stream_logs_all_event_metadata_but_previews_only_the_first_events(monkeypatch, caplog):
+    client = _Client([_chunk("a"), _chunk("b"), _chunk("c"), _chunk("d"), _chunk(finish_reason="stop")])
+    monkeypatch.setattr(llm, "make_async_client", lambda *_args, **_kwargs: client)
+
+    asyncio.run(llm.stream_completion(
+        [{"role": "user", "content": "x"}], "deepseek", None,
+        temperature=0, max_tokens=8, operation="generate", prompt_for_log="x",
+    ))
+
+    assert "event=5" in caplog.text
+    assert "event=4 choices=1 content_chars=1 content_preview='<omitted>'" in caplog.text
+
+
+def test_provider_error_scrubs_the_log_and_client_message(caplog):
+    error = main._provider_error("LLM error", RuntimeError("password=not-for-logs"))
+
+    assert error.status_code == 502
+    assert "not-for-logs" not in caplog.text
+    assert "not-for-logs" not in error.detail["message"]
 
 
 def test_disconnect_cancels_inflight_llm_task():

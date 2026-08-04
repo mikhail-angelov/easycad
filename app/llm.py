@@ -19,6 +19,11 @@ from .skills import render as skills_render
 
 log = logging.getLogger("easycad.llm")
 
+# Prompts and generated code can be large. Keep diagnostics useful without
+# turning application logs into an unbounded store of user/model text.
+LOG_PREVIEW_CHARS = 500
+LOG_PREVIEW_EVENTS = 3
+
 # The synchronous BYOK validation request has no client-disconnect lifecycle, so
 # it keeps a hard ceiling. Streaming generation is cancelled by its HTTP request.
 LLM_TIMEOUT = float(os.getenv("EASYCAD_LLM_TIMEOUT", "90"))
@@ -169,13 +174,16 @@ SYSTEM_PROMPT = textwrap.dedent("""\
     - Fluent Workplane API only. Do NOT use the free-function API
       (`from cadquery.func import *`, or `a + b`/`a - b` on raw shapes) or mix them.
     - TEXT. Workplane.text(txt, fontsize, distance, ...) has NO `cut` argument.
-      Its signature is text(txt, fontsize, distance, combine='cut'|'a'|'s'|bool,
+      The worker provides exactly one supported font: `DejaVu Sans`. Always pass
+      `font="DejaVu Sans"` to every `.text(...)` call; never use Arial or a
+      host-specific font. Its signature is
+      text(txt, fontsize, distance, combine='cut'|'a'|'s'|bool,
       halign=..., valign=...). fontsize = letter height; distance = extrude depth
       (sign sets direction along the workplane normal). To ENGRAVE recessed text
       into a face: select the face and cut inward, e.g.
-        result = result.faces(">Z").workplane().text(S, H, -D)   # combine='cut' default
+        result = result.faces(">Z").workplane().text(S, H, -D, font="DejaVu Sans")
       To EMBOSS raised text on a face, extrude outward and add:
-        result = result.faces(">Z").workplane().text(S, H, D, combine='a')
+        result = result.faces(">Z").workplane().text(S, H, D, combine='a', font="DejaVu Sans")
       To build a standalone text solid (e.g. to .cut()/.union() yourself later),
       pass combine=False — NOT cut=False.
 """)
@@ -205,6 +213,14 @@ class StreamResult:
     completion_tokens: int | None
     total_tokens: int | None
     first_chunk_ms: int | None
+    stream_events: int
+    content_events: int
+    reasoning_events: int
+
+
+def _log_preview(value: str | None) -> str:
+    """Return a bounded, credential-scrubbed value safe for application logs."""
+    return scrub_text(value or "")[:LOG_PREVIEW_CHARS]
 
 
 def resolve_model(provider: str, model: str | None) -> str:
@@ -254,8 +270,8 @@ async def stream_completion(
     client = make_async_client(provider, api_key)
     resolved = resolve_model(provider, model)
     log.info(
-        "llm.stream start operation=%s provider=%s model=%s prompt=%r",
-        operation, provider, resolved, scrub_text(prompt_for_log),
+        "llm.stream start operation=%s provider=%s model=%s prompt_chars=%d prompt=%r",
+        operation, provider, resolved, len(prompt_for_log), _log_preview(prompt_for_log),
     )
     t0 = time.monotonic()
     try:
@@ -268,25 +284,53 @@ async def stream_completion(
         finish_reason: str | None = None
         usage = None
         first_chunk_ms: int | None = None
+        stream_events = 0
+        content_events = 0
+        reasoning_events = 0
         async for chunk in stream:
+            stream_events += 1
             if first_chunk_ms is None:
                 first_chunk_ms = int((time.monotonic() - t0) * 1000)
             if getattr(chunk, "usage", None) is not None:
                 usage = chunk.usage
+            event_content_chars = 0
+            event_content: list[str] = []
+            event_reasoning_chars = 0
+            event_finish_reasons: list[str] = []
             for choice in chunk.choices or []:
                 if choice.finish_reason is not None:
                     finish_reason = choice.finish_reason
+                    event_finish_reasons.append(choice.finish_reason)
                 delta = choice.delta
                 text = getattr(delta, "content", None)
                 if text:
                     content.append(text)
+                    event_content.append(text)
+                    event_content_chars += len(text)
+                    content_events += 1
                 reasoning = getattr(delta, "reasoning_content", None)
                 if reasoning:
                     reasoning_chars += len(reasoning)
+                    event_reasoning_chars += len(reasoning)
+                    reasoning_events += 1
+            # Log every provider event: this makes a 200 response with no
+            # generated content diagnosable. Provider reasoning is counted but
+            # deliberately never logged because it may contain user context.
+            log.info(
+                "llm.stream event operation=%s provider=%s model=%s event=%d choices=%d "
+                "content_chars=%d content_preview=%r reasoning_chars=%d "
+                "finish_reasons=%s usage=%s",
+                operation, provider, resolved, stream_events, len(chunk.choices or []),
+                event_content_chars,
+                _log_preview("".join(event_content))
+                if stream_events <= LOG_PREVIEW_EVENTS else "<omitted>",
+                event_reasoning_chars, event_finish_reasons or None, usage is not None,
+            )
     except Exception as exc:  # noqa: BLE001 — normalize SDK/transport errors
         log.warning(
-            "llm.stream fail operation=%s provider=%s model=%s dur_ms=%d err=%s",
-            operation, provider, resolved, int((time.monotonic() - t0) * 1000), exc,
+            "llm.stream fail operation=%s provider=%s model=%s dur_ms=%d err=%r",
+            operation, provider, resolved, int((time.monotonic() - t0) * 1000),
+            _log_preview(str(exc)),
         )
         raise LLMError(str(exc)) from exc
     finally:
@@ -301,15 +345,19 @@ async def stream_completion(
         prompt_tokens=getattr(usage, "prompt_tokens", None),
         completion_tokens=getattr(usage, "completion_tokens", None),
         total_tokens=getattr(usage, "total_tokens", None), first_chunk_ms=first_chunk_ms,
+        stream_events=stream_events, content_events=content_events,
+        reasoning_events=reasoning_events,
     )
     log.info(
         "llm.stream done operation=%s provider=%s model=%s dur_ms=%d first_chunk_ms=%s "
         "request_id=%s finish_reason=%s prompt_tokens=%s completion_tokens=%s "
-        "total_tokens=%s content_chars=%d reasoning_chars=%d",
+        "total_tokens=%s stream_events=%d content_events=%d reasoning_events=%d "
+        "content_chars=%d content_preview=%r reasoning_chars=%d",
         operation, provider, resolved, int((time.monotonic() - t0) * 1000),
         result.first_chunk_ms, result.request_id, result.finish_reason,
         result.prompt_tokens, result.completion_tokens, result.total_tokens,
-        len(result.content), result.reasoning_chars,
+        result.stream_events, result.content_events, result.reasoning_events,
+        len(result.content), _log_preview(result.content), result.reasoning_chars,
     )
     if not result.content.strip():
         raise LLMEmptyResponse("The provider returned an empty response.")

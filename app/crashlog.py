@@ -35,6 +35,9 @@ MAX_TB = 2000
 _SCRUB = [
     re.compile(r"(sk-or-v1-|sk-ant-|sk-|gsk_|ds-)[A-Za-z0-9_\-]{8,}"),
     re.compile(r"(?i)bearer\s+[A-Za-z0-9._\-]{8,}"),
+    re.compile(r"(?i)authorization\s*:\s*(?:bearer|token|basic)\s+[^\s,;]+"),
+    re.compile(r"(?i)\b(?:api[_-]?key|password|passwd|secret|token)\s*[:=]\s*['\"]?[^\s,'\";]+"),
+    re.compile(r"\beyJ[A-Za-z0-9_-]{8,}\.[A-Za-z0-9_-]{8,}\.[A-Za-z0-9_-]{8,}\b"),
 ]
 
 RETENTION = 3

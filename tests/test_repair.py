@@ -13,6 +13,7 @@ is charged once per turn regardless of how many repairs it took.
 from fastapi.testclient import TestClient
 
 import app.main as m
+from app.cadquery_exec import ExecResult
 from app.main import app
 from app import db, metrics
 from app.llm import _repair_hint
@@ -41,6 +42,22 @@ def test_repair_hint_api_branch_is_targeted_not_blanket():
     # A counterbore error DOES get the specific spelling appended.
     assert "cborehole" in _repair_hint(
         "AttributeError: 'Workplane' object has no attribute 'counterbore'").lower()
+
+
+def test_worker_font_error_is_operational_not_repaired(monkeypatch):
+    monkeypatch.setattr(m, "MAX_REPAIR", 2)
+    seen = _scripted_generate(monkeypatch, [BOX])
+
+    async def fake_execute(_request, code):
+        return ExecResult(False, error="AttributeError: 'NoneType' object has no attribute 'FontName'")
+
+    monkeypatch.setattr(m, "_execute_if_connected", fake_execute)
+    client = TestClient(app)
+    response = _chat(client, ip="7.7.7.8")
+
+    assert response.status_code == 503, response.text
+    assert response.json()["detail"]["code"] == "worker_font_unavailable"
+    assert len(seen) == 1
 
 BOX = "import cadquery as cq\nresult = cq.Workplane('XY').box(10, 10, 10)\n"
 BROKEN = "x = 1\n"  # runs but never defines `result` → execute() reports failure
