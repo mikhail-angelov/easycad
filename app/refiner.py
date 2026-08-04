@@ -171,7 +171,7 @@ async def triage(
             {"role": "system", "content": _triage_system_prompt(response_language)},
             {"role": "user", "content": user_msg},
         ],
-        provider, model, temperature=0.1, max_tokens=1024, api_key=api_key,
+        provider, model, temperature=0.1, max_tokens=16_384, api_key=api_key,
         operation="triage", prompt_for_log=prompt,
     )
     return _parse(result.content, response_language)
