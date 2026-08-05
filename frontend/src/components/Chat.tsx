@@ -43,34 +43,37 @@ export function Chat() {
   const error = useStore((s) => s.error)
   const lang = useStore((s) => s.lang)
   const busyKind = useStore((s) => s.busyKind)
+  const generationStage = useStore((s) => s.generationStage)
   const retryPrompt = useStore((s) => s.retryPrompt)
   const clearRetryPrompt = useStore((s) => s.clearRetryPrompt)
   const setAccountOpen = useStore((s) => s.setAccountOpen)
   const t = useT()
 
-  // Staged progress for LLM generations: since the server does triage → generate
-  // → execute inside one request, advance a plausible label by elapsed time so a
-  // long wait doesn't read as frozen. Non-generation waits keep a generic label.
-  const [genStage, setGenStage] = useState(0)
+  // The server emits each stage over SSE. The timer only shows elapsed time;
+  // it never guesses which stage the model has reached.
   const [genElapsedSeconds, setGenElapsedSeconds] = useState(0)
   useEffect(() => {
     if (!busy || busyKind !== 'gen') {
-      setGenStage(0)
       setGenElapsedSeconds(0)
       return
     }
     const start = Date.now()
     const id = setInterval(() => {
-      const elapsed = (Date.now() - start) / 1000
-      setGenStage(elapsed < 2.5 ? 0 : elapsed < 8 ? 1 : 2)
-      setGenElapsedSeconds(Math.floor(elapsed))
+      setGenElapsedSeconds(Math.floor((Date.now() - start) / 1000))
     }, 400)
     return () => clearInterval(id)
   }, [busy, busyKind])
 
+  const stageKey = {
+    accepted: 'chat.stageThinking',
+    refining: 'chat.stageRefining',
+    generating: 'chat.stageGenerating',
+    executing: 'chat.stageBuilding',
+    repairing: 'chat.stageRepairing',
+  }[generationStage ?? 'accepted']
   const overlayLabel =
     busyKind === 'gen'
-      ? `${[t('chat.stageThinking'), t('chat.stageGenerating'), t('chat.stageBuilding')][genStage]} · ${genElapsedSeconds} s`
+      ? `${t(stageKey)} · ${genElapsedSeconds} s`
       : t('chat.working')
 
   const models = providers[provider]?.models ?? []

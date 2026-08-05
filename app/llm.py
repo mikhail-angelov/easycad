@@ -246,13 +246,90 @@ def make_client(provider: str, api_key: str | None = None) -> OpenAI:
 
 
 def make_async_client(provider: str, api_key: str | None = None) -> AsyncOpenAI:
-    """Streaming generation client: no deadline and no implicit retries.
+    """Generation client: no deadline and no implicit retries.
 
     The request is instead cancelled when the client disconnects. An SDK retry
     would outlive that request and hide the real provider attempt in the trace.
     """
     cfg, key = _provider_key(provider, api_key)
     return AsyncOpenAI(base_url=cfg["base_url"], api_key=key, timeout=None, max_retries=0)
+
+
+async def completion(
+    messages: list[dict],
+    provider: str,
+    model: str | None,
+    *,
+    temperature: float,
+    max_tokens: int,
+    api_key: str | None = None,
+    operation: str,
+    prompt_for_log: str,
+) -> StreamResult:
+    """Run one completion, using DeepSeek's faster non-streaming response mode.
+
+    Other OpenAI-compatible providers keep the existing stream implementation;
+    their transport behaviour has not been measured here.  No generated tokens
+    are forwarded to the browser, so DeepSeek gains nothing from streaming.
+    """
+    if provider != "deepseek":
+        return await stream_completion(
+            messages, provider, model, temperature=temperature, max_tokens=max_tokens,
+            api_key=api_key, operation=operation, prompt_for_log=prompt_for_log,
+        )
+
+    client = make_async_client(provider, api_key)
+    resolved = resolve_model(provider, model)
+    log.info(
+        "llm.post start operation=%s provider=%s model=%s prompt_chars=%d prompt=%r",
+        operation, provider, resolved, len(prompt_for_log), _log_preview(prompt_for_log),
+    )
+    t0 = time.monotonic()
+    try:
+        response = await client.chat.completions.create(
+            model=resolved, messages=messages, temperature=temperature,
+            max_tokens=max_tokens, stream=False,
+        )
+    except Exception as exc:  # noqa: BLE001 — normalize SDK/transport errors
+        log.warning(
+            "llm.post fail operation=%s provider=%s model=%s dur_ms=%d err=%r",
+            operation, provider, resolved, int((time.monotonic() - t0) * 1000),
+            _log_preview(str(exc)),
+        )
+        raise LLMError(str(exc)) from exc
+    finally:
+        await client.close()
+
+    choice = response.choices[0] if response.choices else None
+    message = choice.message if choice is not None else None
+    content = getattr(message, "content", None) or ""
+    reasoning = getattr(message, "reasoning_content", None) or ""
+    usage = getattr(response, "usage", None)
+    result = StreamResult(
+        content=content,
+        reasoning_chars=len(reasoning),
+        finish_reason=getattr(choice, "finish_reason", None),
+        request_id=getattr(response, "_request_id", None),
+        prompt_tokens=getattr(usage, "prompt_tokens", None),
+        completion_tokens=getattr(usage, "completion_tokens", None),
+        total_tokens=getattr(usage, "total_tokens", None),
+        first_chunk_ms=None,
+        stream_events=1,
+        content_events=1 if content else 0,
+        reasoning_events=1 if reasoning else 0,
+    )
+    log.info(
+        "llm.post done operation=%s provider=%s model=%s dur_ms=%d request_id=%s "
+        "finish_reason=%s prompt_tokens=%s completion_tokens=%s total_tokens=%s "
+        "content_chars=%d content_preview=%r reasoning_chars=%d",
+        operation, provider, resolved, int((time.monotonic() - t0) * 1000),
+        result.request_id, result.finish_reason, result.prompt_tokens,
+        result.completion_tokens, result.total_tokens, len(result.content),
+        _log_preview(result.content), result.reasoning_chars,
+    )
+    if not result.content.strip():
+        raise LLMEmptyResponse("The provider returned an empty response.")
+    return result
 
 
 async def stream_completion(
@@ -490,7 +567,7 @@ async def generate_code(
     if skill_prompt:
         messages.append({"role": "system", "content": skill_prompt})
     messages.append({"role": "user", "content": user_msg})
-    result = await stream_completion(
+    result = await completion(
         messages, provider, model, temperature=temperature, max_tokens=16_384,
         api_key=api_key, operation="generate", prompt_for_log=prompt,
     )

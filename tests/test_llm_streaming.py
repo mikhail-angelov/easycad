@@ -77,14 +77,61 @@ def test_stream_completion_collects_content_and_safe_metadata(monkeypatch, caplo
     assert "sk-abcdef" not in caplog.text
 
 
-def test_generate_code_allows_16k_completion_tokens(monkeypatch):
-    client = _Client([_chunk("result = cq.Workplane('XY')"), _chunk(finish_reason="stop")])
+def test_completion_uses_a_non_streaming_request_for_deepseek(monkeypatch):
+    response = SimpleNamespace(
+        choices=[SimpleNamespace(
+            message=SimpleNamespace(content="result = part", reasoning_content="reason"),
+            finish_reason="stop",
+        )],
+        usage=SimpleNamespace(prompt_tokens=3, completion_tokens=2, total_tokens=5),
+        _request_id="ds-request-1",
+    )
+
+    class _PostClient:
+        def __init__(self):
+            self.closed = False
+            self.create_kwargs = None
+            self.chat = SimpleNamespace(completions=SimpleNamespace(create=self._create))
+
+        async def _create(self, **kwargs):
+            self.create_kwargs = kwargs
+            return response
+
+        async def close(self):
+            self.closed = True
+
+    client = _PostClient()
     monkeypatch.setattr(llm, "make_async_client", lambda *_args, **_kwargs: client)
+
+    result = asyncio.run(llm.completion(
+        [{"role": "user", "content": "x"}], "deepseek", None,
+        temperature=0, max_tokens=8, operation="generate", prompt_for_log="x",
+    ))
+
+    assert result.content == "result = part"
+    assert result.reasoning_chars == 6
+    assert client.create_kwargs["stream"] is False
+    assert client.closed is True
+
+
+def test_generate_code_allows_16k_completion_tokens(monkeypatch):
+    seen = {}
+
+    async def fake_completion(*_args, **kwargs):
+        seen.update(kwargs)
+        return llm.StreamResult(
+            content="result = cq.Workplane('XY')", reasoning_chars=0,
+            finish_reason="stop", request_id=None, prompt_tokens=None,
+            completion_tokens=None, total_tokens=None, first_chunk_ms=None,
+            stream_events=1, content_events=1, reasoning_events=0,
+        )
+
+    monkeypatch.setattr(llm, "completion", fake_completion)
 
     code = asyncio.run(llm.generate_code("import cadquery as cq\n", "make a box"))
 
     assert code == "result = cq.Workplane('XY')"
-    assert client.create_kwargs["max_tokens"] == 16_384
+    assert seen["max_tokens"] == 16_384
 
 
 def test_stream_completion_rejects_empty_content_without_retry(monkeypatch, caplog):
@@ -183,6 +230,29 @@ def test_disconnect_cancels_inflight_llm_task():
     exc = asyncio.run(run())
 
     assert exc.status_code == 499
+    assert cancelled.is_set()
+
+
+def test_cancelling_the_request_task_cancels_the_inflight_llm_call():
+    cancelled = asyncio.Event()
+
+    async def slow_call():
+        try:
+            await asyncio.Event().wait()
+        finally:
+            cancelled.set()
+
+    async def run():
+        task = asyncio.create_task(
+            main._await_llm(SimpleNamespace(is_disconnected=lambda: _false()), "generate", slow_call())
+        )
+        await asyncio.sleep(0)
+        task.cancel()
+        with pytest.raises(asyncio.CancelledError):
+            await task
+
+    asyncio.run(run())
+
     assert cancelled.is_set()
 
 

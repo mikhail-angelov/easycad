@@ -27,7 +27,7 @@ from typing import Literal
 
 from dotenv import load_dotenv
 from fastapi import BackgroundTasks, Depends, FastAPI, HTTPException, Request
-from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, RedirectResponse, Response
+from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, RedirectResponse, Response, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
 
@@ -549,19 +549,29 @@ def _empty_response_error() -> HTTPException:
 
 
 async def _await_llm(request: Request, operation: str, value):
-    """Await one streaming LLM call, cancelling its HTTP connection on disconnect."""
+    """Await one LLM call, cancelling its HTTP connection if the request ends."""
     llm_task = asyncio.create_task(value)
-    while not llm_task.done():
-        await asyncio.wait({llm_task}, timeout=0.1)
-        if llm_task.done():
-            break
-        if await request.is_disconnected():
-            llm_task.cancel()
-            await asyncio.gather(llm_task, return_exceptions=True)
-            metrics.incr("llm_disconnect_cancelled")
-            log.info("llm.disconnect_cancelled operation=%s", operation)
-            raise HTTPException(status_code=499, detail={"code": "client_disconnected", "message": "Client disconnected."})
-    return await llm_task
+    try:
+        while not llm_task.done():
+            await asyncio.wait({llm_task}, timeout=0.1)
+            if llm_task.done():
+                break
+            if await request.is_disconnected():
+                llm_task.cancel()
+                await asyncio.gather(llm_task, return_exceptions=True)
+                metrics.incr("llm_disconnect_cancelled")
+                log.info("llm.disconnect_cancelled operation=%s", operation)
+                raise HTTPException(status_code=499, detail={"code": "client_disconnected", "message": "Client disconnected."})
+        return await llm_task
+    except asyncio.CancelledError:
+        # ASGI cancels a streaming response coroutine as soon as its client
+        # disconnects.  Propagate that cancellation into the non-streaming
+        # provider request too; otherwise its HTTP call can outlive the tab.
+        llm_task.cancel()
+        await asyncio.gather(llm_task, return_exceptions=True)
+        metrics.incr("llm_disconnect_cancelled")
+        log.info("llm.disconnect_cancelled operation=%s", operation)
+        raise
 
 
 async def _execute_if_connected(request: Request, code: str):
@@ -570,6 +580,15 @@ async def _execute_if_connected(request: Request, code: str):
         metrics.incr("worker_skipped_disconnect")
         raise HTTPException(status_code=499, detail={"code": "client_disconnected", "message": "Client disconnected."})
     return await asyncio.to_thread(execute, code)
+
+
+async def _emit_progress(progress, stage: str) -> None:
+    if progress is not None:
+        await progress(stage)
+
+
+def _sse_event(name: str, data: dict) -> str:
+    return f"event: {name}\ndata: {json.dumps(data, ensure_ascii=False, separators=(',', ':'))}\n\n"
 
 
 # Operational execution failures (worker timeout / transport) surfaced as coded,
@@ -1503,6 +1522,7 @@ async def _generate_and_step(
     trial_ident: TrialIdent | None,
     skills: list[str] | None = None,
     consume_pending: bool = False,
+    progress=None,
 ) -> dict:
     _t0 = time.time()
     generate_kwargs = {"api_key": api_key, "skills": skills}
@@ -1529,6 +1549,7 @@ async def _generate_and_step(
             break
         metrics.incr("gen_attempts")
         try:
+            await _emit_progress(progress, "generating")
             code = await _await_llm(
                 request, "generate",
                 generate_code(_with_geometry(session.store, base_code), gen_prompt, provider, model,
@@ -1546,6 +1567,7 @@ async def _generate_and_step(
         if trial_ident is not None and not charged_trial:
             _charge_trial(trial_ident)
             charged_trial = True
+        await _emit_progress(progress, "executing")
         res = await _execute_if_connected(request, code)
         # A worker timeout / transport failure won't be fixed by a repair attempt
         # (and each repair costs another LLM call) — surface it as a notice now.
@@ -1555,6 +1577,7 @@ async def _generate_and_step(
         if attempt < MAX_REPAIR:
             metrics.incr("gen_repair")
             log.info("chat.gen repair attempt=%d error=%s", attempt + 1, (res.error or "")[:120])
+            await _emit_progress(progress, "repairing")
         feedback = {"code": code, "error": res.error}
 
     dur_ms = int((time.time() - _t0) * 1000)
@@ -1609,10 +1632,11 @@ def _no_step(session: Session, request: Request, action: str, original_prompt: s
     return payload
 
 
-@app.post("/api/chat")
-async def api_chat(
-    req: ChatRequest, request: Request,
-    session: Session = Depends(locked_session), _slot: None = Depends(gen_slot),
+async def _chat_response(
+    req: ChatRequest,
+    request: Request,
+    session: Session,
+    progress=None,
 ) -> dict:
     _gen_guard(session, request)
     _check_capacity(session)
@@ -1625,7 +1649,7 @@ async def api_chat(
     if _is_initial_model(session.store, base_code):
         return await _generate_and_step(
             session, request, base_code, req.prompt, req.prompt, None,
-            provider, model, api_key, trial_ident,
+            provider, model, api_key, trial_ident, progress=progress,
         )
 
     if not req.auto_refine:
@@ -1645,12 +1669,14 @@ async def api_chat(
         return await _generate_and_step(
             session, request, base_code, gen_prompt, req.prompt, req.refined_prompt,
             provider, model, api_key, trial_ident, skills=skills, consume_pending=matched,
+            progress=progress,
         )
 
     # The triage call is a separate operator-key LLM call → charge it too.
     if not _charge_operator_call(trial_ident):
         raise _budget_exhausted_error()
     try:
+        await _emit_progress(progress, "refining")
         t = await _await_llm(
             request, "triage",
             triage(req.prompt, _with_geometry(session.store, base_code), provider, model, api_key,
@@ -1674,8 +1700,67 @@ async def api_chat(
 
     return await _generate_and_step(
         session, request, base_code, req.prompt, req.prompt, None,
-        provider, model, api_key, trial_ident, skills=t.skills,
+        provider, model, api_key, trial_ident, skills=t.skills, progress=progress,
     )
+
+
+async def _chat_sse(req: ChatRequest, request: Request, session: Session):
+    """Yield chat progress while keeping request cancellation tied to the LLM."""
+    updates: asyncio.Queue[str] = asyncio.Queue()
+
+    async def progress(stage: str) -> None:
+        await updates.put(stage)
+
+    task = asyncio.create_task(_chat_response(req, request, session, progress))
+    yield _sse_event("progress", {"stage": "accepted"})
+    try:
+        while not task.done():
+            next_update = asyncio.create_task(updates.get())
+            try:
+                done, _pending = await asyncio.wait({task, next_update}, return_when=asyncio.FIRST_COMPLETED)
+                if next_update in done:
+                    yield _sse_event("progress", {"stage": next_update.result()})
+            finally:
+                # A disconnect cancels this generator while it is awaiting the
+                # queue. Always clean up that waiter as well as the chat task.
+                if not next_update.done():
+                    next_update.cancel()
+                    await asyncio.gather(next_update, return_exceptions=True)
+
+        while not updates.empty():
+            yield _sse_event("progress", {"stage": updates.get_nowait()})
+
+        try:
+            result = await task
+        except HTTPException as exc:
+            detail = exc.detail if isinstance(exc.detail, dict) else {}
+            yield _sse_event("error", {
+                "status": exc.status_code,
+                "code": detail.get("code"),
+                "message": detail.get("message") or str(exc.detail),
+            })
+        else:
+            yield _sse_event("result", result)
+    finally:
+        if not task.done():
+            task.cancel()
+            await asyncio.gather(task, return_exceptions=True)
+
+
+@app.post("/api/chat")
+async def api_chat(
+    req: ChatRequest, request: Request,
+    session: Session = Depends(locked_session), _slot: None = Depends(gen_slot),
+):
+    # Fetch supports POST + SSE framing, unlike EventSource (GET-only). Keep the
+    # JSON response for API clients that did not opt into progress updates.
+    if "text/event-stream" in request.headers.get("accept", ""):
+        return StreamingResponse(
+            _chat_sse(req, request, session),
+            media_type="text/event-stream",
+            headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
+        )
+    return await _chat_response(req, request, session)
 
 
 @app.post("/api/variations")

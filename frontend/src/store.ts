@@ -4,6 +4,7 @@ import {
   api,
   type Candidate,
   type ClarifyQuestion,
+  type ProgressStage,
   type ProviderInfo,
   type SessionPayload,
   type Step,
@@ -84,6 +85,7 @@ interface State {
   selectedVariation: number | null
   busy: boolean
   busyKind: 'gen' | null // 'gen' = an LLM generation is running (staged progress)
+  generationStage: ProgressStage | null
   error: string | null
   notice: Notice | null
   // Monotonic counter bumped once per mutating action (SPEC22 §4.1). Rendered as
@@ -204,9 +206,12 @@ export const useStore = create<State>((set, get) => {
   async function doChat(prompt: string, autoRefine: boolean, refinedOverride?: string) {
     const { code, provider, model, lang } = get()
     beginAction()
-    set({ busy: true, busyKind: 'gen' })
+    set({ busy: true, busyKind: 'gen', generationStage: 'accepted' })
     try {
-      const res = await api.chat(prompt, code, provider, model || undefined, autoRefine, refinedOverride, lang)
+      const res = await api.chat(
+        prompt, code, provider, model || undefined, autoRefine, refinedOverride, lang,
+        { onProgress: (generationStage) => set({ generationStage }) },
+      )
       set({ steps: res.session.steps, currentId: res.session.current_id })
       applyTrial(res.session)
 
@@ -243,7 +248,7 @@ export const useStore = create<State>((set, get) => {
     } catch (e) {
       reportError(e, 'chat', prompt)
     } finally {
-      set({ busy: false, busyKind: null })
+      set({ busy: false, busyKind: null, generationStage: null })
     }
   }
 
@@ -268,6 +273,7 @@ export const useStore = create<State>((set, get) => {
     selectedVariation: null,
     busy: false,
     busyKind: null,
+    generationStage: null,
     error: null,
     notice: null,
     actionRev: 0,

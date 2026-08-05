@@ -21,7 +21,7 @@ import re
 import textwrap
 from dataclasses import dataclass
 
-from .llm import DEFAULT_PROVIDER, LLMError, stream_completion
+from .llm import DEFAULT_PROVIDER, LLMError, completion
 from .skills import SKILL_MENU, clean_tags
 
 VERDICTS = {"ready", "refine", "clarify", "invalid"}
@@ -166,7 +166,7 @@ async def triage(
         f"Current CadQuery code (with geometry info):\n```python\n{current_code}\n```\n\n"
         f"User request: {prompt}"
     )
-    result = await stream_completion(
+    result = await completion(
         [
             {"role": "system", "content": _triage_system_prompt(response_language)},
             {"role": "user", "content": user_msg},

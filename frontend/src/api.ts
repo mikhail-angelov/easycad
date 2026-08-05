@@ -62,6 +62,7 @@ export interface ClarifyQuestion {
 }
 
 export type ChatAction = 'generated' | 'confirm_refine' | 'clarify' | 'invalid'
+export type ProgressStage = 'accepted' | 'refining' | 'generating' | 'executing' | 'repairing'
 
 export interface ChatResponse {
   action: ChatAction
@@ -111,6 +112,24 @@ export interface ReqOpts {
   timeoutMs?: number
 }
 
+export interface ChatStreamOptions {
+  onProgress?: (stage: ProgressStage) => void
+  signal?: AbortSignal
+}
+
+async function asApiError(res: Response): Promise<ApiError> {
+  const parsed = await res.json().catch(() => null)
+  const detail = parsed?.detail
+  if (detail && typeof detail === 'object') {
+    return new ApiError(detail.message ?? `Request failed: ${res.status}`, detail.code ?? null, res.status)
+  }
+  return new ApiError(
+    typeof detail === 'string' ? detail : `Request failed: ${res.status}`,
+    null,
+    res.status,
+  )
+}
+
 async function send<T>(method: string, url: string, body?: unknown, opts?: ReqOpts): Promise<T> {
   // Optional hard timeout (SPEC22): the boot exchange must never stall the SPA
   // render on a hung network. AbortSignal.timeout rejects the fetch after the
@@ -123,23 +142,55 @@ async function send<T>(method: string, url: string, body?: unknown, opts?: ReqOp
     signal,
   })
   if (!res.ok) {
-    const parsed = await res.json().catch(() => null)
-    const detail = parsed?.detail
-    // Coded errors ship `{detail: {code, message}}`; plain ones `{detail: "…"}`.
-    if (detail && typeof detail === 'object') {
-      throw new ApiError(detail.message ?? `Request failed: ${res.status}`, detail.code ?? null, res.status)
-    }
-    throw new ApiError(
-      typeof detail === 'string' ? detail : `Request failed: ${res.status}`,
-      null,
-      res.status,
-    )
+    throw await asApiError(res)
   }
   return res.json()
 }
 
 function post<T>(url: string, body: unknown, opts?: ReqOpts): Promise<T> {
   return send<T>('POST', url, body, opts)
+}
+
+async function streamChat(body: unknown, opts?: ChatStreamOptions): Promise<ChatResponse> {
+  const res = await fetch('/api/chat', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', Accept: 'text/event-stream' },
+    body: JSON.stringify(body),
+    signal: opts?.signal,
+  })
+  if (!res.ok) throw await asApiError(res)
+  if (!res.body) throw new Error('The server did not provide a chat stream.')
+
+  const reader = res.body.getReader()
+  const decoder = new TextDecoder()
+  let buffered = ''
+  try {
+    while (true) {
+      const { done, value } = await reader.read()
+      buffered += decoder.decode(value, { stream: !done }).replaceAll('\r', '')
+      let boundary = buffered.indexOf('\n\n')
+      while (boundary >= 0) {
+        const frame = buffered.slice(0, boundary)
+        buffered = buffered.slice(boundary + 2)
+        boundary = buffered.indexOf('\n\n')
+        const event = frame.match(/^event: (.+)$/m)?.[1]
+        const raw = frame.match(/^data: (.+)$/m)?.[1]
+        if (!event || !raw) continue
+        const data = JSON.parse(raw)
+        if (event === 'progress') {
+          opts?.onProgress?.(data.stage as ProgressStage)
+        } else if (event === 'result') {
+          return data as ChatResponse
+        } else if (event === 'error') {
+          throw new ApiError(data.message ?? 'Chat request failed.', data.code ?? null, data.status ?? 500)
+        }
+      }
+      if (done) break
+    }
+  } finally {
+    reader.releaseLock()
+  }
+  throw new Error('The chat stream ended before returning a result.')
 }
 
 export interface TokenInfo {
@@ -170,8 +221,9 @@ export const api = {
     autoRefine: boolean,
     refinedPrompt?: string,
     responseLanguage: 'en' | 'ru' = 'en',
+    options?: ChatStreamOptions,
   ): Promise<ChatResponse> =>
-    post('/api/chat', {
+    streamChat({
       prompt,
       current_code: currentCode,
       provider,
@@ -179,7 +231,7 @@ export const api = {
       auto_refine: autoRefine,
       refined_prompt: refinedPrompt,
       response_language: responseLanguage,
-    }),
+    }, options),
 
   variations: (
     prompt: string,
