@@ -3,6 +3,7 @@ import { useStore, useT } from '../store'
 import { STARTERS } from '../i18n'
 import { Notice } from './Notice'
 import { formatGeometryInfo } from '../geometry'
+import type { ProgressStage } from '../api'
 
 const WELCOME_KEY = 'easycad_welcome_seen'
 const MAX_TEXTAREA_HEIGHT = 180
@@ -44,37 +45,35 @@ export function Chat() {
   const lang = useStore((s) => s.lang)
   const busyKind = useStore((s) => s.busyKind)
   const generationStage = useStore((s) => s.generationStage)
+  const generationLog = useStore((s) => s.generationLog)
+  const generationStageStartedAt = useStore((s) => s.generationStageStartedAt)
   const retryPrompt = useStore((s) => s.retryPrompt)
   const clearRetryPrompt = useStore((s) => s.clearRetryPrompt)
   const setAccountOpen = useStore((s) => s.setAccountOpen)
   const t = useT()
 
-  // The server emits each stage over SSE. The timer only shows elapsed time;
-  // it never guesses which stage the model has reached.
-  const [genElapsedSeconds, setGenElapsedSeconds] = useState(0)
+  // The server emits each stage over SSE. This timer only ticks the *current*
+  // stage's elapsed time — it never guesses which stage the model has reached.
+  const [stageElapsedSeconds, setStageElapsedSeconds] = useState(0)
   useEffect(() => {
-    if (!busy || busyKind !== 'gen') {
-      setGenElapsedSeconds(0)
+    if (!busy || busyKind !== 'gen' || generationStageStartedAt == null) {
+      setStageElapsedSeconds(0)
       return
     }
-    const start = Date.now()
-    const id = setInterval(() => {
-      setGenElapsedSeconds(Math.floor((Date.now() - start) / 1000))
-    }, 400)
+    const tick = () => setStageElapsedSeconds(Math.floor((Date.now() - generationStageStartedAt) / 1000))
+    tick()
+    const id = setInterval(tick, 400)
     return () => clearInterval(id)
-  }, [busy, busyKind])
+  }, [busy, busyKind, generationStageStartedAt])
 
-  const stageKey = {
+  const STAGE_KEYS: Record<ProgressStage, string> = {
     accepted: 'chat.stageThinking',
     refining: 'chat.stageRefining',
     generating: 'chat.stageGenerating',
     executing: 'chat.stageBuilding',
     repairing: 'chat.stageRepairing',
-  }[generationStage ?? 'accepted']
-  const overlayLabel =
-    busyKind === 'gen'
-      ? `${t(stageKey)} · ${genElapsedSeconds} s`
-      : t('chat.working')
+  }
+  const formatStageDuration = (ms: number) => `${(ms / 1000).toFixed(1)} s`
 
   const models = providers[provider]?.models ?? []
   const onTrial = trialTier === 'anon' || trialTier === 'user'
@@ -160,7 +159,20 @@ export function Chat() {
       {busy && (
         <div class="chat-overlay" aria-live="polite">
           <span class="spinner" />
-          <span class="chat-overlay-label">{overlayLabel}</span>
+          {busyKind === 'gen' ? (
+            <ul class="chat-overlay-log">
+              {generationLog.map((entry, i) => (
+                <li key={i}>
+                  {t(STAGE_KEYS[entry.stage])} · {formatStageDuration(entry.durationMs)}
+                </li>
+              ))}
+              <li class="chat-overlay-log-current">
+                {t(STAGE_KEYS[generationStage ?? 'accepted'])} · {stageElapsedSeconds} s
+              </li>
+            </ul>
+          ) : (
+            <span class="chat-overlay-label">{t('chat.working')}</span>
+          )}
         </div>
       )}
       <header>

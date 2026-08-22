@@ -86,6 +86,12 @@ interface State {
   busy: boolean
   busyKind: 'gen' | null // 'gen' = an LLM generation is running (staged progress)
   generationStage: ProgressStage | null
+  // Stages the server has already finished this request, oldest first, each with
+  // how long it took — so the spinner can show a running log, not just one label.
+  generationLog: { stage: ProgressStage; durationMs: number }[]
+  // When the current (not-yet-finished) stage started, so the UI can tick a
+  // live per-stage timer instead of only showing total elapsed time.
+  generationStageStartedAt: number | null
   error: string | null
   notice: Notice | null
   // Monotonic counter bumped once per mutating action (SPEC22 §4.1). Rendered as
@@ -206,11 +212,29 @@ export const useStore = create<State>((set, get) => {
   async function doChat(prompt: string, autoRefine: boolean, refinedOverride?: string) {
     const { code, provider, model, lang } = get()
     beginAction()
-    set({ busy: true, busyKind: 'gen', generationStage: 'accepted' })
+    const genStart = Date.now()
+    set({
+      busy: true, busyKind: 'gen', generationStage: 'accepted', generationLog: [],
+      generationStageStartedAt: genStart,
+    })
+    // Each progress event marks the *previous* stage as finished — log it with
+    // how long it ran before advancing the live label to the new stage.
+    let stage: ProgressStage = 'accepted'
+    let stageStart = genStart
+    const onProgress = (nextStage: ProgressStage) => {
+      const now = Date.now()
+      set({
+        generationStage: nextStage,
+        generationLog: [...get().generationLog, { stage, durationMs: now - stageStart }],
+        generationStageStartedAt: now,
+      })
+      stage = nextStage
+      stageStart = now
+    }
     try {
       const res = await api.chat(
         prompt, code, provider, model || undefined, autoRefine, refinedOverride, lang,
-        { onProgress: (generationStage) => set({ generationStage }) },
+        { onProgress },
       )
       set({ steps: res.session.steps, currentId: res.session.current_id })
       applyTrial(res.session)
@@ -248,7 +272,10 @@ export const useStore = create<State>((set, get) => {
     } catch (e) {
       reportError(e, 'chat', prompt)
     } finally {
-      set({ busy: false, busyKind: null, generationStage: null })
+      set({
+        busy: false, busyKind: null, generationStage: null, generationLog: [],
+        generationStageStartedAt: null,
+      })
     }
   }
 
@@ -274,6 +301,8 @@ export const useStore = create<State>((set, get) => {
     busy: false,
     busyKind: null,
     generationStage: null,
+    generationLog: [],
+    generationStageStartedAt: null,
     error: null,
     notice: null,
     actionRev: 0,
