@@ -15,10 +15,10 @@ import json
 import sys
 
 
-def get_geometry_info(result) -> str:
-    """Build the auto-generated geometry-info comment block from a result."""
+def get_geometry_info(shape) -> str:
+    """Measure the complete shape passed to the exporter, not one stack item."""
     try:
-        bb = result.val().BoundingBox()
+        bb = shape.BoundingBox()
         lines = [
             "# ── Geometry info (auto-generated, do not edit) ──",
             f"# Bounding box: X: {bb.xmin:.1f}..{bb.xmax:.1f}, "
@@ -26,10 +26,9 @@ def get_geometry_info(result) -> str:
             f"# Size: {bb.xmax - bb.xmin:.1f} x {bb.ymax - bb.ymin:.1f} "
             f"x {bb.zmax - bb.zmin:.1f} mm",
         ]
-        solid = result.val()
-        n_faces = len(solid.Faces())
-        n_edges = len(solid.Edges())
-        n_solids = len(solid.Solids()) if hasattr(solid, "Solids") else 1
+        n_faces = len(shape.Faces())
+        n_edges = len(shape.Edges())
+        n_solids = len(shape.Solids())
         lines.append(f"# Topology: {n_solids} solid(s), {n_faces} faces, {n_edges} edges")
         return "\n".join(lines)
     except Exception:
@@ -81,8 +80,11 @@ def execute_job(code: str, export_path: str) -> dict:
     try:
         import cadquery as cq
 
-        cq.exporters.export(result, export_path)
-        info = get_geometry_info(result)
+        # CadQuery exports every item of a Workplane/iterable as a compound.
+        # Materialise it once so export and feedback describe the same geometry.
+        shape = result if isinstance(result, cq.Shape) else cq.Compound.makeCompound(result)
+        cq.exporters.export(shape, export_path)
+        info = get_geometry_info(shape)
     except Exception as exc:  # noqa: BLE001
         return {"success": False, "geometry_info": None, "error": f"Export error: {_describe(exc)}"}
 

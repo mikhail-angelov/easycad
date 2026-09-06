@@ -96,3 +96,44 @@ In this SOCKS-proxy environment, installing ordinary requirements left API clien
 construction failing. Installing
 `uv pip install --python .venv-poc/bin/python 'httpx[socks]'` fixed it, and the
 full suite passed. The experiment's mesh connectivity analysis needed `networkx`.
+
+## 2026-09-06 — Match geometry measurements to the exporter's shape scope
+
+### Goal
+
+Verify geometry feedback for single- and multi-body models without assuming
+that a Workplane's first value or Python wrapper describes the exported model.
+
+### Golden path
+
+1. Check the installed CadQuery export implementation and Workplane iterator.
+   In 2.8.0, export accepts a Shape or collects the entire iterable into a compound.
+2. Materialise the export shape once; measure that same shape. Do not fuse bodies
+   or force a single-solid requirement just to simplify measurements.
+3. Exercise the real isolated `execute()` boundary. Compare known dimensions
+   against both feedback and independently parsed STL vertices.
+4. Test the next chat request with only external completion stubbed, to verify
+   delivery of measured context without spending LLM tokens.
+
+### Verification
+
+`CADQUERY_WORKER_TIMEOUT_SECONDS=120 XDG_CACHE_HOME=$PWD/.cache PYTHONDONTWRITEBYTECODE=1
+.venv-poc/bin/python -m pytest tests/test_cadquery_exec.py tests/test_spec20.py -q`:
+18 passed. Cases include a drilled plate, washers, a pocketed enclosure and lid,
+multiple stack items, and raw shapes.
+
+### Failure pattern avoided
+
+`result.val()` can under-report the exported geometry. Python wrapper classes
+can also differ from the underlying topology: in this environment `shell(-2)`
+returned a `Compound` wrapper around a `Solid`, which Workplane iteration
+expanded into a `Shell`. Count solids in the export shape, not presumed solids
+from source operations. This measurement fix does not repair that library behavior.
+
+### Ruled-out approaches
+
+- Measuring only `.val()` failed both multi-body dimension and raw-shape feedback
+  regressions while STL export succeeded.
+- Assuming a shell-built enclosure plus lid exports as two solids failed the
+  topology checks. A rectangular `cutBlind(-18)` pocket preserved a solid under
+  export iteration and passed the same enclosure checks.
