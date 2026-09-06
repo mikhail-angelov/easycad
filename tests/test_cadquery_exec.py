@@ -25,6 +25,30 @@ def test_execute_simple_box():
     assert res.geometry_info.startswith("# ── Geometry info")
 
 
+def test_execute_exposes_tessellated_cad_faces_for_selection():
+    res = execute("import cadquery as cq\nresult = cq.Workplane('XY').box(50, 80, 30)\n")
+    assert res.success, res.error
+    mesh = res.face_mesh
+    assert mesh is not None
+    assert len(mesh["faces"]) == 6
+    assert len(mesh["positions"]) == 72  # 6 planar faces × 4 vertices × XYZ
+    assert len(mesh["indices"]) == 36    # 6 planar faces × 2 triangles × 3 indices
+    assert [face["label"] for face in mesh["faces"]] == list("ABCDEF")
+    assert all(face["planar"] and face["count"] == 6 for face in mesh["faces"])
+    assert all(face["center"] is not None and face["normal"] is not None for face in mesh["faces"])
+
+
+def test_face_mesh_uses_a_valid_anchor_when_a_planar_face_has_a_hole():
+    res = execute(
+        "import cadquery as cq\n"
+        "result = cq.Workplane('XY').circle(10).circle(5).extrude(3)\n"
+    )
+    assert res.success, res.error
+    top = next(face for face in res.face_mesh["faces"] if face["planar"] and face["normal"][2] > 0.9)
+    assert top["center"] is None  # annular face centre is inside its hole
+    assert top["anchor"][0] ** 2 + top["anchor"][1] ** 2 > 25
+
+
 def test_execute_missing_result():
     res = execute("import cadquery as cq\nx = cq.Workplane('XY').box(1, 1, 1)\n")
     assert not res.success

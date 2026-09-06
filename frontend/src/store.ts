@@ -3,6 +3,8 @@ import {
   ApiError,
   api,
   type Candidate,
+  type FaceMesh,
+  type FaceSelection,
   type ClarifyQuestion,
   type ProgressStage,
   type ProviderInfo,
@@ -70,6 +72,8 @@ interface State {
   code: string // editor contents
   stlBase64: string | null // model currently shown in the viewer
   geometryInfo: string | null
+  faceMesh: FaceMesh | null
+  selectedFace: FaceSelection | null
   providers: Record<string, ProviderInfo>
   provider: string
   model: string
@@ -123,6 +127,7 @@ interface State {
   clearRetryPrompt: () => void
   setAccountOpen: (open: boolean) => void
   setAutoRefine: (on: boolean) => void
+  setSelectedFace: (face: FaceSelection | null) => void
   sendChat: (prompt: string) => Promise<void>
   answerClarification: (answer: string) => Promise<void>
   confirmProposal: (editedText?: string) => Promise<void>
@@ -161,6 +166,8 @@ export const useStore = create<State>((set, get) => {
       code: cur?.code ?? get().code,
       stlBase64: cur?.stl_base64 ?? null,
       geometryInfo: cur?.geometry_info ?? null,
+      faceMesh: cur?.face_mesh ?? null,
+      selectedFace: null,
     })
     applyTrial(session)
   }
@@ -210,7 +217,7 @@ export const useStore = create<State>((set, get) => {
 
   // Core chat round-trip shared by send / confirm / proceed-anyway.
   async function doChat(prompt: string, autoRefine: boolean, refinedOverride?: string) {
-    const { code, provider, model, lang } = get()
+    const { code, provider, model, lang, selectedFace } = get()
     beginAction()
     const genStart = Date.now()
     set({
@@ -233,7 +240,7 @@ export const useStore = create<State>((set, get) => {
     }
     try {
       const res = await api.chat(
-        prompt, code, provider, model || undefined, autoRefine, refinedOverride, lang,
+        prompt, code, provider, model || undefined, autoRefine, refinedOverride, lang, selectedFace,
         { onProgress },
       )
       set({ steps: res.session.steps, currentId: res.session.current_id })
@@ -264,7 +271,10 @@ export const useStore = create<State>((set, get) => {
       })
       if (step.success) {
         track('step_success', { source: 'chat' })
-        set({ code: step.code, stlBase64: step.stl_base64, geometryInfo: step.geometry_info, error: null })
+        set({
+          code: step.code, stlBase64: step.stl_base64, geometryInfo: step.geometry_info,
+          faceMesh: step.face_mesh, selectedFace: null, error: null,
+        })
       } else {
         track('generation_failed', { source: 'chat' })
         set({ code: step.code, error: step.error })
@@ -285,6 +295,8 @@ export const useStore = create<State>((set, get) => {
     code: '',
     stlBase64: null,
     geometryInfo: null,
+    faceMesh: null,
+    selectedFace: null,
     providers: {},
     provider: 'deepseek',
     model: '',
@@ -451,6 +463,7 @@ export const useStore = create<State>((set, get) => {
     clearRetryPrompt: () => set({ retryPrompt: null }),
     setAccountOpen: (accountOpen) => set({ accountOpen }),
     setAutoRefine: (autoRefine) => set({ autoRefine }),
+    setSelectedFace: (selectedFace) => set({ selectedFace }),
 
     async sendChat(prompt) {
       track('prompt_sent', { mode: 'chat' })
@@ -530,6 +543,8 @@ export const useStore = create<State>((set, get) => {
         code: c.code,
         stlBase64: c.stl_base64,
         geometryInfo: c.geometry_info,
+        faceMesh: null,
+        selectedFace: null,
       })
     },
 
@@ -555,7 +570,10 @@ export const useStore = create<State>((set, get) => {
         })
         if (step.success) {
           track('step_success', { source: 'variation' })
-          set({ code: step.code, stlBase64: step.stl_base64, geometryInfo: step.geometry_info })
+          set({
+            code: step.code, stlBase64: step.stl_base64, geometryInfo: step.geometry_info,
+            faceMesh: step.face_mesh, selectedFace: null,
+          })
         }
       } catch (e) {
         reportError(e, 'variation')
@@ -580,7 +598,7 @@ export const useStore = create<State>((set, get) => {
         set({ steps: session.steps, currentId: session.current_id })
         if (step.success) {
           track('step_success', { source: 'manual' })
-          set({ stlBase64: step.stl_base64, geometryInfo: step.geometry_info, code: step.code, error: null })
+          set({ stlBase64: step.stl_base64, geometryInfo: step.geometry_info, faceMesh: step.face_mesh, selectedFace: null, code: step.code, error: null })
         } else {
           track('generation_failed', { source: 'manual' })
           set({ error: step.error })

@@ -15,6 +15,57 @@ import json
 import sys
 
 
+def get_face_mesh(shape) -> dict | None:
+    """Return a bounded, CAD-coordinate display mesh grouped by source face.
+
+    It is intentionally built before STL serialization: an STL triangle index
+    has no stable relationship to a BRep face. Selection is optional UI data;
+    failure or a very large model must not turn a valid export into a failure.
+    """
+    from OCP.BRepClass import BRepClass_FaceClassifier
+    from OCP.TopAbs import TopAbs_IN, TopAbs_ON
+
+    faces = shape.Faces()
+    if len(faces) > 500:
+        return None
+    positions: list[float] = []
+    indices: list[int] = []
+    records: list[dict] = []
+    for face_id, face in enumerate(faces):
+        vertices, triangles = face.tessellate(0.1, 0.1)
+        if not triangles or len(indices) + len(triangles) * 3 > 50_000:
+            return None
+        offset = len(positions) // 3
+        start = len(indices)
+        positions.extend(coordinate for vertex in vertices for coordinate in vertex.toTuple())
+        indices.extend(offset + vertex for triangle in triangles for vertex in triangle)
+
+        planar = face.geomType() == "PLANE"
+        center = face.Center()
+        center_on_face = planar and BRepClass_FaceClassifier(
+            face.wrapped, center.toPnt(), 1e-6,
+        ).State() in (TopAbs_IN, TopAbs_ON)
+        # The centroid of a tessellated triangle lies within the trimmed face,
+        # unlike the area centre of an annulus or a concave face.
+        tri = triangles[0]
+        anchor = (vertices[tri[0]] + vertices[tri[1]] + vertices[tri[2]]) / 3
+        label, number = "", face_id + 1
+        while number:
+            number, digit = divmod(number - 1, 26)
+            label = chr(65 + digit) + label
+        records.append({
+            "id": face_id,
+            "label": label,
+            "start": start,
+            "count": len(indices) - start,
+            "planar": planar,
+            "anchor": anchor.toTuple(),
+            "center": center.toTuple() if center_on_face else None,
+            "normal": face.normalAt(anchor).toTuple() if planar else None,
+        })
+    return {"positions": positions, "indices": indices, "faces": records}
+
+
 def get_geometry_info(shape) -> str:
     """Measure the complete shape passed to the exporter, not one stack item."""
     try:
@@ -88,7 +139,13 @@ def execute_job(code: str, export_path: str) -> dict:
     except Exception as exc:  # noqa: BLE001
         return {"success": False, "geometry_info": None, "error": f"Export error: {_describe(exc)}"}
 
-    return {"success": True, "geometry_info": info, "error": None}
+    face_mesh = None
+    if export_path.lower().endswith(".stl"):
+        try:
+            face_mesh = get_face_mesh(shape)
+        except Exception:  # selection is optional; STL remains the fallback
+            pass
+    return {"success": True, "geometry_info": info, "face_mesh": face_mesh, "error": None}
 
 
 def main() -> None:

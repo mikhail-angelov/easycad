@@ -54,6 +54,9 @@ class ExecResult:
     # (transport). Left None for ordinary CadQuery/model errors, which stay in the
     # chat as a normal failed step. The API maps this to a localized notice (W1).
     code: str | None = None
+    # Optional CAD-face mesh used only for interactive selection. The STL stays
+    # the printable/exported format; its triangle ids are never used as face ids.
+    face_mesh: dict | None = None
 
 
 @dataclass
@@ -100,6 +103,7 @@ def _result_from_worker_payload(out: dict) -> ExecResult:
         success=True,
         stl_base64=out["stl_base64"],
         geometry_info=info,
+        face_mesh=out.get("face_mesh"),
     )
 
 

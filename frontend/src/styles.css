@@ -891,6 +891,21 @@ body {
   color: var(--soft);
   font-size: 11px;
 }
+
+.selected-face-chip {
+  display: inline-block;
+  margin: 0 0 6px;
+  padding: 3px 8px;
+  border-radius: 999px;
+  background: #fff0c2;
+  color: #5a3d00;
+  font-size: 0.78rem;
+}
+
+.text-button.active {
+  color: #8a5a00;
+  background: #fff0c2;
+}
 .chat-send {
   display: flex;
   flex-direction: column;

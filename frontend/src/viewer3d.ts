@@ -6,6 +6,7 @@
 import * as THREE from 'three'
 import { OrbitControls } from 'three/addons/controls/OrbitControls.js'
 import { STLLoader } from 'three/addons/loaders/STLLoader.js'
+import type { FaceMesh } from './api'
 
 export class ModelViewer {
   private scene = new THREE.Scene()
@@ -15,6 +16,11 @@ export class ModelViewer {
   private grid: THREE.GridHelper
   private loader = new STLLoader()
   private mesh: THREE.Mesh | null = null
+  private faceMesh: FaceMesh | null = null
+  private selectedOverlay: THREE.Mesh | null = null
+  private selectedLabel: THREE.Sprite | null = null
+  private pickerLabels: THREE.Sprite[] = []
+  private onFacePick: ((faceId: number) => void) | null = null
   private wireframe = false
   private raf = 0
   private ro: ResizeObserver
@@ -37,6 +43,7 @@ export class ModelViewer {
 
     this.controls = new OrbitControls(this.camera, this.renderer.domElement)
     this.controls.enableDamping = true
+    this.renderer.domElement.addEventListener('click', (event) => this.pickFace(event))
 
     this.scene.add(new THREE.AmbientLight(0xffffff, 0.65))
     const key = new THREE.DirectionalLight(0xffffff, 0.9)
@@ -77,6 +84,7 @@ export class ModelViewer {
     geo.center()
 
     this.disposeMesh()
+    this.faceMesh = null
     const material = new THREE.MeshStandardMaterial({
       color: 0x2a5c8a,
       metalness: 0.1,
@@ -89,6 +97,57 @@ export class ModelViewer {
     this.frame(geo)
   }
 
+  setFaceMesh(data: FaceMesh) {
+    const geo = new THREE.BufferGeometry()
+    geo.setAttribute('position', new THREE.Float32BufferAttribute(data.positions, 3))
+    geo.setIndex(data.indices)
+    geo.rotateX(-Math.PI / 2) // CAD Z-up -> viewer Y-up
+    geo.computeVertexNormals()
+    geo.computeBoundingBox()
+    const displayCentre = geo.boundingBox!.getCenter(new THREE.Vector3())
+    geo.center()
+
+    this.disposeMesh()
+    this.faceMesh = data
+    const material = new THREE.MeshStandardMaterial({
+      color: 0x2a5c8a, metalness: 0.1, roughness: 0.6,
+      wireframe: this.wireframe, flatShading: true,
+    })
+    this.mesh = new THREE.Mesh(geo, material)
+    this.mesh.userData.displayCentre = displayCentre
+    this.scene.add(this.mesh)
+    this.frame(geo)
+  }
+
+  setFacePicking(onPick: ((faceId: number) => void) | null) {
+    this.onFacePick = onPick
+    this.renderer.domElement.style.cursor = onPick ? 'crosshair' : ''
+    this.disposePickerLabels()
+    if (onPick) this.showPickerLabels()
+  }
+
+  selectFace(faceId: number | null) {
+    this.disposeSelection()
+    if (faceId == null || !this.mesh || !this.faceMesh) return
+    const face = this.faceMesh.faces.find((item) => item.id === faceId)
+    if (!face) return
+    const base = this.mesh.geometry as THREE.BufferGeometry
+    const overlay = new THREE.BufferGeometry()
+    overlay.setAttribute('position', base.getAttribute('position'))
+    overlay.setIndex(this.faceMesh.indices.slice(face.start, face.start + face.count))
+    this.selectedOverlay = new THREE.Mesh(overlay, new THREE.MeshBasicMaterial({
+      color: 0xffc857, transparent: true, opacity: 0.58, side: THREE.DoubleSide,
+      depthWrite: false,
+    }))
+    this.selectedOverlay.renderOrder = 1
+    this.scene.add(this.selectedOverlay)
+
+    const anchor = this.displayAnchor(face.anchor)
+    this.selectedLabel = this.makeLabel(face.label)
+    this.selectedLabel.position.copy(anchor)
+    this.scene.add(this.selectedLabel)
+  }
+
   setWireframe(on: boolean) {
     this.wireframe = on
     if (this.mesh) (this.mesh.material as THREE.MeshStandardMaterial).wireframe = on
@@ -96,6 +155,56 @@ export class ModelViewer {
 
   clear() {
     this.disposeMesh()
+    this.faceMesh = null
+  }
+
+  private pickFace(event: MouseEvent) {
+    if (!this.onFacePick || !this.mesh || !this.faceMesh) return
+    const rect = this.renderer.domElement.getBoundingClientRect()
+    const pointer = new THREE.Vector2(
+      ((event.clientX - rect.left) / rect.width) * 2 - 1,
+      -((event.clientY - rect.top) / rect.height) * 2 + 1,
+    )
+    const raycaster = new THREE.Raycaster()
+    raycaster.setFromCamera(pointer, this.camera)
+    const hit = raycaster.intersectObject(this.mesh, false)[0]
+    if (!hit || hit.faceIndex == null) return
+    const indexOffset = hit.faceIndex * 3
+    const face = this.faceMesh.faces.find((item) =>
+      indexOffset >= item.start && indexOffset < item.start + item.count,
+    )
+    if (face) this.onFacePick(face.id)
+  }
+
+  private makeLabel(text: string) {
+    const canvas = document.createElement('canvas')
+    canvas.width = canvas.height = 96
+    const context = canvas.getContext('2d')!
+    context.beginPath(); context.arc(48, 48, 34, 0, Math.PI * 2)
+    context.fillStyle = '#ffc857'; context.fill()
+    context.fillStyle = '#172033'; context.font = 'bold 48px sans-serif'
+    context.textAlign = 'center'; context.textBaseline = 'middle'; context.fillText(text, 48, 50)
+    // Labels behind the model must remain hidden; otherwise A on the back face
+    // can visually overlap a different front face and make the target ambiguous.
+    const sprite = new THREE.Sprite(new THREE.SpriteMaterial({ map: new THREE.CanvasTexture(canvas), depthWrite: false }))
+    sprite.scale.set(12, 12, 1)
+    return sprite
+  }
+
+  private displayAnchor(anchor: [number, number, number]) {
+    return new THREE.Vector3(...anchor)
+      .applyAxisAngle(new THREE.Vector3(1, 0, 0), -Math.PI / 2)
+      .sub(this.mesh!.userData.displayCentre as THREE.Vector3)
+  }
+
+  private showPickerLabels() {
+    if (!this.mesh || !this.faceMesh) return
+    for (const face of this.faceMesh.faces.filter((item) => item.planar && item.center != null).slice(0, 30)) {
+      const label = this.makeLabel(face.label)
+      label.position.copy(this.displayAnchor(face.anchor))
+      this.pickerLabels.push(label)
+      this.scene.add(label)
+    }
   }
 
   private frame(geo: THREE.BufferGeometry) {
@@ -116,11 +225,37 @@ export class ModelViewer {
   }
 
   private disposeMesh() {
+    this.disposePickerLabels()
+    this.disposeSelection()
     if (!this.mesh) return
     this.scene.remove(this.mesh)
     this.mesh.geometry.dispose()
     ;(this.mesh.material as THREE.Material).dispose()
     this.mesh = null
+  }
+
+  private disposePickerLabels() {
+    for (const label of this.pickerLabels) {
+      this.scene.remove(label)
+      ;(label.material as THREE.SpriteMaterial).map?.dispose()
+      ;(label.material as THREE.Material).dispose()
+    }
+    this.pickerLabels = []
+  }
+
+  private disposeSelection() {
+    if (this.selectedOverlay) {
+      this.scene.remove(this.selectedOverlay)
+      this.selectedOverlay.geometry.dispose()
+      ;(this.selectedOverlay.material as THREE.Material).dispose()
+      this.selectedOverlay = null
+    }
+    if (this.selectedLabel) {
+      this.scene.remove(this.selectedLabel)
+      ;(this.selectedLabel.material as THREE.SpriteMaterial).map?.dispose()
+      ;(this.selectedLabel.material as THREE.Material).dispose()
+      this.selectedLabel = null
+    }
   }
 
   dispose() {

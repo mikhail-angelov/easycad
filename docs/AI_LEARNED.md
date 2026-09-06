@@ -137,3 +137,73 @@ from source operations. This measurement fix does not repair that library behavi
 - Assuming a shell-built enclosure plus lid exports as two solids failed the
   topology checks. A rectangular `cutBlind(-18)` pocket preserved a solid under
   export iteration and passed the same enclosure checks.
+
+## 2026-09-06 — Validate face anchors against trimmed geometry
+
+### Goal
+
+Choose label, sketch or engraving anchors that actually belong to a CAD face,
+including planar faces with holes.
+
+### Golden path
+
+1. Obtain the actual face in the isolated CadQuery process.
+2. Treat `Face.Center()` as a candidate, not a guaranteed point on the face.
+3. Check it with `BRepClass_FaceClassifier(face.wrapped, gp_Pnt(x, y, z), tolerance)`
+   from OCP. An `OUT` result requires a different, validated anchor or user choice.
+4. Check the operation footprint separately: an anchor on the face does not
+   guarantee that the whole text/sketch fits inside its trimmed boundary.
+
+### Verification
+
+A local `.venv-poc/bin/python` diagnostic built
+`cq.Workplane('XY').circle(10).circle(5).extrude(3)` and selected its top face.
+`Center()` returned approximately `(0, 0, 3)`; classification at tolerance
+`1e-6` returned `TopAbs_OUT`, correctly identifying the hole.
+See `docs/research-face-targeting-2026-09-06.md` for the research context.
+
+### Failure pattern avoided
+
+An overlay or centred operation can land in empty space even on a planar face.
+Geometric centre, valid label anchor and intended operation location are not
+interchangeable concepts.
+
+### Ruled-out approaches
+
+- Using `Face.Center()` unconditionally failed on the annular top face above.
+
+## 2026-09-06 — Keep interactive face IDs scoped to one rendered CAD snapshot
+
+### Goal
+
+Let a viewer pick a CAD face without treating STL triangle numbers, client
+coordinates or a source-code hash as durable topology identifiers.
+
+### Golden path
+
+1. In the isolated worker, tessellate each `Shape.Faces()` item separately and
+   store the exact index range beside a local face ID.
+2. Attach a new random revision to that mesh when the successful step is stored.
+3. Send only `(revision, face_id)` from the browser; resolve centre and normal
+   from the stored map after confirming the supplied editor code equals the
+   current step.
+4. Clear client selection whenever the rendered model changes. Reject stale or
+   unavailable faces before an LLM call.
+
+### Verification
+
+`tests/test_face_selection.py` exercises a real worker mesh plus the API path:
+current target reaches the generator, wrong revision and changed editor code
+produce `409`, and an annular planar face produces `422` without a provider call.
+
+### Failure pattern avoided
+
+STL has triangles, not durable BRep face identities. An index can point at a
+different surface after any rebuild; a geometric centre can be inside a hole.
+
+### Ruled-out approaches
+
+- Matching a separately exported STL triangle index to a BRep face was rejected:
+  the correspondence is not a contractual stable identifier.
+- Allowing the browser to supply a point or normal was rejected because display
+  rotation/centring differs from CAD coordinates and is client-controlled.
