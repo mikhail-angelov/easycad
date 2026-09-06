@@ -16,6 +16,7 @@ from openai import AsyncOpenAI, OpenAI
 
 from .crashlog import scrub_text
 from .skills import render as skills_render
+from .skills import select as skills_select
 
 log = logging.getLogger("easycad.llm")
 
@@ -536,8 +537,9 @@ async def generate_code(
 
     A higher `temperature` yields more varied output — used to generate several
     distinct candidates for the retry-with-variations flow. `skills` are
-    specialised recipe tags (from triage) injected as an extra system message
-    only when relevant — see `app/skills.py` (SPEC15).
+    specialised recipe tags (from triage) injected as an extra system message.
+    When absent, the request selects applicable recipes locally, including on
+    the first turn and with refinement disabled — see `app/skills.py` (SPEC15).
 
     `feedback` (in-turn repair): when a prior attempt this turn failed,
     `{"code": <failed script>, "error": <message>}` is appended so the model can
@@ -563,7 +565,7 @@ async def generate_code(
     messages = [{"role": "system", "content": SYSTEM_PROMPT}]
     if replace_initial:
         messages.append({"role": "system", "content": INITIAL_REPLACEMENT_PROMPT})
-    skill_prompt = skills_render(skills)
+    skill_prompt = skills_render(skills_select(prompt, skills))
     if skill_prompt:
         messages.append({"role": "system", "content": skill_prompt})
     messages.append({"role": "user", "content": user_msg})

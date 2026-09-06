@@ -1653,11 +1653,10 @@ async def _chat_response(
         )
 
     if not req.auto_refine:
-        # No triage this turn. Skills come ONLY from the server-side pending
-        # refinement stored by the triage that returned confirm_refine — never
-        # from the request, and only when this turn's prompt matches the one the
-        # refinement was for. So neither a client nor an unrelated auto_refine=off
-        # turn can pick up someone else's recipe (SPEC15). The pending state is
+        # No triage this turn. Explicit skill tags come only from the matching
+        # server-side pending refinement, never from the request. Without pending
+        # tags, generate_code selects recipes from this turn's prompt locally.
+        # An unrelated turn cannot inherit a pending recipe (SPEC15). The state is
         # consumed inside _generate_and_step, and only on a fully successful
         # attempt — a failed confirm leaves it so a retry still gets the recipe.
         matched = (

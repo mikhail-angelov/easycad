@@ -6,18 +6,90 @@ The LLM is stubbed so no live provider is needed; CadQuery still runs the
 stub's code, so it must be valid.
 """
 
+import asyncio
 import struct
+from types import SimpleNamespace
 
 import numpy as np
+import pytest
 from fastapi.testclient import TestClient
 
 import app.main as m
 from app.main import app
 from app import skills
+from app import llm
 from app.cadquery_exec import execute
 from app.refiner import TriageResult, _parse, _triage_system_prompt
 
 BOX = "import cadquery as cq\nresult = cq.Workplane('XY').box(10, 10, 10)\n"
+
+
+@pytest.mark.parametrize("endpoint,auto_refine,current_code", [
+    ("/api/chat", True, None),
+    ("/api/chat", False, None),
+    ("/api/chat", False, BOX),
+    ("/api/variations", True, None),
+    ("/api/variations", False, BOX),
+])
+def test_first_bolt_request_loads_recipe_without_triage(monkeypatch, endpoint, auto_refine, current_code):
+    messages_seen = []
+
+    async def completion(messages, *args, **kwargs):
+        messages_seen.extend(messages)
+        return SimpleNamespace(content=BOX)
+
+    async def no_triage(*args, **kwargs):
+        raise AssertionError("Creating a model must not require clarification")
+
+    monkeypatch.setattr(llm, "completion", completion)
+    monkeypatch.setattr(m, "triage", no_triage)
+    client = TestClient(app)
+    payload = {"prompt": "Сделай болт M12", "auto_refine": auto_refine, "count": 1}
+    if current_code is not None:
+        payload["current_code"] = current_code
+    response = client.post(endpoint, json=payload)
+
+    assert response.status_code == 200, response.text
+    body = response.json()
+    result = body["step"] if endpoint == "/api/chat" else body["candidates"][0]
+    assert result["success"]
+    assert any(skills.THREAD_EXAMPLE in msg["content"] for msg in messages_seen)
+
+
+@pytest.mark.parametrize("prompt,tags,expected", [
+    ("Create an M12 bolt", None, True),
+    ("Сделай гайку М8", None, True),
+    ("Добавь внутреннюю резьбу M8", None, True),
+    ("A threaded rod with an unthreaded shank", None, True),
+    ("Create an M12 bolt with an unthreaded shank", None, True),
+    ("Сделай болт M12 с участком без резьбы", None, True),
+    ("Болт с участком без резьбы и резьбой M12 на конце", None, True),
+    ("Make a box 80 x 50 x 30 mm", None, False),
+    ("Сделай коробку 80 на 50 на 30 мм", None, False),
+    ("A plate with four bolt holes", None, False),
+    ("A plate with clearance holes for M6 screws", None, False),
+    ("Make a box with clearance holes for four M6 bolts", None, False),
+    ("Пластина с отверстиями под болты M6", None, False),
+    ("Карманы для гаек M6", None, False),
+    ("Сделай винтовую лестницу", None, False),
+    ("Сделай винт для самолёта диаметром 100 мм", None, False),
+    ("Make an unthreaded bolt", None, False),
+    ("Болт M12 без резьбы", None, False),
+    ("Remove the thread from the bolt", None, False),
+    ("M12 bolt", [], False),
+    ("Use the confirmed dimensions", ["thread"], True),
+])
+def test_generator_loads_only_applicable_recipes(monkeypatch, prompt, tags, expected):
+    messages_seen = []
+
+    async def completion(messages, *args, **kwargs):
+        messages_seen.extend(messages)
+        return SimpleNamespace(content=BOX)
+
+    monkeypatch.setattr(llm, "completion", completion)
+    asyncio.run(llm.generate_code(BOX, prompt, skills=tags))
+
+    assert any(skills.THREAD_EXAMPLE in msg["content"] for msg in messages_seen) is expected
 
 
 def _load_zr(stl_b64: str) -> tuple[np.ndarray, np.ndarray]:

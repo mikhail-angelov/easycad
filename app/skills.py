@@ -4,9 +4,9 @@ The base system prompt is kept lean. Specialised, heavier recipes — things the
 model tends to get wrong or invent badly (threads, gears, …) — live here as
 separate "skills" and are injected into the generator prompt ONLY when relevant.
 
-Relevance is decided upstream by the triage LLM call (see `refiner.triage`),
-which returns a list of skill tags from `SKILL_TAGS`. `render()` turns those
-tags into an extra system message for `llm.generate_code`.
+Triage can supply skill tags. When it is skipped, `select()` recognises explicit
+English/Russian thread requests locally, without another provider call. `render()`
+turns the selected tags into an extra system message for `llm.generate_code`.
 
 Each recipe is a VERIFIED snippet (runs clean in our cadquery 2.8.0 worker) —
 treat that as a hard requirement when adding new skills, mirroring the
@@ -14,6 +14,7 @@ treat that as a hard requirement when adding new skills, mirroring the
 """
 
 from dataclasses import dataclass
+import re
 
 
 @dataclass(frozen=True)
@@ -123,6 +124,39 @@ SKILL_TAGS: list[str] = list(SKILLS)
 
 # Menu block listed in the triage prompt so the classifier knows what exists.
 SKILL_MENU: str = "\n".join(f"    - {SKILLS[t].menu}" for t in SKILL_TAGS)
+
+
+def select(prompt: str, tags: list[str] | None = None) -> list[str]:
+    """Use triage's decision, or a conservative local fallback when absent.
+
+    This recognises explicit threads, bolts and nuts, not arbitrary synonyms or
+    ambiguous screw/stud/винт requests. Triage handles broader intent. An explicit
+    empty tag list means triage opted out.
+    Clearance holes and pockets for fasteners do not need physical threads.
+    """
+    if tags is not None:
+        return clean_tags(tags)
+    text = prompt.lower()
+    # A smooth section does not make the entire bolt threadless.
+    text = re.sub(r"\bunthreaded\s+(?:shank|section|portion)\b|"
+                  r"\b(?:участ\w*|част\w*|стерж\w*)\s+без\s+резьбы\b", " ", text)
+    thread_terms = r"threads?|threaded|threading|tapped|резьб\w*"
+    text, excluded = re.subn(
+        r"\b(?:without\s+(?:any\s+)?threads?|no\s+threads?|threadless|unthreaded|"
+        r"remove\s+(?:the\s+)?threads?|без\s+резьбы|уб(?:ери|рать)\s+резьбу)\b",
+        " ", text,
+    )
+    if excluded and not re.search(rf"\b(?:{thread_terms})\b", text):
+        return []
+    text = re.sub(
+        r"\b(?:bolt|screw|nut)[ -]+(?:clearance[ -]+)?(?:holes?|patterns?|circles?|pockets?|traps?)\b"
+        r"|\b(?:for|под|для)\s+(?:[\w.-]+\s+){0,4}(?:bolts?|screws?|nuts?|болт\w*|винт\w*|га(?:йк|ек)\w*)\b",
+        " ", text,
+    )
+    if re.search(rf"\b(?:{thread_terms}|bolts?|nuts?|"
+                 r"болт(?:а|у|ом|е|ы|ов|ам|ами|ах)?|гайк(?:а|и|у|ой|е|ам|ами|ах)|гаек)\b", text):
+        return ["thread"]
+    return []
 
 
 def clean_tags(tags: object) -> list[str]:

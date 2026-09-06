@@ -52,3 +52,47 @@ default. CadQuery then raises `AttributeError: 'NoneType' object has no attribut
 
 - Tried the engraving in the original worker image; it failed because no font
   could be resolved, not because of face placement or the CadQuery text API.
+
+## 2026-09-06 — Recipe selection must survive skipped triage
+
+### Goal
+
+Keep specialised recipes available on initial requests, refinement-off turns and
+variations without another provider call.
+
+### Golden path
+
+1. Select recipes at the shared `generate_code` boundary. Preserve explicit
+   triage tags: `None` enables fallback, `[]` opts out.
+2. Capture generator messages with external completion stubbed; exercise initial,
+   refinement-off and variations requests through the API.
+3. Include plain boxes, clearance holes, whole-part thread negation and partially
+   threaded bolts in routing regressions.
+4. Measure execution and geometry separately in live comparisons.
+
+### Verification
+
+The initial-request regression failed on the missing recipe before the fix and
+passed after it. Recipe tests: 44 passed. Full app suite: 333 passed, 24 platform
+skips. A/B conditions and limits: `docs/thread-recipe-routing-2026-09-06.md`.
+
+### Failure pattern avoided
+
+Choosing recipes only inside optional triage silently disables them on common
+generation paths. Successful export also does not establish correct dimensions
+or a watertight mesh, even with an executable recipe.
+
+### Ruled-out approaches
+
+- Existing triage-only selection failed the first-request regression.
+- Broad `винт` matching selected propellers and spiral stairs; ambiguous fastener
+  words now remain with triage.
+- Whole-request negation dropped partially threaded bolts; smooth sections are
+  handled separately and covered by regression cases.
+
+### Notes
+
+In this SOCKS-proxy environment, installing ordinary requirements left API client
+construction failing. Installing
+`uv pip install --python .venv-poc/bin/python 'httpx[socks]'` fixed it, and the
+full suite passed. The experiment's mesh connectivity analysis needed `networkx`.
