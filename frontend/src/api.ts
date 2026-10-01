@@ -23,6 +23,7 @@ export interface Facts {
   area_mm2: number
   bbox_mm: [number, number, number, number, number, number] // xmin, ymin, zmin, xmax, ymax, zmax
   center_mm: [number, number, number]
+  inertia_mm5: [number, number, number] // Ixx, Iyy, Izz about the centroid
   solids: number
   faces: number
   edges: number

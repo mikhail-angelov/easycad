@@ -100,7 +100,8 @@ test('errorCode: notice.code exposed; error → "error"; absent otherwise', () =
 
 const facts = {
   volume_mm3: 1000, area_mm2: 600, bbox_mm: [0, 0, 0, 10, 10, 10] as [number, number, number, number, number, number],
-  center_mm: [5, 5, 5] as [number, number, number], solids: 1, faces: 6, edges: 12,
+  center_mm: [5, 5, 5] as [number, number, number], inertia_mm5: [1, 1, 1] as [number, number, number],
+  solids: 1, faces: 6, edges: 12,
 }
 
 test('SPEC23: done exposes the current step verdict and facts', () => {
