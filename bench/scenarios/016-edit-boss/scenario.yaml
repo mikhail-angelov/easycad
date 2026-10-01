@@ -1,0 +1,18 @@
+id: 016-edit-boss
+title: "Edit: plate, then a boss, then a hole through both"
+spec: complete
+tags: [edit, multi-turn, boss, hole]
+timeout_s: 120
+
+turns:
+  - prompt: >
+      Create a rectangular plate 60 × 40 × 5 mm, centered on XY with its bottom
+      face at Z = 0.
+    reference: reference-1.py
+  - prompt: >
+      Add a cylindrical boss 12 mm in diameter and 10 mm tall on the center of
+      the top face.
+    reference: reference-2.py
+  - prompt: >
+      Drill a 5 mm diameter hole through the center of the boss and the plate.
+    reference: reference-3.py

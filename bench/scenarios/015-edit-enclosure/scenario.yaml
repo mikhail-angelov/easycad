@@ -1,0 +1,16 @@
+id: 015-edit-enclosure
+title: "Edit: open enclosure, then a cutout in the front wall"
+spec: complete
+tags: [edit, multi-turn, shell, cutout]
+timeout_s: 120
+
+turns:
+  - prompt: >
+      Create an open-top enclosure: outer size 100 × 60 × 40 mm, centered on XY
+      with its bottom face at Z = 0, 2 mm walls and floor, top fully open.
+    reference: reference-1.py
+  - prompt: >
+      Cut a rectangular opening 20 mm wide and 10 mm tall through the front wall
+      (the wall at the minimum Y side). Center it left-to-right; its center is
+      15 mm above the bottom face of the enclosure.
+    reference: reference-2.py

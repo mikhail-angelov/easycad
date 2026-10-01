@@ -1,0 +1,44 @@
+{
+  "generated_by": "bench spec",
+  "turn": 1,
+  "reference_sha256": "b4b90780cdcaff5678978a062f5decc9882f214dc87cb2c78444d42ed2f87d17",
+  "toolchain": {
+    "cadquery": "2.8.0",
+    "OCP": "7.9.3.1.1",
+    "trimesh": "5.1.0",
+    "tessellation": {
+      "linear_deflection": 0.05,
+      "angular_deflection": 0.3
+    }
+  },
+  "bbox_mm": [
+    60.0,
+    40.0,
+    5.0
+  ],
+  "volume_mm3": 12000.0,
+  "solids": 1,
+  "bodies": 1,
+  "valid": true,
+  "watertight": true,
+  "coordinate_contract": {
+    "z_min_mm": 0.0,
+    "xy_center_mm": [
+      0.0,
+      0.0
+    ],
+    "ok": true,
+    "tol_z_mm": 0.1,
+    "tol_xy_mm": 0.5
+  },
+  "artifacts": {
+    "step": {
+      "file": "turn-1.step",
+      "sha256": "eb51eb84a396f3801e12cfd27f16cd22cd2e3914cba1237c5055caa7a48e3827"
+    },
+    "stl": {
+      "file": "turn-1.stl",
+      "sha256": "035b4f65464ff64c5a0a6a27d7e7a43bfc6b3ef042558a75b53a36f1566acc94"
+    }
+  }
+}

@@ -1,0 +1,21 @@
+{
+  "validator": "agent-visual-check",
+  "date": "2026-10-01",
+  "per_turn": [
+    {
+      "turn": 1,
+      "reference_sha256": "3e23be26515d2d1a9a9f01446fae5c76dc304e5ab729d89c2f0c2f5a236a31f8",
+      "accepted": true
+    },
+    {
+      "turn": 2,
+      "reference_sha256": "576cd0737b0ae1223873c1c605e1f1fc55737c92510bfc2f4ff03a6428773045",
+      "accepted": true
+    },
+    {
+      "turn": 3,
+      "reference_sha256": "b6b3aa9e962594ab0ff6a5ce0d3115c71291b0e443ff59235b69881724068e09",
+      "accepted": true
+    }
+  ]
+}

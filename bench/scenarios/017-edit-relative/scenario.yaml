@@ -1,0 +1,18 @@
+id: 017-edit-relative
+title: "Edit: relative changes to existing holes (bigger, further apart)"
+spec: complete
+tags: [edit, multi-turn, relative, hole]
+timeout_s: 120
+
+turns:
+  - prompt: >
+      Create a plate 80 × 50 × 5 mm, centered on XY with its bottom face at
+      Z = 0, with two 6 mm through holes on the X axis, 50 mm apart center to
+      center, symmetric about the plate center.
+    reference: reference-1.py
+  - prompt: >
+      Make the holes 2 mm bigger in diameter.
+    reference: reference-2.py
+  - prompt: >
+      Move the holes 5 mm further apart, still symmetric about the center.
+    reference: reference-3.py

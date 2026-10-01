@@ -1,0 +1,19 @@
+id: 013-edit-plate
+title: "Edit: plate, then corner holes, then rounded corners"
+spec: complete
+tags: [edit, multi-turn, hole, fillet]
+timeout_s: 120
+
+turns:
+  - prompt: >
+      Create a rectangular plate 80 × 60 × 6 mm, centered on XY with its bottom
+      face at Z = 0.
+    reference: reference-1.py
+  - prompt: >
+      Add four through holes, 4 mm diameter, one near each corner: each hole
+      center is 8 mm in from both adjacent edges.
+    reference: reference-2.py
+  - prompt: >
+      Now round the four vertical corner edges of the plate with a 5 mm radius.
+      Keep the holes.
+    reference: reference-3.py
