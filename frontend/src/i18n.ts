@@ -74,6 +74,8 @@ const STRINGS: Record<Lang, Record<string, string>> = {
 
     'viewer.title': 'Model',
     'viewer.wireframe': 'wireframe',
+    'viewer.faceOrientation': 'Orientation',
+    'viewer.faceSize': 'Surface size',
     'viewer.exportStl': 'Export STL',
     'viewer.download': 'Download',
     'viewer.hintMesh': '3D mesh',
@@ -202,6 +204,8 @@ const STRINGS: Record<Lang, Record<string, string>> = {
 
     'viewer.title': 'Модель',
     'viewer.wireframe': 'каркас',
+    'viewer.faceOrientation': 'Ориентация',
+    'viewer.faceSize': 'Размер поверхности',
     'viewer.exportStl': 'Экспорт STL',
     'viewer.download': 'Скачать',
     'viewer.hintMesh': '3D-меш',

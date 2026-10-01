@@ -9,6 +9,7 @@ timeline can render branch points later.
 import time
 from dataclasses import asdict, dataclass
 from itertools import count
+from uuid import uuid4
 
 from .cadquery_exec import strip_geometry_block
 
@@ -26,11 +27,15 @@ class Step:
     error: str | None
     parent_id: int | None
     created_at: float
+    # Snapshot-only face map for the interactive viewer. It is deliberately not
+    # exported in a project: importing source requires a fresh trusted execution.
+    face_mesh: dict | None = None
 
     def to_public(self, include_stl: bool = True) -> dict:
         data = asdict(self)
         if not include_stl:
             data.pop("stl_base64", None)
+            data.pop("face_mesh", None)
         elif self.stl_base64:
             # Content hash of the STL bytes, so a client (e.g. the bench harness)
             # can verify the inline base64 decoded to exactly what the server
@@ -73,6 +78,7 @@ class SessionStore:
         refined_prompt: str | None = None,
         stl_base64: str | None = None,
         geometry_info: str | None = None,
+        face_mesh: dict | None = None,
         error: str | None = None,
         make_current: bool = True,
     ) -> Step:
@@ -91,6 +97,7 @@ class SessionStore:
             error=error,
             parent_id=self.current_id,
             created_at=time.time(),
+            face_mesh=({**face_mesh, "revision": uuid4().hex} if face_mesh else None),
         )
         self._steps[step.id] = step
         self._order.append(step.id)

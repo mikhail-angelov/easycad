@@ -597,6 +597,18 @@ body {
   max-height: 96px;
   overflow: auto;
 }
+.face-info {
+  display: flex;
+  gap: 16px;
+  padding: 8px 16px;
+  border-top: 1px solid var(--grid);
+  background: #fff8e8;
+  color: var(--soft);
+  font: 11px/1.5 ui-monospace, monospace;
+}
+.face-info strong {
+  color: var(--ink);
+}
 
 /* ── Chat ────────────────────────────────────────────────── */
 .chat-panel > header {
@@ -891,6 +903,7 @@ body {
   color: var(--soft);
   font-size: 11px;
 }
+
 .chat-send {
   display: flex;
   flex-direction: column;

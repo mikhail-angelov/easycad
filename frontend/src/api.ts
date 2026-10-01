@@ -12,6 +12,32 @@ export interface Step {
   error: string | null
   parent_id: number | null
   created_at: number
+  face_mesh: FaceMesh | null
+}
+
+export interface FaceInfo {
+  id: number
+  label: string
+  start: number
+  count: number
+  planar: boolean
+  anchor: [number, number, number]
+  center: [number, number, number] | null
+  normal: [number, number, number] | null
+  size: [number, number] | null
+}
+
+export interface FaceMesh {
+  revision: string
+  positions: number[]
+  indices: number[]
+  faces: FaceInfo[]
+}
+
+export interface FaceSelection {
+  revision: string
+  faceId: number
+  label: string
 }
 
 export interface AuthInfo {
@@ -221,6 +247,7 @@ export const api = {
     autoRefine: boolean,
     refinedPrompt?: string,
     responseLanguage: 'en' | 'ru' = 'en',
+    faceSelection?: FaceSelection | null,
     options?: ChatStreamOptions,
   ): Promise<ChatResponse> =>
     streamChat({
@@ -231,6 +258,8 @@ export const api = {
       auto_refine: autoRefine,
       refined_prompt: refinedPrompt,
       response_language: responseLanguage,
+      face_revision: faceSelection?.revision,
+      face_id: faceSelection?.faceId,
     }, options),
 
   variations: (

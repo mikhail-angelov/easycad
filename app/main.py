@@ -890,6 +890,34 @@ class ChatRequest(BaseModel):
     auto_refine: bool = True
     refined_prompt: str | None = Field(default=None, max_length=MAX_PROMPT)
     response_language: Literal["en", "ru"] = "en"
+    face_revision: str | None = Field(default=None, max_length=64)
+    face_id: int | None = Field(default=None, ge=0)
+
+
+def _selected_face_context(session: Session, req: ChatRequest, base_code: str) -> str:
+    """Resolve a client selection only against its current server-side snapshot."""
+    if req.face_revision is None and req.face_id is None:
+        return ""
+    if not req.face_revision or req.face_id is None:
+        raise _coded_error(422, "invalid_face_selection", "Select one current model surface.")
+    current = session.store.current()
+    if current is None or strip_geometry_block(base_code) != current.code:
+        raise _coded_error(409, "stale_face_selection", "The model changed; select its surface again.")
+    mesh = current.face_mesh
+    if not mesh or mesh.get("revision") != req.face_revision:
+        raise _coded_error(409, "stale_face_selection", "The model changed; select its surface again.")
+    face = next((item for item in mesh.get("faces", []) if item.get("id") == req.face_id), None)
+    if face is None:
+        raise _coded_error(422, "invalid_face_selection", "The selected surface is unavailable.")
+    if not face.get("planar") or face.get("center") is None or face.get("normal") is None:
+        raise _coded_error(422, "unsupported_face_selection", "Choose a planar surface for this edit.")
+    center = ", ".join(f"{value:.3f}" for value in face["center"])
+    normal = ", ".join(f"{value:.3f}" for value in face["normal"])
+    return (
+        f"\n\nTARGET SURFACE (server-verified; do not reinterpret): face {face['label']}. "
+        f"It is planar. Verified reference point in CAD millimetres: ({center}); outward normal: ({normal}). "
+        "Apply the requested feature on this exact surface."
+    )
 
 
 class RefineRequest(BaseModel):
@@ -976,6 +1004,7 @@ def _create_initial(store) -> None:
         code=INITIAL_CODE,
         stl_base64=res.stl_base64,
         geometry_info=res.geometry_info,
+        face_mesh=res.face_mesh,
         success=res.success,
         error=res.error,
     )
@@ -1002,6 +1031,7 @@ def _ensure_step_stl(step) -> None:
             _gen_semaphore.release()
     if res.success:
         step.stl_base64 = res.stl_base64
+        step.face_mesh = ({**res.face_mesh, "revision": secrets.token_hex(16)} if res.face_mesh else None)
         if res.geometry_info:
             step.geometry_info = res.geometry_info
 
@@ -1461,6 +1491,7 @@ def api_execute_manual(
         code=req.code,
         stl_base64=res.stl_base64,
         geometry_info=res.geometry_info,
+        face_mesh=res.face_mesh,
         success=res.success,
         error=res.error,
         make_current=res.success,
@@ -1603,6 +1634,7 @@ async def _generate_and_step(
         code=code,
         stl_base64=res.stl_base64,
         geometry_info=res.geometry_info,
+        face_mesh=res.face_mesh,
         success=res.success,
         error=res.error,
         make_current=res.success,
@@ -1642,22 +1674,22 @@ async def _chat_response(
     _check_capacity(session)
     _ensure_initial(session.store)
     base_code = _base_code(session.store, req.current_code)
+    selection_context = _selected_face_context(session, req, base_code)
     provider, model, api_key, trial_ident = _resolve_llm(session, request, req.provider, req.model)
 
     # The starter box is a disposable visual placeholder. The first user request
     # always defines the actual model, so bypass triage and replace it directly.
     if _is_initial_model(session.store, base_code):
         return await _generate_and_step(
-            session, request, base_code, req.prompt, req.prompt, None,
+            session, request, base_code, req.prompt + selection_context, req.prompt, None,
             provider, model, api_key, trial_ident, progress=progress,
         )
 
     if not req.auto_refine:
-        # No triage this turn. Skills come ONLY from the server-side pending
-        # refinement stored by the triage that returned confirm_refine — never
-        # from the request, and only when this turn's prompt matches the one the
-        # refinement was for. So neither a client nor an unrelated auto_refine=off
-        # turn can pick up someone else's recipe (SPEC15). The pending state is
+        # No triage this turn. Explicit skill tags come only from the matching
+        # server-side pending refinement, never from the request. Without pending
+        # tags, generate_code selects recipes from this turn's prompt locally.
+        # An unrelated turn cannot inherit a pending recipe (SPEC15). The state is
         # consumed inside _generate_and_step, and only on a fully successful
         # attempt — a failed confirm leaves it so a retry still gets the recipe.
         matched = (
@@ -1665,7 +1697,7 @@ async def _chat_response(
             and session.pending_skills[0] == req.prompt
         )
         skills = session.pending_skills[1] if matched else None
-        gen_prompt = req.refined_prompt or req.prompt
+        gen_prompt = (req.refined_prompt or req.prompt) + selection_context
         return await _generate_and_step(
             session, request, base_code, gen_prompt, req.prompt, req.refined_prompt,
             provider, model, api_key, trial_ident, skills=skills, consume_pending=matched,
@@ -1679,7 +1711,7 @@ async def _chat_response(
         await _emit_progress(progress, "refining")
         t = await _await_llm(
             request, "triage",
-            triage(req.prompt, _with_geometry(session.store, base_code), provider, model, api_key,
+            triage(req.prompt + selection_context, _with_geometry(session.store, base_code), provider, model, api_key,
                    response_language=req.response_language),
         )
     except LLMEmptyResponse as exc:
@@ -1699,7 +1731,7 @@ async def _chat_response(
                         refined_prompt=t.refined_prompt)
 
     return await _generate_and_step(
-        session, request, base_code, req.prompt, req.prompt, None,
+        session, request, base_code, req.prompt + selection_context, req.prompt, None,
         provider, model, api_key, trial_ident, skills=t.skills, progress=progress,
     )
 
@@ -1889,6 +1921,7 @@ def api_commit(
         code=req.code,
         stl_base64=res.stl_base64,
         geometry_info=res.geometry_info,
+        face_mesh=res.face_mesh,
         success=res.success,
         error=res.error,
         make_current=res.success,
