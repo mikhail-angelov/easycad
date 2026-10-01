@@ -12,7 +12,30 @@ down the API server — the parent just observes a non-zero exit or timeout.
 """
 
 import json
+import math
 import sys
+
+
+def _planar_size(vertices, normal: tuple[float, float, float]) -> list[float]:
+    """Return the extents of a tessellated planar face along its own axes."""
+    reference = (0.0, 0.0, 1.0) if abs(normal[2]) < 0.9 else (0.0, 1.0, 0.0)
+    u = (
+        reference[1] * normal[2] - reference[2] * normal[1],
+        reference[2] * normal[0] - reference[0] * normal[2],
+        reference[0] * normal[1] - reference[1] * normal[0],
+    )
+    length = math.sqrt(sum(value * value for value in u))
+    u = tuple(value / length for value in u)
+    v = (
+        normal[1] * u[2] - normal[2] * u[1],
+        normal[2] * u[0] - normal[0] * u[2],
+        normal[0] * u[1] - normal[1] * u[0],
+    )
+    projected = [
+        (sum(a * b for a, b in zip(vertex.toTuple(), u)), sum(a * b for a, b in zip(vertex.toTuple(), v)))
+        for vertex in vertices
+    ]
+    return [max(axis) - min(axis) for axis in zip(*projected)]
 
 
 def get_face_mesh(shape) -> dict | None:
@@ -22,9 +45,6 @@ def get_face_mesh(shape) -> dict | None:
     has no stable relationship to a BRep face. Selection is optional UI data;
     failure or a very large model must not turn a valid export into a failure.
     """
-    from OCP.BRepClass import BRepClass_FaceClassifier
-    from OCP.TopAbs import TopAbs_IN, TopAbs_ON
-
     faces = shape.Faces()
     if len(faces) > 500:
         return None
@@ -40,15 +60,12 @@ def get_face_mesh(shape) -> dict | None:
         positions.extend(coordinate for vertex in vertices for coordinate in vertex.toTuple())
         indices.extend(offset + vertex for triangle in triangles for vertex in triangle)
 
-        planar = face.geomType() == "PLANE"
-        center = face.Center()
-        center_on_face = planar and BRepClass_FaceClassifier(
-            face.wrapped, center.toPnt(), 1e-6,
-        ).State() in (TopAbs_IN, TopAbs_ON)
         # The centroid of a tessellated triangle lies within the trimmed face,
-        # unlike the area centre of an annulus or a concave face.
+        # unlike the area centre of a face with holes or a concave face.
         tri = triangles[0]
         anchor = (vertices[tri[0]] + vertices[tri[1]] + vertices[tri[2]]) / 3
+        planar = face.geomType() == "PLANE"
+        normal = face.normalAt(anchor).toTuple() if planar else None
         label, number = "", face_id + 1
         while number:
             number, digit = divmod(number - 1, 26)
@@ -60,8 +77,11 @@ def get_face_mesh(shape) -> dict | None:
             "count": len(indices) - start,
             "planar": planar,
             "anchor": anchor.toTuple(),
-            "center": center.toTuple() if center_on_face else None,
-            "normal": face.normalAt(anchor).toTuple() if planar else None,
+            # Kept as `center` for the client contract, but this is a verified
+            # interior reference point rather than the geometric area centre.
+            "center": anchor.toTuple() if planar else None,
+            "normal": normal,
+            "size": _planar_size(vertices, normal) if normal else None,
         })
     return {"positions": positions, "indices": indices, "faces": records}
 

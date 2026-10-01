@@ -24,6 +24,7 @@ export interface FaceInfo {
   anchor: [number, number, number]
   center: [number, number, number] | null
   normal: [number, number, number] | null
+  size: [number, number] | null
 }
 
 export interface FaceMesh {

@@ -74,10 +74,8 @@ const STRINGS: Record<Lang, Record<string, string>> = {
 
     'viewer.title': 'Model',
     'viewer.wireframe': 'wireframe',
-    'viewer.selectSurface': 'Select surface',
-    'viewer.clickSurface': 'Click a planar surface',
-    'viewer.selectedSurface': 'Surface {label}',
-    'viewer.targetSurface': 'Target surface {label}',
+    'viewer.faceOrientation': 'Orientation',
+    'viewer.faceSize': 'Surface size',
     'viewer.exportStl': 'Export STL',
     'viewer.download': 'Download',
     'viewer.hintMesh': '3D mesh',
@@ -128,7 +126,6 @@ const STRINGS: Record<Lang, Record<string, string>> = {
     'chat.variationsTip': 'Generate 3 variations to pick from',
     'chat.variations': '3 variants',
     'chat.inputHint': 'Enter to send · Shift+Enter for a new line',
-    'chat.targetSurface': 'Target surface {label}',
     'chat.modelTip': 'Model ({provider})',
 
     'account.iconTip': 'Account & LLM key',
@@ -207,10 +204,8 @@ const STRINGS: Record<Lang, Record<string, string>> = {
 
     'viewer.title': 'Модель',
     'viewer.wireframe': 'каркас',
-    'viewer.selectSurface': 'Выбрать поверхность',
-    'viewer.clickSurface': 'Нажмите на плоскую поверхность',
-    'viewer.selectedSurface': 'Поверхность {label}',
-    'viewer.targetSurface': 'Поверхность {label}',
+    'viewer.faceOrientation': 'Ориентация',
+    'viewer.faceSize': 'Размер поверхности',
     'viewer.exportStl': 'Экспорт STL',
     'viewer.download': 'Скачать',
     'viewer.hintMesh': '3D-меш',
@@ -261,7 +256,6 @@ const STRINGS: Record<Lang, Record<string, string>> = {
     'chat.variationsTip': 'Сгенерировать 3 варианта на выбор',
     'chat.variations': '3 варианта',
     'chat.inputHint': 'Enter — отправить · Shift+Enter — новая строка',
-    'chat.targetSurface': 'Целевая поверхность {label}',
     'chat.modelTip': 'Модель ({provider})',
 
     'account.iconTip': 'Аккаунт и ключ LLM',

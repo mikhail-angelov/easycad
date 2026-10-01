@@ -75,9 +75,12 @@ def test_face_selection_does_not_apply_to_unexecuted_editor_code(monkeypatch):
     assert response.json()["detail"]["code"] == "stale_face_selection"
 
 
-def test_annular_planar_face_cannot_be_used_as_a_centre_target(monkeypatch):
-    async def completion(*args, **kwargs):
-        raise AssertionError("an annular centre target must not reach the provider")
+def test_annular_planar_face_can_be_selected(monkeypatch):
+    messages = []
+
+    async def completion(seen, *args, **kwargs):
+        messages.extend(seen)
+        return SimpleNamespace(content=BOX)
 
     monkeypatch.setattr(llm, "completion", completion)
     client = TestClient(app)
@@ -85,10 +88,10 @@ def test_annular_planar_face_cannot_be_used_as_a_centre_target(monkeypatch):
         "code": "import cadquery as cq\nresult = cq.Workplane('XY').circle(10).circle(5).extrude(3)\n",
     }).json()["step"]
     mesh = ring["face_mesh"]
-    face = next(item for item in mesh["faces"] if item["planar"] and item["center"] is None)
+    face = next(item for item in mesh["faces"] if item["planar"] and item["normal"][2] > 0.9)
     response = client.post("/api/chat", json={
         "prompt": "Engrave ABC", "auto_refine": False,
         "face_revision": mesh["revision"], "face_id": face["id"],
     })
-    assert response.status_code == 422
-    assert response.json()["detail"]["code"] == "unsupported_face_selection"
+    assert response.status_code == 200, response.text
+    assert any("Verified reference point" in item["content"] for item in messages)

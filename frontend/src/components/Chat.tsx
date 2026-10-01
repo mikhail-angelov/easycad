@@ -50,7 +50,6 @@ export function Chat() {
   const retryPrompt = useStore((s) => s.retryPrompt)
   const clearRetryPrompt = useStore((s) => s.clearRetryPrompt)
   const setAccountOpen = useStore((s) => s.setAccountOpen)
-  const selectedFace = useStore((s) => s.selectedFace)
   const t = useT()
 
   // The server emits each stage over SSE. This timer only ticks the *current*
@@ -375,7 +374,6 @@ export function Chat() {
 
       <div class="chat-input">
         <div class="chat-compose">
-          {selectedFace && <div class="selected-face-chip">{t('chat.targetSurface', { label: selectedFace.label })}</div>}
           <textarea
             ref={inputRef}
             id="chat-prompt"

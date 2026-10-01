@@ -3,7 +3,33 @@ import { api } from '../api'
 import { useStore, useT } from '../store'
 import { ModelViewer } from '../viewer3d'
 import { formatGeometryInfo } from '../geometry'
+import type { FaceInfo, FaceMesh } from '../api'
 import { IconCode, IconCube, IconDownload, IconMesh } from './Icons'
+
+function formatOrientation(normal: [number, number, number]) {
+  const axes = ['X', 'Y', 'Z']
+  const index = normal.reduce((best, value, current) => Math.abs(value) > Math.abs(normal[best]) ? current : best, 0)
+  if (Math.abs(normal[index]) > 0.999) return `${normal[index] >= 0 ? '+' : '-'}${axes[index]}`
+  return `(${normal.map((value) => value.toFixed(2)).join(', ')})`
+}
+
+function faceSize(face: FaceInfo, mesh: FaceMesh) {
+  if (face.size) return face.size
+  if (!face.normal) return null
+  const normalAxis = face.normal.reduce((best, value, current) =>
+    Math.abs(value) > Math.abs(face.normal![best]) ? current : best, 0)
+  const axes = [0, 1, 2].filter((axis) => axis !== normalAxis)
+  const ranges = axes.map(() => [Infinity, -Infinity])
+  for (let i = face.start; i < face.start + face.count; i++) {
+    const vertex = mesh.indices[i] * 3
+    axes.forEach((axis, range) => {
+      const value = mesh.positions[vertex + axis]
+      ranges[range][0] = Math.min(ranges[range][0], value)
+      ranges[range][1] = Math.max(ranges[range][1], value)
+    })
+  }
+  return ranges.map(([min, max]) => max - min) as [number, number]
+}
 
 export function Viewer() {
   const stlBase64 = useStore((s) => s.stlBase64)
@@ -12,12 +38,13 @@ export function Viewer() {
   const selectedFace = useStore((s) => s.selectedFace)
   const setSelectedFace = useStore((s) => s.setSelectedFace)
   const currentId = useStore((s) => s.currentId)
+  const selectedFaceInfo = selectedFace && faceMesh?.faces.find((face) => face.id === selectedFace.faceId)
+  const selectedFaceSize = selectedFaceInfo && faceMesh ? faceSize(selectedFaceInfo, faceMesh) : null
 
   const t = useT()
   const stageRef = useRef<HTMLDivElement>(null)
   const viewerRef = useRef<ModelViewer | null>(null)
   const [wire, setWire] = useState(false)
-  const [picking, setPicking] = useState(false)
   const [dlOpen, setDlOpen] = useState(false)
   const dlRef = useRef<HTMLDivElement>(null)
 
@@ -63,13 +90,16 @@ export function Viewer() {
   }, [selectedFace])
 
   useEffect(() => {
-    viewerRef.current?.setFacePicking(picking ? (faceId) => {
+    viewerRef.current?.setFaceSelectionHandler(faceMesh ? (faceId) => {
       const face = faceMesh?.faces.find((item) => item.id === faceId)
       if (!face?.planar || face.center == null || !faceMesh) return
-      setSelectedFace({ revision: faceMesh.revision, faceId, label: face.label })
-      setPicking(false)
+      if (selectedFace?.faceId === faceId) {
+        setSelectedFace(null)
+      } else {
+        setSelectedFace({ revision: faceMesh.revision, faceId, label: face.label })
+      }
     } : null)
-  }, [picking, faceMesh, setSelectedFace])
+  }, [faceMesh, selectedFace, setSelectedFace])
 
   return (
     <section class="panel viewer-panel">
@@ -86,24 +116,6 @@ export function Viewer() {
             />
             {t('viewer.wireframe')}
           </label>
-          {faceMesh && (
-            <button
-              class={`text-button ${picking ? 'active' : ''}`}
-              type="button"
-              id="viewer-select-face"
-              data-testid="viewer-select-face"
-              aria-pressed={picking}
-              onClick={() => setPicking((value) => !value)}
-            >
-              {picking ? t('viewer.clickSurface') : selectedFace
-                ? t('viewer.selectedSurface', { label: selectedFace.label }) : t('viewer.selectSurface')}
-            </button>
-          )}
-          {selectedFace && (
-            <button id="viewer-clear-face" type="button" class="text-button" onClick={() => setSelectedFace(null)}>
-              × {t('viewer.targetSurface', { label: selectedFace.label })}
-            </button>
-          )}
           {currentId != null && (
             <div class="export-menu" ref={dlRef}>
               <button id="viewer-download" data-testid="viewer-download" class="text-button" onClick={() => setDlOpen((v) => !v)}>
@@ -133,6 +145,12 @@ export function Viewer() {
         </div>
       </header>
       <div class="viewer-stage" ref={stageRef} />
+      {selectedFaceInfo?.normal && selectedFaceSize && (
+        <div class="face-info" data-testid="viewer-face-info">
+          <span>{t('viewer.faceOrientation')}: <strong>{formatOrientation(selectedFaceInfo.normal)}</strong></span>
+          <span>{t('viewer.faceSize')}: <strong>{selectedFaceSize.map((value) => value.toFixed(1)).join(' × ')} {t('geometry.mm')}</strong></span>
+        </div>
+      )}
       {geometryInfo && <div class="geo-info">{formatGeometryInfo(geometryInfo, t)}</div>}
     </section>
   )

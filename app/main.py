@@ -910,12 +910,12 @@ def _selected_face_context(session: Session, req: ChatRequest, base_code: str) -
     if face is None:
         raise _coded_error(422, "invalid_face_selection", "The selected surface is unavailable.")
     if not face.get("planar") or face.get("center") is None or face.get("normal") is None:
-        raise _coded_error(422, "unsupported_face_selection", "Choose a planar surface without a hole for this edit.")
+        raise _coded_error(422, "unsupported_face_selection", "Choose a planar surface for this edit.")
     center = ", ".join(f"{value:.3f}" for value in face["center"])
     normal = ", ".join(f"{value:.3f}" for value in face["normal"])
     return (
         f"\n\nTARGET SURFACE (server-verified; do not reinterpret): face {face['label']}. "
-        f"It is planar. Centre in CAD millimetres: ({center}); outward normal: ({normal}). "
+        f"It is planar. Verified reference point in CAD millimetres: ({center}); outward normal: ({normal}). "
         "Apply the requested feature on this exact surface."
     )
 
