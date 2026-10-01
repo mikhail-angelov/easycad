@@ -271,8 +271,13 @@ async def completion(
     api_key: str | None = None,
     operation: str,
     prompt_for_log: str,
+    thinking: bool = True,
 ) -> StreamResult:
     """Run one completion, using DeepSeek's faster non-streaming response mode.
+
+    `thinking=False` turns DeepSeek reasoning off. Bench 2026-10-01: generation
+    needs it (64 attempts: 61 pass with, 45 without), triage does not (39/39
+    correct without, 37/39 with, at half the latency).
 
     Other OpenAI-compatible providers keep the existing stream implementation;
     their transport behaviour has not been measured here.  No generated tokens
@@ -287,6 +292,7 @@ async def completion(
     result = await _deepseek_post(
         messages, model, temperature=temperature, max_tokens=max_tokens,
         api_key=api_key, operation=operation, prompt_for_log=prompt_for_log,
+        thinking=thinking,
     )
     if not result.content.strip() and result.finish_reason == "length" and result.reasoning_chars:
         # The model spent the whole budget reasoning and wrote no answer (seen on
