@@ -284,17 +284,50 @@ async def completion(
             api_key=api_key, operation=operation, prompt_for_log=prompt_for_log,
         )
 
+    result = await _deepseek_post(
+        messages, model, temperature=temperature, max_tokens=max_tokens,
+        api_key=api_key, operation=operation, prompt_for_log=prompt_for_log,
+    )
+    if not result.content.strip() and result.finish_reason == "length" and result.reasoning_chars:
+        # The model spent the whole budget reasoning and wrote no answer (seen on
+        # bench 004-l-bracket, ~70 s then an error). Ask once more without
+        # reasoning: an answer in seconds beats an error after a minute.
+        log.warning("llm.post reasoning exhausted the budget; retrying without thinking operation=%s", operation)
+        result = await _deepseek_post(
+            messages, model, temperature=temperature, max_tokens=max_tokens,
+            api_key=api_key, operation=operation, prompt_for_log=prompt_for_log,
+            thinking=False,
+        )
+    if not result.content.strip():
+        raise LLMEmptyResponse("The provider returned an empty response.")
+    return result
+
+
+async def _deepseek_post(
+    messages: list[dict],
+    model: str | None,
+    *,
+    temperature: float,
+    max_tokens: int,
+    api_key: str | None,
+    operation: str,
+    prompt_for_log: str,
+    thinking: bool = True,
+) -> StreamResult:
+    provider = "deepseek"
     client = make_async_client(provider, api_key)
     resolved = resolve_model(provider, model)
     log.info(
-        "llm.post start operation=%s provider=%s model=%s prompt_chars=%d prompt=%r",
-        operation, provider, resolved, len(prompt_for_log), _log_preview(prompt_for_log),
+        "llm.post start operation=%s provider=%s model=%s thinking=%s prompt_chars=%d prompt=%r",
+        operation, provider, resolved, thinking, len(prompt_for_log), _log_preview(prompt_for_log),
     )
     t0 = time.monotonic()
+    # https://api-docs.deepseek.com/guides/thinking_mode/
+    extra = {} if thinking else {"extra_body": {"thinking": {"type": "disabled"}}}
     try:
         response = await client.chat.completions.create(
             model=resolved, messages=messages, temperature=temperature,
-            max_tokens=max_tokens, stream=False,
+            max_tokens=max_tokens, stream=False, **extra,
         )
     except Exception as exc:  # noqa: BLE001 — normalize SDK/transport errors
         log.warning(
@@ -333,8 +366,6 @@ async def completion(
         result.completion_tokens, result.total_tokens, len(result.content),
         _log_preview(result.content), result.reasoning_chars,
     )
-    if not result.content.strip():
-        raise LLMEmptyResponse("The provider returned an empty response.")
     return result
 
 
