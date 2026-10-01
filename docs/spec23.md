@@ -1,6 +1,6 @@
 # SPEC23 — Verified generation: no silent no-ops, a compact CadQuery surface, facts for agents
 
-Status: **W1 + W5 IMPLEMENTED** (2026-10-01) · W2–W4 deferred, see §10 · line: spec22→ (follows SPEC22)
+Status: **W1 + W2 + W5 IMPLEMENTED** (2026-10-01) · W3–W4 deferred, see §10 · line: spec22→ (follows SPEC22)
 
 ## 1. Goal & framing
 
@@ -260,11 +260,37 @@ intent check: there is no reliable non-LLM signal for it, and a no-op prompt alr
 through triage. The verdict is a factual statement ("geometry identical"), not an error,
 so a deliberate no-op gets an accurate notice and nothing is blocked.
 
-### Deferred — W2, W3, W4
+### Done — W2, accepted on a bench A/B
 
-- **W2 (API index + synonyms):** an extra prompt block is exactly what the 2026-07-29 A/B
-  measured net-negative (77% → 63% first-pass). Only worth trying behind a paid bench A/B;
-  not started without one.
+- `app/cq_index.py` holds the single allow-list (46 `Workplane` methods by idiom) and the
+  EN/RU synonym map. Signatures come from the installed CadQuery via `inspect`, never by
+  hand. The app image has no CadQuery, so the rendered index is committed as
+  `app/cq_index.txt` (regenerate: `.venv-poc/bin/python -m app.cq_index`); a test fails on
+  drift, on a missing allow-list entry, or above 6000 chars (~1.5k tokens).
+- Sent as a second system message on every generation (`app/llm.py`), no flag.
+- A/B protocol as in 2026-07-29: `complete` set, `EASYCAD_MAX_REPAIR=0`, same model
+  (deepseek-v4-flash), all attempt verdicts aggregated, not the attempt-1 headline.
+
+  | run | attempts | index off | index on |
+  |---|---|---|---|
+  | 1 (`2026-10-01T04-06-30_complete_4f9b` / `…04-15-39_complete_8bbd`) | 3 | 27/30 | 28/30 |
+  | 2 (`2026-10-01T04-25-13_complete_8f28` / `…04-46-12_complete_a1af`) | 7 | 65/70 | 67/70 |
+  | total, run 1 fence-corrected (see below) | | **93/100** | **97/100** |
+
+  No scenario got worse; 004-l-bracket 4/7 → 5/7. Non-parser execution errors 1 → 0.
+  Median latency 9.8 s → 9.1 s; prompt +~1.4k tokens per generation. p ≈ 0.2 — directional,
+  not significant — but consistent across both runs and the opposite of the July result.
+- Found by the A/B: every run-1 execution error (3/60, both sides) was the parser, not the
+  prompt — the model returned code, a closing fence, then prose, and
+  `strip_markdown_fences` only trimmed fences at the very ends. Fixed in `app/llm.py`;
+  replaying the three replies, all execute and match the reference. Run 2 has the fix on
+  both sides.
+- Open, not caused by W2: on 004-l-bracket the model twice per side spent all 16,384
+  tokens on reasoning and returned no code (`finish_reason=length` → 422). Equal on both
+  sides; a reasoning-budget question for the generator, not for the prompt.
+
+### Deferred — W3, W4
+
 - **W3 (stated-millimetre check):** extracting "the millimetres the user asked for" from
   free text is a heuristic with real false-positive risk, and the generator already sees
   the measured size block each turn. Revisit with a structured target (e.g. from triage)

@@ -1,0 +1,80 @@
+CadQuery Workplane methods supported here (real signatures from cadquery 2.8.0).
+Use only these and the idioms in the rules; do not invent methods or parameters.
+
+## 2D sketch
+- rect(xLen, yLen, centered=True) — rectangle, centred on the workplane origin by default
+- circle(radius) — circle by RADIUS, not diameter
+- polygon(nSides, diameter, circumscribed=False) — regular polygon; diameter of the circle through its vertices
+- slot2D(length, diameter, angle=0) — obround slot; length is end to end
+- ellipse(x_radius, y_radius, rotation_angle=0.0) — ellipse by radii
+- moveTo(x=0, y=0) — start an open profile
+- lineTo(x, y) — line segment to an absolute point
+- threePointArc(point1, point2) — arc through a mid point to an end point
+- polyline(listOfXYTuple) — connected line segments through points
+- spline(listOfXYTuple, tangents=None, periodic=False) — smooth curve through points
+- close() — close the current profile before extrude/revolve
+- offset2D(d, kind='arc') — offset closed wires outward (+) or inward (-)
+
+## 2D -> 3D
+- extrude(until, combine=True, both=False, taper=None) — extrude pending wires by a distance (both=True: symmetric)
+- cutBlind(until, both=False, taper=None) — cut pending wires to a depth (negative = into the solid)
+- cutThruAll(taper=0) — cut pending wires through the whole solid
+- revolve(angleDegrees=360.0, axisStart=None, axisEnd=None, combine=True) — revolve pending wires about an axis in workplane coords
+- twistExtrude(distance, angleDegrees, combine=True) — extrude while rotating
+- loft(ruled=False, combine=True) — loft between the pending wires of stacked workplanes
+- sweep(path, multisection=False, makeSolid=True, isFrenet=False, combine=True) — sweep the pending profile along a path Workplane
+
+## Primitives
+- box(length, width, height, centered=True, combine=True) — box centred on the origin by default
+- cylinder(height, radius, direct=(0.0, 0.0, 1.0), angle=360, centered=True, combine=True) — cylinder by height and RADIUS, centred by default
+- sphere(radius, direct=(0, 0, 1), angle1=-90, angle2=90, angle3=360, centered=True, combine=True) — sphere by radius
+- wedge(dx, dy, dz, xmin, zmin, xmax, zmax, pnt=(0.0, 0.0, 0.0), dir=(0.0, 0.0, 1.0), centered=True, combine=True) — tapered box
+
+## Features
+- hole(diameter, depth=None) — through or blind hole by DIAMETER at each pending point
+- cboreHole(diameter, cboreDiameter, cboreDepth, depth=None) — counterbored hole
+- cskHole(diameter, cskDiameter, cskAngle, depth=None) — countersunk hole; cskAngle is the full cone angle, e.g. 82 or 90
+- fillet(radius) — round the selected edges
+- chamfer(length, length2=None) — bevel the selected edges
+- shell(thickness, kind='arc') — hollow the solid, removing the selected faces; negative = inward
+- text(txt, fontsize, distance, combine='cut', font='Arial', kind='regular', halign='center', valign='center') — engrave (negative distance) or emboss (combine='a') text
+
+## Placement
+- workplane(offset=0.0, invert=False, centerOption='ProjectedOrigin', origin=None) — new workplane on the selected face
+- center(x, y) — shift the workplane origin
+- transformed(rotate=(0, 0, 0), offset=(0, 0, 0)) — rotate/offset the workplane
+- pushPoints(pntList) — pending points at explicit positions
+- rarray(xSpacing, ySpacing, xCount, yCount, center=True) — rectangular grid of pending points
+- polarArray(radius, startAngle, angle, count, fill=True, rotate=True) — circular pattern of pending points
+
+## Selection
+- faces(selector=None, tag=None) — select faces: '>Z', '<X', '|Z', '#Z', or a tag
+- edges(selector=None, tag=None) — select edges: '|Z', '>Z', combine with 'and'/'or'/'not'
+- vertices(selector=None, tag=None) — select vertices, e.g. as hole positions
+- tag(name) — name the current object for later selection
+
+## Booleans
+- union(toUnion=None) — join another solid
+- cut(toCut) — subtract another solid
+- intersect(toIntersect) — keep the common volume
+
+## Transforms
+- translate(vec) — move the whole object (moves its centre)
+- rotate(axisStartPoint, axisEndPoint, angleDegrees) — rotate about an axis through two points
+- mirror(mirrorPlane='XY', basePointVector=None, union=False) — mirror across a plane; union=True keeps both halves
+
+## User words -> API
+- bore, drill, through hole / отверстие, сверление -> hole
+- counterbore / цековка -> cboreHole
+- countersink, cone cut / зенковка -> cskHole
+- round, rounded edge / скругление -> fillet
+- bevel / фаска -> chamfer
+- hollow, wall, enclosure / полый, стенка, корпус -> shell
+- slot / паз -> slot2D + cutThruAll or cutBlind
+- pocket, recess / карман, выемка -> rect + cutBlind
+- boss, standoff / бобышка, стойка -> circle + extrude
+- rib / ребро -> rect + extrude
+- pattern, array / массив -> rarray or polarArray
+- engrave, emboss / гравировка, надпись -> text
+- split, slice / разрезать -> cut with an oversized box
+- thread, helix / резьба -> the thread skill, not this index

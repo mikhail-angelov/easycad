@@ -66,3 +66,27 @@ def test_missing_measurement_never_claims_a_no_op():
     assert same_geometry(None, facts) is None
     assert same_geometry(facts, {"volume_mm3": 1.0}) is None
     assert same_geometry(facts, dict(facts)) is True
+
+
+def test_cq_index_is_regenerated_from_the_allow_list():
+    from app import cq_index
+
+    assert cq_index.load() == cq_index.build(), "run: .venv-poc/bin/python -m app.cq_index"
+    text = cq_index.load()
+    for _, method, _ in cq_index.ALLOW_LIST:
+        assert f"- {method}(" in text
+    # Hard budget (~1.5k tokens): the 2026-07-29 A/B showed prompt bloat costs quality.
+    assert len(text) <= 6000
+
+
+def test_code_is_kept_when_the_model_wraps_it_in_prose():
+    from app.llm import strip_markdown_fences
+
+    code = "import cadquery as cq\nresult = cq.Workplane('XY').box(1, 1, 1)"
+    for reply in (
+        code,
+        f"```python\n{code}\n```",
+        f"Here is the model:\n\n```python\n{code}\n```\n\nIt is a 1 mm cube.",
+        f"{code}\n```\n\n**What this builds**\n- a 1 × 1 × 1 mm cube",  # bench 2026-10-01
+    ):
+        assert strip_markdown_fences(reply) == code
