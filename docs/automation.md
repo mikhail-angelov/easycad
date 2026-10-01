@@ -126,7 +126,7 @@ Priority is first-match-wins in exactly that order. Companion attributes:
   Treat `no_change_detected` as "the request was not applied", not as success.
 - `data-facts` — present only in `done`: JSON of the current model's measured
   `volume_mm3`, `area_mm2`, `bbox_mm` (`[xmin, ymin, zmin, xmax, ymax, zmax]`),
-  `center_mm`, `solids`, `faces`, `edges`. The same `facts` / `verdict` fields are
+  `center_mm`, `inertia_mm5` (Ixx, Iyy, Izz about the centroid), `solids`, `faces`, `edges`. The same `facts` / `verdict` fields are
   on every `step` in the API responses, so an API client needs no DOM.
 - Per-step `#timeline-step-{id}` carries `data-status="ok|error"`.
 

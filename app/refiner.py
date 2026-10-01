@@ -172,6 +172,6 @@ async def triage(
             {"role": "user", "content": user_msg},
         ],
         provider, model, temperature=0.1, max_tokens=16_384, api_key=api_key,
-        operation="triage", prompt_for_log=prompt,
+        operation="triage", prompt_for_log=prompt, thinking=False,
     )
     return _parse(result.content, response_language)

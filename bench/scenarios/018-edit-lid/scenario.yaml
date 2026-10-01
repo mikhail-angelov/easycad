@@ -1,0 +1,21 @@
+id: 018-edit-lid
+title: "Edit: enclosure, then a separate lid with a locating lip"
+spec: complete
+tags: [edit, multi-turn, multi-body, fit]
+timeout_s: 120
+
+turns:
+  - prompt: >
+      Create an open-top enclosure: outer size 100 × 60 × 40 mm, centered on XY
+      with its bottom face at Z = 0, 2 mm walls and floor, top fully open.
+    reference: reference-1.py
+  - prompt: >
+      Add a separate flat lid as a second body: 100 × 60 × 2 mm, same XY
+      footprint as the box, its bottom face 10 mm above the top of the box.
+      Do not join it to the box.
+    reference: reference-2.py
+  - prompt: >
+      On the underside of the lid add a rectangular lip 3 mm tall that fits
+      inside the box walls with 0.2 mm clearance on every side, 2 mm thick.
+      The lip is part of the lid; the lid and the box stay separate bodies.
+    reference: reference-3.py

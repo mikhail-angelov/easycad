@@ -1,0 +1,17 @@
+id: 014-edit-resize
+title: "Edit: block with bore, then change height and bore diameter"
+spec: complete
+tags: [edit, multi-turn, parametric]
+timeout_s: 120
+
+turns:
+  - prompt: >
+      Create a block 50 × 50 × 20 mm, centered on XY with its bottom face at
+      Z = 0, with a 16 mm diameter hole straight through its center along Z.
+    reference: reference-1.py
+  - prompt: >
+      Make the block 30 mm tall instead of 20. Keep everything else the same.
+    reference: reference-2.py
+  - prompt: >
+      Change the hole diameter from 16 mm to 22 mm.
+    reference: reference-3.py

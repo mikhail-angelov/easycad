@@ -120,6 +120,9 @@ def get_facts(shape) -> dict | None:
             "bbox_mm": [bb.xmin, bb.ymin, bb.zmin, bb.xmax, bb.ymax, bb.zmax],
             # Volume centroid: moves when a feature moves even if bbox/volume don't.
             "center_mm": list(shape.Center().toTuple()),
+            # Second moments about the centroid: change when features move
+            # symmetrically (two holes pushed apart), which the centroid cannot see.
+            "inertia_mm5": [row[i] for i, row in enumerate(type(shape).matrixOfInertia(shape))],
             "solids": len(shape.Solids()),
             "faces": len(shape.Faces()),
             "edges": len(shape.Edges()),

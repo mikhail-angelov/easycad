@@ -10,8 +10,8 @@ turns:
       sits on the XY plane (Z up), centered on XY by its overall bounding box.
       The horizontal flange is 60 mm long (X) by 40 mm wide (Y) by 5 mm thick,
       lying on the XY plane. The vertical flange is 40 mm tall (Z) by 40 mm wide
-      (Y) by 5 mm thick, rising from the short edge at one end of the horizontal
-      flange, flush with it in Y. Both flanges share the 40 mm width.
+      (Y) by 5 mm thick, rising from the short edge at the minimum-X end of the
+      horizontal flange, flush with it in Y. Both flanges share the 40 mm width.
       Holes, all 5.5 mm diameter, drilled through the 5 mm thickness:
       in the horizontal flange, two holes on a line 15 mm from the far short
       edge (the end away from the vertical flange), one on each side of the

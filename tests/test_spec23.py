@@ -2,6 +2,8 @@
 
 from types import SimpleNamespace
 
+import pytest
+
 from fastapi.testclient import TestClient
 
 from app import llm, main
@@ -52,6 +54,15 @@ def test_moved_feature_with_identical_volume_and_bbox_is_a_change(monkeypatch):
     assert right["verdict"] == "changed"
 
 
+def test_holes_moved_apart_symmetrically_is_a_change(monkeypatch):
+    # Bench 017-edit-relative: volume, area, bbox, centroid and topology all stay
+    # identical; only the second moments move.
+    holes = "import cadquery as cq\nresult = cq.Workplane('XY').box(80, 50, 5).faces('>Z').workplane().pushPoints([(-{0}, 0), ({0}, 0)]).hole(8)\n"
+    near, far = _turns(monkeypatch, holes.format(25), holes.format(27.5))
+    assert near["facts"]["center_mm"] == pytest.approx(far["facts"]["center_mm"], abs=1e-9)
+    assert far["verdict"] == "changed"
+
+
 def test_facts_describe_the_model(monkeypatch):
     (plate,) = _turns(monkeypatch, PLATE)
     facts = plate["facts"]
@@ -62,7 +73,7 @@ def test_facts_describe_the_model(monkeypatch):
 
 def test_missing_measurement_never_claims_a_no_op():
     facts = {"volume_mm3": 1.0, "area_mm2": 6.0, "bbox_mm": [0] * 6, "center_mm": [0] * 3,
-             "solids": 1, "faces": 6, "edges": 12}
+             "inertia_mm5": [1.0] * 3, "solids": 1, "faces": 6, "edges": 12}
     assert same_geometry(None, facts) is None
     assert same_geometry(facts, {"volume_mm3": 1.0}) is None
     assert same_geometry(facts, dict(facts)) is True

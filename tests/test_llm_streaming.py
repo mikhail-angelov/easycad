@@ -302,3 +302,64 @@ def test_empty_generation_maps_to_a_rephrase_error():
     assert error.status_code == 422
     assert error.detail["code"] == "empty_response"
     assert "rephrase" in error.detail["message"].lower()
+
+
+def test_deepseek_retries_without_thinking_when_reasoning_exhausts_the_budget(monkeypatch):
+    calls = []
+
+    def response(content, reasoning, finish_reason):
+        return SimpleNamespace(
+            choices=[SimpleNamespace(
+                message=SimpleNamespace(content=content, reasoning_content=reasoning),
+                finish_reason=finish_reason,
+            )],
+            usage=None,
+        )
+
+    async def create(**kwargs):
+        calls.append(kwargs)
+        if len(calls) == 1:
+            return response("", "long private reasoning", "length")
+        return response("result = 1", None, "stop")
+
+    async def close():
+        pass
+
+    client = SimpleNamespace(chat=SimpleNamespace(completions=SimpleNamespace(create=create)), close=close)
+    monkeypatch.setattr(llm, "make_async_client", lambda *_args, **_kwargs: client)
+
+    result = asyncio.run(llm.completion(
+        [{"role": "user", "content": "x"}], "deepseek", None,
+        temperature=0, max_tokens=8, operation="generate", prompt_for_log="x",
+    ))
+
+    assert result.content == "result = 1"
+    assert "extra_body" not in calls[0]
+    assert calls[1]["extra_body"] == {"thinking": {"type": "disabled"}}
+
+
+def test_triage_runs_without_thinking_and_generation_with_it(monkeypatch):
+    from app.refiner import triage
+
+    calls = []
+
+    async def create(**kwargs):
+        calls.append(kwargs)
+        content = '{"verdict": "ready"}' if len(calls) == 1 else "result = 1"
+        return SimpleNamespace(
+            choices=[SimpleNamespace(message=SimpleNamespace(content=content, reasoning_content=None),
+                                     finish_reason="stop")],
+            usage=None,
+        )
+
+    async def close():
+        pass
+
+    client = SimpleNamespace(chat=SimpleNamespace(completions=SimpleNamespace(create=create)), close=close)
+    monkeypatch.setattr(llm, "make_async_client", lambda *_args, **_kwargs: client)
+
+    asyncio.run(triage("add a hole", "import cadquery as cq\n", "deepseek"))
+    asyncio.run(llm.generate_code("import cadquery as cq\n", "add a hole", "deepseek"))
+
+    assert calls[0]["extra_body"] == {"thinking": {"type": "disabled"}}
+    assert "extra_body" not in calls[1]

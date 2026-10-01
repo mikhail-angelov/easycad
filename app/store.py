@@ -72,6 +72,9 @@ def same_geometry(before: dict | None, after: dict | None) -> bool | None:
         return all(
             math.isclose(before[k], after[k], rel_tol=1e-6, abs_tol=1e-3)
             for k in ("volume_mm3", "area_mm2")
+        ) and all(
+            math.isclose(a, b, rel_tol=1e-6, abs_tol=1e-3)
+            for a, b in zip(before["inertia_mm5"], after["inertia_mm5"])
         )
     except (KeyError, TypeError):
         return None
