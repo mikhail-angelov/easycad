@@ -12,13 +12,84 @@ down the API server — the parent just observes a non-zero exit or timeout.
 """
 
 import json
+import math
 import sys
 
 
-def get_geometry_info(result) -> str:
-    """Build the auto-generated geometry-info comment block from a result."""
+def _planar_size(vertices, normal: tuple[float, float, float]) -> list[float]:
+    """Return the extents of a tessellated planar face along its own axes."""
+    reference = (0.0, 0.0, 1.0) if abs(normal[2]) < 0.9 else (0.0, 1.0, 0.0)
+    u = (
+        reference[1] * normal[2] - reference[2] * normal[1],
+        reference[2] * normal[0] - reference[0] * normal[2],
+        reference[0] * normal[1] - reference[1] * normal[0],
+    )
+    length = math.sqrt(sum(value * value for value in u))
+    u = tuple(value / length for value in u)
+    v = (
+        normal[1] * u[2] - normal[2] * u[1],
+        normal[2] * u[0] - normal[0] * u[2],
+        normal[0] * u[1] - normal[1] * u[0],
+    )
+    projected = [
+        (sum(a * b for a, b in zip(vertex.toTuple(), u)), sum(a * b for a, b in zip(vertex.toTuple(), v)))
+        for vertex in vertices
+    ]
+    return [max(axis) - min(axis) for axis in zip(*projected)]
+
+
+def get_face_mesh(shape) -> dict | None:
+    """Return a bounded, CAD-coordinate display mesh grouped by source face.
+
+    It is intentionally built before STL serialization: an STL triangle index
+    has no stable relationship to a BRep face. Selection is optional UI data;
+    failure or a very large model must not turn a valid export into a failure.
+    """
+    faces = shape.Faces()
+    if len(faces) > 500:
+        return None
+    positions: list[float] = []
+    indices: list[int] = []
+    records: list[dict] = []
+    for face_id, face in enumerate(faces):
+        vertices, triangles = face.tessellate(0.1, 0.1)
+        if not triangles or len(indices) + len(triangles) * 3 > 50_000:
+            return None
+        offset = len(positions) // 3
+        start = len(indices)
+        positions.extend(coordinate for vertex in vertices for coordinate in vertex.toTuple())
+        indices.extend(offset + vertex for triangle in triangles for vertex in triangle)
+
+        # The centroid of a tessellated triangle lies within the trimmed face,
+        # unlike the area centre of a face with holes or a concave face.
+        tri = triangles[0]
+        anchor = (vertices[tri[0]] + vertices[tri[1]] + vertices[tri[2]]) / 3
+        planar = face.geomType() == "PLANE"
+        normal = face.normalAt(anchor).toTuple() if planar else None
+        label, number = "", face_id + 1
+        while number:
+            number, digit = divmod(number - 1, 26)
+            label = chr(65 + digit) + label
+        records.append({
+            "id": face_id,
+            "label": label,
+            "start": start,
+            "count": len(indices) - start,
+            "planar": planar,
+            "anchor": anchor.toTuple(),
+            # Kept as `center` for the client contract, but this is a verified
+            # interior reference point rather than the geometric area centre.
+            "center": anchor.toTuple() if planar else None,
+            "normal": normal,
+            "size": _planar_size(vertices, normal) if normal else None,
+        })
+    return {"positions": positions, "indices": indices, "faces": records}
+
+
+def get_geometry_info(shape) -> str:
+    """Measure the complete shape passed to the exporter, not one stack item."""
     try:
-        bb = result.val().BoundingBox()
+        bb = shape.BoundingBox()
         lines = [
             "# ── Geometry info (auto-generated, do not edit) ──",
             f"# Bounding box: X: {bb.xmin:.1f}..{bb.xmax:.1f}, "
@@ -26,14 +97,35 @@ def get_geometry_info(result) -> str:
             f"# Size: {bb.xmax - bb.xmin:.1f} x {bb.ymax - bb.ymin:.1f} "
             f"x {bb.zmax - bb.zmin:.1f} mm",
         ]
-        solid = result.val()
-        n_faces = len(solid.Faces())
-        n_edges = len(solid.Edges())
-        n_solids = len(solid.Solids()) if hasattr(solid, "Solids") else 1
+        n_faces = len(shape.Faces())
+        n_edges = len(shape.Edges())
+        n_solids = len(shape.Solids())
         lines.append(f"# Topology: {n_solids} solid(s), {n_faces} faces, {n_edges} edges")
         return "\n".join(lines)
     except Exception:
         return "# ── Geometry info: could not extract ──"
+
+
+def get_facts(shape) -> dict | None:
+    """Machine-readable measurements of the exported shape (SPEC23 W1/W5).
+
+    The numbers a step must move to prove it changed the model. Optional like the
+    face map: a measurement failure must not fail a valid export.
+    """
+    try:
+        bb = shape.BoundingBox()
+        return {
+            "volume_mm3": shape.Volume(),
+            "area_mm2": shape.Area(),
+            "bbox_mm": [bb.xmin, bb.ymin, bb.zmin, bb.xmax, bb.ymax, bb.zmax],
+            # Volume centroid: moves when a feature moves even if bbox/volume don't.
+            "center_mm": list(shape.Center().toTuple()),
+            "solids": len(shape.Solids()),
+            "faces": len(shape.Faces()),
+            "edges": len(shape.Edges()),
+        }
+    except Exception:
+        return None
 
 
 def _emit(payload: dict) -> None:
@@ -81,12 +173,24 @@ def execute_job(code: str, export_path: str) -> dict:
     try:
         import cadquery as cq
 
-        cq.exporters.export(result, export_path)
-        info = get_geometry_info(result)
+        # CadQuery exports every item of a Workplane/iterable as a compound.
+        # Materialise it once so export and feedback describe the same geometry.
+        shape = result if isinstance(result, cq.Shape) else cq.Compound.makeCompound(result)
+        cq.exporters.export(shape, export_path)
+        info = get_geometry_info(shape)
     except Exception as exc:  # noqa: BLE001
         return {"success": False, "geometry_info": None, "error": f"Export error: {_describe(exc)}"}
 
-    return {"success": True, "geometry_info": info, "error": None}
+    face_mesh = None
+    if export_path.lower().endswith(".stl"):
+        try:
+            face_mesh = get_face_mesh(shape)
+        except Exception:  # selection is optional; STL remains the fallback
+            pass
+    return {
+        "success": True, "geometry_info": info, "facts": get_facts(shape),
+        "face_mesh": face_mesh, "error": None,
+    }
 
 
 def main() -> None:

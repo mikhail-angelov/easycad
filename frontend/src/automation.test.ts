@@ -1,6 +1,6 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
-import { automationState, automationErrorCode, type AutomationInput } from './automation.ts'
+import { automationState, automationErrorCode, automationResult, type AutomationInput } from './automation.ts'
 import type { Step } from './api.ts'
 
 function step(partial: Partial<Step> & { id: number }): Step {
@@ -16,6 +16,9 @@ function step(partial: Partial<Step> & { id: number }): Step {
     error: partial.error ?? null,
     parent_id: null,
     created_at: 0,
+    face_mesh: null,
+    facts: partial.facts ?? null,
+    verdict: partial.verdict ?? null,
   }
 }
 
@@ -93,4 +96,22 @@ test('errorCode: notice.code exposed; error → "error"; absent otherwise', () =
   // Not exposed while busy or awaiting-input.
   assert.equal(automationErrorCode({ ...base, busy: true, error: 'boom' }), undefined)
   assert.equal(automationErrorCode({ ...base, pending: { originalPrompt: 'p', questions: [] }, error: 'boom' }), undefined)
+})
+
+const facts = {
+  volume_mm3: 1000, area_mm2: 600, bbox_mm: [0, 0, 0, 10, 10, 10] as [number, number, number, number, number, number],
+  center_mm: [5, 5, 5] as [number, number, number], solids: 1, faces: 6, edges: 12,
+}
+
+test('SPEC23: done exposes the current step verdict and facts', () => {
+  const steps = [step({ id: 1, kind: 'initial' }), step({ id: 2, verdict: 'no_change_detected', facts })]
+  const attrs = automationResult({ ...base, steps, currentId: 2 })
+  assert.equal(attrs['data-verdict'], 'no_change_detected')
+  assert.deepEqual(JSON.parse(attrs['data-facts']), facts)
+})
+
+test('SPEC23: verdict and facts are absent outside done', () => {
+  const steps = [step({ id: 2, verdict: 'changed', facts })]
+  assert.deepEqual(automationResult({ ...base, steps, currentId: 2, busy: true }), {})
+  assert.deepEqual(automationResult({ ...base, steps, currentId: 2, error: 'boom' }), {})
 })

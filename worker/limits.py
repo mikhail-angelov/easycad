@@ -107,6 +107,8 @@ def run(code: str) -> dict:
             "success": True,
             "stl_base64": stl_b64,
             "geometry_info": out["geometry_info"],
+            "facts": out.get("facts"),
+            "face_mesh": out.get("face_mesh"),
             "error": None,
         }
 

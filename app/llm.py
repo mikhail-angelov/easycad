@@ -15,7 +15,9 @@ from dataclasses import dataclass
 from openai import AsyncOpenAI, OpenAI
 
 from .crashlog import scrub_text
+from . import cq_index
 from .skills import render as skills_render
+from .skills import select as skills_select
 
 log = logging.getLogger("easycad.llm")
 
@@ -187,6 +189,10 @@ SYSTEM_PROMPT = textwrap.dedent("""\
       To build a standalone text solid (e.g. to .cut()/.union() yourself later),
       pass combine=False — NOT cut=False.
 """)
+
+# SPEC23 W2: the generated CadQuery surface index, sent with every generation.
+# Bench A/B 2026-10-01: 93/100 -> 97/100 pass, no per-scenario regression.
+CQ_INDEX = cq_index.load()
 
 INITIAL_REPLACEMENT_PROMPT = """\
 This is the first request for a new project. The current box is only a starter
@@ -467,11 +473,24 @@ def validate_key_live(provider: str, key: str) -> tuple[bool, str | None]:
 
 
 def strip_markdown_fences(text: str) -> str:
-    """Remove ```python ... ``` wrappers if the model added them anyway."""
-    text = text.strip()
-    text = re.sub(r"^```(?:python)?\s*\n?", "", text)
-    text = re.sub(r"\n?```\s*$", "", text)
-    return text.strip()
+    """Return the code from a reply that wrapped it in markdown anyway.
+
+    Models ignore "code only" in three shapes, all seen in bench runs: a fenced
+    block, prose before an opening ```python, and code followed by a closing
+    ``` plus an explanation. Keep the code; drop the fences and the prose.
+    """
+    lines = text.strip().splitlines()
+    fences = [i for i, line in enumerate(lines) if line.strip().startswith("```")]
+    if not fences:
+        return text.strip()
+    first = fences[0]
+    if first == 0 or lines[first].strip() != "```":
+        # An opening fence (at the top, or with a language after prose).
+        start, end = first + 1, next((i for i in fences if i > first), len(lines))
+    else:
+        # A bare ``` after code is a closing fence whose opener was omitted.
+        start, end = 0, first
+    return "\n".join(lines[start:end]).strip()
 
 
 def _repair_hint(error: str | None) -> str | None:
@@ -536,8 +555,9 @@ async def generate_code(
 
     A higher `temperature` yields more varied output — used to generate several
     distinct candidates for the retry-with-variations flow. `skills` are
-    specialised recipe tags (from triage) injected as an extra system message
-    only when relevant — see `app/skills.py` (SPEC15).
+    specialised recipe tags (from triage) injected as an extra system message.
+    When absent, the request selects applicable recipes locally, including on
+    the first turn and with refinement disabled — see `app/skills.py` (SPEC15).
 
     `feedback` (in-turn repair): when a prior attempt this turn failed,
     `{"code": <failed script>, "error": <message>}` is appended so the model can
@@ -561,9 +581,10 @@ async def generate_code(
         if hint:
             user_msg += f"\nHint: {hint}"
     messages = [{"role": "system", "content": SYSTEM_PROMPT}]
+    messages.append({"role": "system", "content": CQ_INDEX})
     if replace_initial:
         messages.append({"role": "system", "content": INITIAL_REPLACEMENT_PROMPT})
-    skill_prompt = skills_render(skills)
+    skill_prompt = skills_render(skills_select(prompt, skills))
     if skill_prompt:
         messages.append({"role": "system", "content": skill_prompt})
     messages.append({"role": "user", "content": user_msg})

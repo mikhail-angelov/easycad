@@ -1,7 +1,10 @@
 """SPEC20: base-code invariant and LLM-only geometry reconciliation."""
 
+from types import SimpleNamespace
+
 from fastapi.testclient import TestClient
 
+from app import llm
 import app.main as m
 from app.cadquery_exec import append_geometry_block, strip_geometry_block
 from app.main import app
@@ -43,6 +46,35 @@ def test_geometry_is_reattached_only_for_llm_calls(monkeypatch):
     )
     assert response.status_code == 200, response.text
     assert "Geometry info" in seen["generate"]
+    assert "Geometry info" not in response.json()["step"]["code"]
+
+
+def test_next_edit_receives_measured_geometry_of_the_whole_model(monkeypatch):
+    code = (
+        "import cadquery as cq\n"
+        "result = cq.Workplane('XY').box(40, 30, 20).faces('>Z').workplane().rect(36, 26).cutBlind(-18)\n"
+        "result = result.add(cq.Workplane('XY').box(40, 30, 2).translate((60, 0, 0)))\n"
+    )
+    messages_seen = []
+
+    async def completion(messages, *args, **kwargs):
+        messages_seen.extend(messages)
+        return SimpleNamespace(content=code)
+
+    monkeypatch.setattr(llm, "completion", completion)
+    client = TestClient(app)
+    created = client.post("/api/execute-manual", json={"code": code}).json()["step"]
+    assert created["success"], created["error"]
+    response = client.post("/api/chat", json={
+        "prompt": "Round the lid corners", "auto_refine": False,
+    })
+    assert response.status_code == 200, response.text
+    assert response.json()["step"]["success"]
+    assert any(
+        "Size: 100.0 x 30.0 x 20.0 mm" in message["content"]
+        and "Topology: 2 solid(s)," in message["content"]
+        for message in messages_seen
+    )
     assert "Geometry info" not in response.json()["step"]["code"]
 
 

@@ -6,9 +6,11 @@ branching are deferred (Phase 2 in SPEC11); `parent_id` is recorded now so the
 timeline can render branch points later.
 """
 
+import math
 import time
 from dataclasses import asdict, dataclass
 from itertools import count
+from uuid import uuid4
 
 from .cadquery_exec import strip_geometry_block
 
@@ -26,11 +28,19 @@ class Step:
     error: str | None
     parent_id: int | None
     created_at: float
+    # Snapshot-only face map for the interactive viewer. It is deliberately not
+    # exported in a project: importing source requires a fresh trusted execution.
+    face_mesh: dict | None = None
+    # Measured volume/area/bbox/centroid/topology (SPEC23 W1/W5) and, for a chat
+    # turn, whether those facts moved: "changed" | "no_change_detected" | None.
+    facts: dict | None = None
+    verdict: str | None = None
 
     def to_public(self, include_stl: bool = True) -> dict:
         data = asdict(self)
         if not include_stl:
             data.pop("stl_base64", None)
+            data.pop("face_mesh", None)
         elif self.stl_base64:
             # Content hash of the STL bytes, so a client (e.g. the bench harness)
             # can verify the inline base64 decoded to exactly what the server
@@ -43,6 +53,28 @@ class Step:
             except Exception:  # noqa: BLE001 — never let hashing break the response
                 data["stl_sha256"] = None
         return data
+
+
+VERDICTS = ("changed", "no_change_detected")
+
+
+def same_geometry(before: dict | None, after: dict | None) -> bool | None:
+    """True when no measured fact moved beyond tolerance (SPEC23 W1); None when
+    either side is unmeasured, so a missing measurement never claims a no-op."""
+    if not before or not after:
+        return None
+    try:
+        if any(before[k] != after[k] for k in ("solids", "faces", "edges")):
+            return False
+        lengths = [*before["bbox_mm"], *before["center_mm"]], [*after["bbox_mm"], *after["center_mm"]]
+        if not all(math.isclose(a, b, abs_tol=1e-3) for a, b in zip(*lengths)):
+            return False
+        return all(
+            math.isclose(before[k], after[k], rel_tol=1e-6, abs_tol=1e-3)
+            for k in ("volume_mm3", "area_mm2")
+        )
+    except (KeyError, TypeError):
+        return None
 
 
 class SessionStore:
@@ -73,6 +105,9 @@ class SessionStore:
         refined_prompt: str | None = None,
         stl_base64: str | None = None,
         geometry_info: str | None = None,
+        face_mesh: dict | None = None,
+        facts: dict | None = None,
+        verdict: str | None = None,
         error: str | None = None,
         make_current: bool = True,
     ) -> Step:
@@ -91,6 +126,9 @@ class SessionStore:
             error=error,
             parent_id=self.current_id,
             created_at=time.time(),
+            face_mesh=({**face_mesh, "revision": uuid4().hex} if face_mesh else None),
+            facts=facts,
+            verdict=verdict,
         )
         self._steps[step.id] = step
         self._order.append(step.id)
@@ -188,6 +226,9 @@ class SessionStore:
                     error=sd.get("error"),
                     parent_id=parent_id,
                     created_at=float(sd.get("created_at", 0.0)),
+                    # Facts are re-measured with the STL on first read; the
+                    # verdict is history and has no other source.
+                    verdict=sd.get("verdict") if sd.get("verdict") in VERDICTS else None,
                 )
             )
 

@@ -74,6 +74,8 @@ const STRINGS: Record<Lang, Record<string, string>> = {
 
     'viewer.title': 'Model',
     'viewer.wireframe': 'wireframe',
+    'viewer.faceOrientation': 'Orientation',
+    'viewer.faceSize': 'Surface size',
     'viewer.exportStl': 'Export STL',
     'viewer.download': 'Download',
     'viewer.hintMesh': '3D mesh',
@@ -111,6 +113,8 @@ const STRINGS: Record<Lang, Record<string, string>> = {
     'chat.emptyHint': 'Describe one change at a time. Try one of these to start:',
     'chat.refinedPrompt': 'refined prompt',
     'chat.stepOk': 'Step {id} ✓',
+    'chat.noChange':
+      'Step {id}: the code ran, but the model did not change — volume, size and topology are identical. The request was probably not applied; try rephrasing it.',
     'chat.failed': 'Failed: {error}',
     'chat.proposalHead': 'Refined instruction — confirm or edit:',
     'chat.use': 'Use',
@@ -202,6 +206,8 @@ const STRINGS: Record<Lang, Record<string, string>> = {
 
     'viewer.title': 'Модель',
     'viewer.wireframe': 'каркас',
+    'viewer.faceOrientation': 'Ориентация',
+    'viewer.faceSize': 'Размер поверхности',
     'viewer.exportStl': 'Экспорт STL',
     'viewer.download': 'Скачать',
     'viewer.hintMesh': '3D-меш',
@@ -239,6 +245,8 @@ const STRINGS: Record<Lang, Record<string, string>> = {
     'chat.emptyHint': 'Описывайте по одному изменению за раз. Попробуйте для начала:',
     'chat.refinedPrompt': 'уточнённый запрос',
     'chat.stepOk': 'Шаг {id} ✓',
+    'chat.noChange':
+      'Шаг {id}: код выполнился, но модель не изменилась — объём, размеры и топология те же. Похоже, запрос не применён; попробуйте переформулировать.',
     'chat.failed': 'Ошибка: {error}',
     'chat.proposalHead': 'Уточнённая инструкция — подтвердите или измените:',
     'chat.use': 'Применить',

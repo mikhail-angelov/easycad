@@ -121,6 +121,13 @@ Priority is first-match-wins in exactly that order. Companion attributes:
 - `data-error-code` — present only in `error`: the notice code (e.g.
   `server_busy`, retryable) or `error` (hard). Branch on it.
 - `data-auth-error` — present only after a failed PAT bootstrap.
+- `data-verdict` — present only in `done`, for a chat step: `changed`, or
+  `no_change_detected` when the code ran but no measured fact moved (SPEC23).
+  Treat `no_change_detected` as "the request was not applied", not as success.
+- `data-facts` — present only in `done`: JSON of the current model's measured
+  `volume_mm3`, `area_mm2`, `bbox_mm` (`[xmin, ymin, zmin, xmax, ymax, zmax]`),
+  `center_mm`, `solids`, `faces`, `edges`. The same `facts` / `verdict` fields are
+  on every `step` in the API responses, so an API client needs no DOM.
 - Per-step `#timeline-step-{id}` carries `data-status="ok|error"`.
 
 ### Race-free waiting (the important part)
@@ -143,7 +150,7 @@ retry; on a hard error, read the message / stop.
 | Prompt input                | `#chat-prompt` (also `[data-testid=chat-prompt]`, `[name=chat-prompt]`) |
 | Send                        | `#chat-send` |
 | Variations                  | `#chat-variations` |
-| App state root              | `[data-state]`, `[data-state-rev]`, `[data-error-code]`, `[data-auth-error]`, `[aria-busy]` |
+| App state root              | `[data-state]`, `[data-state-rev]`, `[data-error-code]`, `[data-auth-error]`, `[data-verdict]`, `[data-facts]`, `[aria-busy]` |
 | Clarify options             | `[id^="clarify-"]` (i.e. `#clarify-{q}-{o}`) |
 | Confirm-refine fork         | `#proposal-use` / `#proposal-cancel` (edit box `[name=refined-prompt]`) |
 | Invalid-prompt fork         | `#invalid-generate` / `#invalid-cancel` |

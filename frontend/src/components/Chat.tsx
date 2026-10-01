@@ -251,7 +251,7 @@ export function Chat() {
           </div>
         )}
         {chatLog.map((e) => (
-          <div class={`chat-entry ${e.ok ? 'ok' : 'fail'}`} key={e.id}>
+          <div class={`chat-entry ${e.ok ? 'ok' : 'fail'}${e.noChange ? ' no-change' : ''}`} key={e.id}>
             <div class="bubble user">{e.prompt}</div>
             {e.refined && (
               <details class="refined">
@@ -260,7 +260,11 @@ export function Chat() {
               </details>
             )}
             <div class="bubble result">
-              {e.ok ? t('chat.stepOk', { id: e.id }) : t('chat.failed', { error: e.error ?? '' })}
+              {!e.ok
+                ? t('chat.failed', { error: e.error ?? '' })
+                : e.noChange
+                  ? t('chat.noChange', { id: e.id })
+                  : t('chat.stepOk', { id: e.id })}
             </div>
           </div>
         ))}

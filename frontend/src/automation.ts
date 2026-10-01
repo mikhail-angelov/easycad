@@ -60,3 +60,16 @@ export function automationErrorCode(i: Pick<AutomationInput, 'busy' | 'error' | 
   if (i.error) return 'error'
   return undefined
 }
+
+// What the current step did (SPEC23 W5): its verdict and measured facts, exposed
+// as `data-verdict` / `data-facts` so an agent reads numbers instead of pixels.
+// Absent unless the state is `done` — while busy or on an error they would
+// describe a model the last action did not produce.
+export function automationResult(i: AutomationInput): Record<string, string> {
+  if (automationState(i) !== 'done') return {}
+  const cur = i.steps.find((s) => s.id === i.currentId)
+  const attrs: Record<string, string> = {}
+  if (cur?.verdict) attrs['data-verdict'] = cur.verdict
+  if (cur?.facts) attrs['data-facts'] = JSON.stringify(cur.facts)
+  return attrs
+}
