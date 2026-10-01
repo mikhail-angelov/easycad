@@ -106,6 +106,28 @@ def get_geometry_info(shape) -> str:
         return "# ── Geometry info: could not extract ──"
 
 
+def get_facts(shape) -> dict | None:
+    """Machine-readable measurements of the exported shape (SPEC23 W1/W5).
+
+    The numbers a step must move to prove it changed the model. Optional like the
+    face map: a measurement failure must not fail a valid export.
+    """
+    try:
+        bb = shape.BoundingBox()
+        return {
+            "volume_mm3": shape.Volume(),
+            "area_mm2": shape.Area(),
+            "bbox_mm": [bb.xmin, bb.ymin, bb.zmin, bb.xmax, bb.ymax, bb.zmax],
+            # Volume centroid: moves when a feature moves even if bbox/volume don't.
+            "center_mm": list(shape.Center().toTuple()),
+            "solids": len(shape.Solids()),
+            "faces": len(shape.Faces()),
+            "edges": len(shape.Edges()),
+        }
+    except Exception:
+        return None
+
+
 def _emit(payload: dict) -> None:
     sys.stdout.write(json.dumps(payload) + "\n")
     sys.stdout.flush()
@@ -165,7 +187,10 @@ def execute_job(code: str, export_path: str) -> dict:
             face_mesh = get_face_mesh(shape)
         except Exception:  # selection is optional; STL remains the fallback
             pass
-    return {"success": True, "geometry_info": info, "face_mesh": face_mesh, "error": None}
+    return {
+        "success": True, "geometry_info": info, "facts": get_facts(shape),
+        "face_mesh": face_mesh, "error": None,
+    }
 
 
 def main() -> None:

@@ -30,6 +30,7 @@ export interface ChatEntry {
   refined: string | null
   ok: boolean
   error: string | null
+  noChange: boolean
 }
 
 export interface Pending {
@@ -63,6 +64,7 @@ function chatLogFromSteps(steps: Step[]): ChatEntry[] {
       refined: s.refined_prompt,
       ok: s.success,
       error: s.error,
+      noChange: s.verdict === 'no_change_detected',
     }))
 }
 
@@ -266,7 +268,8 @@ export const useStore = create<State>((set, get) => {
       set({
         chatLog: [
           ...get().chatLog,
-          { id: step.id, prompt, refined: res.refined_prompt, ok: step.success, error: step.error },
+          { id: step.id, prompt, refined: res.refined_prompt, ok: step.success, error: step.error,
+            noChange: step.verdict === 'no_change_detected' },
         ],
       })
       if (step.success) {
@@ -563,7 +566,8 @@ export const useStore = create<State>((set, get) => {
           currentId: session.current_id,
           chatLog: [
             ...get().chatLog,
-            { id: step.id, prompt: v.originalPrompt, refined: v.refined, ok: step.success, error: step.error },
+            { id: step.id, prompt: v.originalPrompt, refined: v.refined, ok: step.success, error: step.error,
+            noChange: step.verdict === 'no_change_detected' },
           ],
           variations: null,
           selectedVariation: null,

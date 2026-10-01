@@ -2,7 +2,7 @@ import { useEffect, useRef, useState } from 'preact/hooks'
 import { lazy, Suspense } from 'preact/compat'
 import { api } from './api'
 import { useStore, useT } from './store'
-import { automationState, automationErrorCode } from './automation'
+import { automationState, automationErrorCode, automationResult } from './automation'
 import { Chat } from './components/Chat'
 import { Timeline } from './components/Timeline'
 import { Account } from './components/Account'
@@ -48,6 +48,7 @@ export function App({ authError }: { authError?: string | null } = {}) {
   const input = { busy, error, notice, pending, proposal, invalidNotice, variations, steps, currentId }
   const state = automationState(input)
   const errorCode = automationErrorCode(input)
+  const result = automationResult(input)
 
   // A failed PAT bootstrap (§3.2) surfaces as a single neutral marker + a
   // dismissible banner — the SPA still renders on the free trial. Never echoes
@@ -84,6 +85,7 @@ export function App({ authError }: { authError?: string | null } = {}) {
       data-state={state}
       data-state-rev={actionRev}
       {...(errorCode ? { 'data-error-code': errorCode } : {})}
+      {...result}
       {...(authError ? { 'data-auth-error': authError } : {})}
       aria-busy={state === 'generating' ? 'true' : undefined}
     >

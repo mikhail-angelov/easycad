@@ -1,6 +1,6 @@
 # SPEC23 — Verified generation: no silent no-ops, a compact CadQuery surface, facts for agents
 
-Status: **DESIGN** · 2026-09-30 · line: spec22→ (follows SPEC22)
+Status: **W1 + W5 IMPLEMENTED** (2026-10-01) · W2–W4 deferred, see §10 · line: spec22→ (follows SPEC22)
 
 ## 1. Goal & framing
 
@@ -229,3 +229,46 @@ SSE stream, in the DOM contract, and therefore in the chat.
 Licensing note: the ClassCAD kernel behind that project is commercial and key-gated; only
 the tooling (`@classcad/skill`, `@buerli.io/ai`) is MIT. This spec borrows *approaches*,
 not code.
+
+## 10. Implementation status (2026-10-01)
+
+### Done — W1 and W5
+
+- `app/cq_worker.py` `get_facts()` measures the exported shape: `volume_mm3`, `area_mm2`,
+  `bbox_mm`, `center_mm` (volume centroid), `solids`, `faces`, `edges`. It rides the same
+  payload as `geometry_info` through the local subprocess, the worker and the zygote, into
+  `ExecResult.facts` and `Step.facts`.
+- `app/store.py` `same_geometry()` is the single tolerance policy (lengths 1e-3 mm,
+  volume/area rel 1e-6, counts exact). Unmeasured on either side → `None`: a missing
+  measurement never claims a no-op.
+- `_generate_and_step` compares the new facts with the current step's and stores
+  `verdict = changed | no_change_detected` on the chat step. It is a valid model, not an
+  error: it becomes current, the step is not repaired, and the chat shows an amber
+  "the model did not change" line instead of "Step N ✓". Counted as `gen_no_change`.
+- The centroid is there because volume, area, bbox and topology all stay identical when a
+  hole moves; without it a legitimate move would be flagged
+  (`test_moved_feature_with_identical_volume_and_bbox_is_a_change`).
+- W5: `facts` and `verdict` are on every `step` in API responses (and so in the SSE final
+  event); the app root carries `data-verdict` / `data-facts` in `done` only.
+  `docs/automation.md` documents both.
+- Tests: `tests/test_spec23.py`, `frontend/src/automation.test.ts`.
+
+### Deviation from §3
+
+"Requests that legitimately change nothing must not be flagged" is not implemented as an
+intent check: there is no reliable non-LLM signal for it, and a no-op prompt already goes
+through triage. The verdict is a factual statement ("geometry identical"), not an error,
+so a deliberate no-op gets an accurate notice and nothing is blocked.
+
+### Deferred — W2, W3, W4
+
+- **W2 (API index + synonyms):** an extra prompt block is exactly what the 2026-07-29 A/B
+  measured net-negative (77% → 63% first-pass). Only worth trying behind a paid bench A/B;
+  not started without one.
+- **W3 (stated-millimetre check):** extracting "the millimetres the user asked for" from
+  free text is a heuristic with real false-positive risk, and the generator already sees
+  the measured size block each turn. Revisit with a structured target (e.g. from triage)
+  rather than regexes.
+- **W4 (op list):** the premise "one prompt = one feature" does not hold — the generator
+  rewrites the whole program each turn, so a multi-op prompt already runs in one turn.
+  Per-op verification would need an op-list contract with little evidence of payoff.

@@ -195,7 +195,8 @@ def _execute_in_child(op: str, code: str, fmt, cq_worker) -> dict:
         with open(path, "rb") as f:
             stl = base64.b64encode(f.read()).decode("ascii")
         return {"success": True, "stl_base64": stl,
-                "geometry_info": out["geometry_info"], "face_mesh": out.get("face_mesh"),
+                "geometry_info": out["geometry_info"], "facts": out.get("facts"),
+                "face_mesh": out.get("face_mesh"),
                 "error": None}
     finally:
         shutil.rmtree(tmp, ignore_errors=True)

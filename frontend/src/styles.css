@@ -788,6 +788,11 @@ body {
   border-color: var(--rust);
   color: var(--rust);
 }
+.chat-entry.no-change .bubble.result {
+  background: var(--amber-bg);
+  border-color: var(--amber);
+  color: var(--amber);
+}
 .refined {
   font-size: 12px;
   color: var(--soft);

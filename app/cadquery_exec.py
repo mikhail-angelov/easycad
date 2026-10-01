@@ -57,6 +57,8 @@ class ExecResult:
     # Optional CAD-face mesh used only for interactive selection. The STL stays
     # the printable/exported format; its triangle ids are never used as face ids.
     face_mesh: dict | None = None
+    # Measured volume/bbox/topology of the exported shape (SPEC23 W1/W5).
+    facts: dict | None = None
 
 
 @dataclass
@@ -104,6 +106,7 @@ def _result_from_worker_payload(out: dict) -> ExecResult:
         stl_base64=out["stl_base64"],
         geometry_info=info,
         face_mesh=out.get("face_mesh"),
+        facts=out.get("facts"),
     )
 
 

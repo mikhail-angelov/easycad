@@ -35,7 +35,7 @@ test('SPEC22 automation contract selectors are present', () => {
   const timeline = source('./components/Timeline.tsx')
 
   // App state root exposes the machine-readable signals.
-  for (const attr of ['data-state', 'data-state-rev', 'data-error-code', 'data-auth-error', 'aria-busy']) {
+  for (const attr of ['data-state', 'data-state-rev', 'data-error-code', 'data-auth-error', 'aria-busy', 'automationResult']) {
     assert.match(app, new RegExp(attr))
   }
   // Auth-error banner.

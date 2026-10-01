@@ -51,6 +51,7 @@ from .mail import send_mail
 from .ratelimit import RateLimiter
 from .refiner import triage
 from .session_registry import Session, build_registry
+from .store import same_geometry
 
 ROOT = Path(__file__).resolve().parent.parent
 STATIC_DIR = ROOT / "static"
@@ -1005,6 +1006,7 @@ def _create_initial(store) -> None:
         stl_base64=res.stl_base64,
         geometry_info=res.geometry_info,
         face_mesh=res.face_mesh,
+        facts=res.facts,
         success=res.success,
         error=res.error,
     )
@@ -1034,6 +1036,7 @@ def _ensure_step_stl(step) -> None:
         step.face_mesh = ({**res.face_mesh, "revision": secrets.token_hex(16)} if res.face_mesh else None)
         if res.geometry_info:
             step.geometry_info = res.geometry_info
+        step.facts = res.facts
 
 
 def _session_payload(session: Session, request: Request) -> dict:
@@ -1492,6 +1495,7 @@ def api_execute_manual(
         stl_base64=res.stl_base64,
         geometry_info=res.geometry_info,
         face_mesh=res.face_mesh,
+        facts=res.facts,
         success=res.success,
         error=res.error,
         make_current=res.success,
@@ -1627,7 +1631,19 @@ async def _generate_and_step(
     # so the user can retry the same confirmation and still get the recipe.
     if consume_pending and res.success:
         session.pending_skills = None
+    # SPEC23 W1: code that runs but moves no measured fact is not an ordinary
+    # success. Reported, not repaired — the model stays current and the user decides.
+    verdict = None
+    if res.success:
+        prev = session.store.current()
+        same = same_geometry(prev.facts if prev else None, res.facts)
+        if same is not None:
+            verdict = "no_change_detected" if same else "changed"
+        if same:
+            metrics.incr("gen_no_change")
+            log.info("chat.gen no_change_detected parent=%s", prev.id)
     step = session.store.add(
+        verdict=verdict,
         kind="chat",
         original_prompt=original_prompt,
         refined_prompt=refined_prompt,
@@ -1635,6 +1651,7 @@ async def _generate_and_step(
         stl_base64=res.stl_base64,
         geometry_info=res.geometry_info,
         face_mesh=res.face_mesh,
+        facts=res.facts,
         success=res.success,
         error=res.error,
         make_current=res.success,
@@ -1922,6 +1939,7 @@ def api_commit(
         stl_base64=res.stl_base64,
         geometry_info=res.geometry_info,
         face_mesh=res.face_mesh,
+        facts=res.facts,
         success=res.success,
         error=res.error,
         make_current=res.success,

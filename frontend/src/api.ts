@@ -13,6 +13,19 @@ export interface Step {
   parent_id: number | null
   created_at: number
   face_mesh: FaceMesh | null
+  facts: Facts | null
+  // SPEC23: a chat step whose code ran but moved no measured fact.
+  verdict: 'changed' | 'no_change_detected' | null
+}
+
+export interface Facts {
+  volume_mm3: number
+  area_mm2: number
+  bbox_mm: [number, number, number, number, number, number] // xmin, ymin, zmin, xmax, ymax, zmax
+  center_mm: [number, number, number]
+  solids: number
+  faces: number
+  edges: number
 }
 
 export interface FaceInfo {
